@@ -1,0 +1,26 @@
+# outputs/
+
+Per-run artifacts. Everything a single run produces lives under one folder so a
+run is easy to reproduce, compare, and delete. Reusable training data does **not**
+go here — it lives in `../datasets/`.
+
+**Gitignored:** everything here except this file.
+
+## Layout convention
+
+```
+outputs/<experiment>/<run_id>/
+    metrics/       # scalar/tabular results (json, csv)
+    plots/         # figures
+    videos/        # rollouts / renders
+    checkpoints/   # model weights
+    logs/          # stdout, config snapshot, git commit
+    episodes/      # trial captures for this run (docs/episode_schema.md)
+```
+
+- `<experiment>` — a named comparison, e.g. `A2_vs_A4_door_push`
+- `<run_id>` — a unique run, e.g. `2026-07-01_seed0` (timestamp + variant/seed)
+
+Grouping by experiment → run makes action-space comparisons (the project's core
+question) straightforward: sibling runs under one experiment share task and
+evaluation protocol and differ only in the variable under study.

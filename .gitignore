@@ -1,0 +1,32 @@
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.eggs/
+
+# ── Tooling caches ───────────────────────────────────────────────────────────
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ── Generated artifacts (see datasets/README.md, outputs/README.md) ──────────
+# The directories are tracked via their README.md; everything else is ignored.
+/datasets/*
+!/datasets/README.md
+/outputs/*
+!/outputs/README.md
+
+# ── Large / machine-local sim artifacts ──────────────────────────────────────
+*.onnx
+*.usdc            # binary USD caches; source scenes live outside this repo
+*.occupancy.npz
+*.topdown.png
+.lmdb/
+
+# ── Editor / OS cruft ────────────────────────────────────────────────────────
+.idea/
+.vscode/
+.DS_Store
