@@ -1,7 +1,7 @@
 """Load the IHMC Alex articulation config for AlexDoor-XAS.
 
 Two responsibilities, kept self-contained so this project never depends on the
-IHMC IsaacLab shim (which currently lives inside the frozen ``isaac_suitcase``):
+legacy-only custom Isaac suitcase or its IHMC IsaacLab shim:
 
 1. :func:`resolve_alex_urdf` — rewrite the URDF's ``package://alex_V1_description/``
    mesh references to absolute paths (into a temp cache) so the Isaac URDF
@@ -14,6 +14,9 @@ IHMC IsaacLab shim (which currently lives inside the frozen ``isaac_suitcase``):
 
 Variants:
   - ``"fullbody"`` → ``ALEX_V1_FULLBODY_DEFAULT_CFG`` (adds wrist/gripper; default).
+  - ``"fullbody_fullcollisions"`` → same cfg, but the URDF authors collision
+    geometry on every link (the default fullbody URDF has NO arm collisions —
+    required whenever the arm must contact the world, e.g. door pushing).
   - ``"nub"``      → ``ALEX_V1_NUBS_DEFAULT_CFG`` (nub forearms, 23 DoF).
 """
 
@@ -30,6 +33,7 @@ _URDF_CACHE_DIR = Path("/tmp/alexdoor-xas-urdf")
 
 _CFG_ATTR = {
     "fullbody": "ALEX_V1_FULLBODY_DEFAULT_CFG",
+    "fullbody_fullcollisions": "ALEX_V1_FULLBODY_DEFAULT_CFG",
     "nub": "ALEX_V1_NUBS_DEFAULT_CFG",
 }
 
@@ -70,12 +74,14 @@ def _load_vendored_alex_module() -> ModuleType:
     return module
 
 
-def load_alex_articulation_cfg(variant: str = "fullbody"):
+def load_alex_articulation_cfg(variant: str = "fullbody", *, fix_base: bool = False):
     """Return a ready-to-spawn ``ArticulationCfg`` for the given Alex variant.
 
     Deep-copies the vendored config and sets ``spawn.asset_path`` to the resolved
-    URDF. Requires Isaac Lab (call after ``AppLauncher``). The returned cfg still
-    needs a ``prim_path`` — e.g. ``cfg.replace(prim_path="/World/Alex")``.
+    URDF. ``fix_base=True`` welds the pelvis to the world (the vendored cfg is a
+    free-floating biped). Requires Isaac Lab (call after ``AppLauncher``). The
+    returned cfg still needs a ``prim_path`` — e.g.
+    ``cfg.replace(prim_path="/World/Alex")``.
     """
     import copy
 
@@ -85,4 +91,5 @@ def load_alex_articulation_cfg(variant: str = "fullbody"):
     module = _load_vendored_alex_module()
     cfg = copy.deepcopy(getattr(module, _CFG_ATTR[variant]))
     cfg.spawn.asset_path = resolve_alex_urdf(variant)
+    cfg.spawn.fix_base = fix_base
     return cfg

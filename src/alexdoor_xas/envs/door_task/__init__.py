@@ -1,0 +1,60 @@
+"""Gym registration for the single-door Isaac Lab tasks."""
+
+from __future__ import annotations
+
+DOOR_TASK_ENV_ID = "AlexDoor-DoorTask-Direct-v0"
+DOOR_TASK_ENV_ENTRY_POINT = "alexdoor_xas.envs.door_task.door_env:DoorTaskEnv"
+DOOR_TASK_ENV_CFG_ENTRY_POINT = "alexdoor_xas.envs.door_task.door_env_cfg:DoorTaskEnvCfg"
+
+DOOR_PUSH_ENV_ID = "AlexDoor-DoorPush-Proxy-v0"
+DOOR_PUSH_ENV_ENTRY_POINT = "alexdoor_xas.envs.door_task.door_push_env:DoorPushEnv"
+DOOR_PUSH_ENV_CFG_ENTRY_POINT = "alexdoor_xas.envs.door_task.door_push_env_cfg:DoorPushEnvCfg"
+
+DOOR_PUSH_ALEX_ENV_ID = "AlexDoor-DoorPush-Alex-v0"
+DOOR_PUSH_ALEX_ENV_ENTRY_POINT = "alexdoor_xas.envs.door_task.door_push_alex_env:DoorPushAlexEnv"
+DOOR_PUSH_ALEX_ENV_CFG_ENTRY_POINT = (
+    "alexdoor_xas.envs.door_task.door_push_alex_env_cfg:DoorPushAlexEnvCfg"
+)
+
+
+def _register_gym_envs() -> None:
+    try:
+        import gymnasium as gym
+        from gymnasium.error import Error as GymError
+    except ModuleNotFoundError:
+        return
+
+    registrations = (
+        (DOOR_TASK_ENV_ID, DOOR_TASK_ENV_ENTRY_POINT, DOOR_TASK_ENV_CFG_ENTRY_POINT),
+        (DOOR_PUSH_ENV_ID, DOOR_PUSH_ENV_ENTRY_POINT, DOOR_PUSH_ENV_CFG_ENTRY_POINT),
+        (
+            DOOR_PUSH_ALEX_ENV_ID,
+            DOOR_PUSH_ALEX_ENV_ENTRY_POINT,
+            DOOR_PUSH_ALEX_ENV_CFG_ENTRY_POINT,
+        ),
+    )
+    for env_id, entry_point, cfg_entry_point in registrations:
+        try:
+            gym.spec(env_id)
+        except GymError:
+            gym.register(
+                id=env_id,
+                entry_point=entry_point,
+                disable_env_checker=True,
+                kwargs={"env_cfg_entry_point": cfg_entry_point},
+            )
+
+
+_register_gym_envs()
+
+__all__ = [
+    "DOOR_PUSH_ALEX_ENV_CFG_ENTRY_POINT",
+    "DOOR_PUSH_ALEX_ENV_ENTRY_POINT",
+    "DOOR_PUSH_ALEX_ENV_ID",
+    "DOOR_PUSH_ENV_CFG_ENTRY_POINT",
+    "DOOR_PUSH_ENV_ENTRY_POINT",
+    "DOOR_PUSH_ENV_ID",
+    "DOOR_TASK_ENV_CFG_ENTRY_POINT",
+    "DOOR_TASK_ENV_ENTRY_POINT",
+    "DOOR_TASK_ENV_ID",
+]

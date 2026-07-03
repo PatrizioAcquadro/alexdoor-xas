@@ -44,6 +44,12 @@ ALEX_URDF: Path = ALEX_URDF_DIR / "alex_v1.rlModel_fullBody_robotAccurate_torsoF
 ALEX_URDF_NUB: Path = (
     ALEX_URDF_DIR / "alex_v1.rlModel_nubForearms_robotAccurate_torsoFootCollisions.urdf"
 )
+# Full body with collision geometry on every link (incl. the arm/gripper) — the
+# torsoFootCollisions variant has NO arm collisions, so any env where the arm
+# must touch the world (e.g. door pushing) needs this one.
+ALEX_URDF_FULLBODY_FULLCOLL: Path = (
+    ALEX_URDF_DIR / "alex_v1.rlModel_fullBody_robotAccurate_fullCollisions.urdf"
+)
 
 # ── Scenes (CombinedScene) ───────────────────────────────────────────────────
 SCENES_ROOT: Path = ASSETS_ROOT / "CombinedScene"
@@ -54,12 +60,17 @@ DOOR_USD: Path = SCENES_ROOT / "Door.usd"
 
 
 def urdf_for(variant: str = "fullbody") -> Path:
-    """Return the source URDF for ``variant`` (``"fullbody"`` or ``"nub"``)."""
+    """Return the source URDF for one of the registered Alex variants."""
     if variant == "fullbody":
         return ALEX_URDF
+    if variant == "fullbody_fullcollisions":
+        return ALEX_URDF_FULLBODY_FULLCOLL
     if variant == "nub":
         return ALEX_URDF_NUB
-    raise ValueError(f"unknown Alex variant {variant!r} (expected 'fullbody' or 'nub')")
+    raise ValueError(
+        f"unknown Alex variant {variant!r} "
+        "(expected 'fullbody', 'fullbody_fullcollisions', or 'nub')"
+    )
 
 
 def iter_assets() -> list[tuple[str, Path, bool]]:
@@ -73,6 +84,7 @@ def iter_assets() -> list[tuple[str, Path, bool]]:
         ("Alex IsaacLab config", ALEX_ISAAC_CFG_PY, True),
         ("Alex mesh root", ALEX_MESH_ROOT, True),
         ("Alex URDF (fullbody)", ALEX_URDF, True),
+        ("Alex URDF (fullbody, full collisions)", ALEX_URDF_FULLBODY_FULLCOLL, True),
         ("Alex URDF (nub)", ALEX_URDF_NUB, True),
         ("Combined scene USD", COMBINED_SCENE_USD, True),
         ("Door USD", DOOR_USD, True),

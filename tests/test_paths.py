@@ -19,12 +19,17 @@ def test_repo_root_resolves() -> None:
 
 
 def test_required_assets_exist() -> None:
-    missing = [name for name, path, required in paths.iter_assets() if required and not path.exists()]
+    missing = [
+        name
+        for name, path, required in paths.iter_assets()
+        if required and not path.exists()
+    ]
     assert not missing, f"missing required assets: {missing}"
 
 
 def test_urdf_for_variants() -> None:
     assert paths.urdf_for("fullbody") == paths.ALEX_URDF
+    assert paths.urdf_for("fullbody_fullcollisions") == paths.ALEX_URDF_FULLBODY_FULLCOLL
     assert paths.urdf_for("nub") == paths.ALEX_URDF_NUB
 
 

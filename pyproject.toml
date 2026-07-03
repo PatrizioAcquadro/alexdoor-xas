@@ -1,8 +1,8 @@
 # AlexDoor-XAS — packaging for the Phase-1 scaffold.
 #
-# Isaac Sim / Isaac Lab / PyTorch are provided by the `env_alex` conda
-# environment (see docs/environment.md) and are intentionally NOT listed as
-# dependencies here — this package installs light and never pulls the sim stack.
+# Isaac Sim / Isaac Lab / PyTorch are provided by the official local installs
+# (see docs/environment.md) and are intentionally NOT listed as dependencies
+# here -- this package installs light and never pulls the sim stack.
 
 [build-system]
 requires = ["hatchling"]

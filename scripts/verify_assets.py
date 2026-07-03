@@ -14,12 +14,19 @@ Proves the two local assets load in Isaac Lab, as a *fast* smoke test:
 
 Exits 0 only if both checks pass.
 
-Run inside ``env_alex`` with the EULA vars set (see docs/environment.md)::
+Run through the official Isaac Lab launcher (see docs/environment.md)::
 
-    export ACCEPT_EULA=Y OMNI_KIT_ACCEPT_EULA=Yes PRIVACY_CONSENT=Y
-    python scripts/verify_assets.py --headless
+    PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p \
+        scripts/verify_assets.py --viz none --device cpu --steps 1
+
+For GUI inspection, use::
+
+    PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p \
+        scripts/verify_assets.py --viz kit --device cpu --steps 1
 
 Flags: ``--variant {fullbody,nub}``  ``--scene {combined,none}``  ``--steps N``.
+By default the script exits immediately after flushing the result because Kit
+shutdown can be slow; pass ``--clean-shutdown`` to debug graceful shutdown.
 """
 
 from __future__ import annotations
@@ -38,6 +45,11 @@ parser.add_argument("--variant", choices=["fullbody", "nub"], default="fullbody"
 parser.add_argument("--scene", choices=["combined", "none"], default="combined",
                     help="Also compose the combined corridor scene (default: combined).")
 parser.add_argument("--steps", type=int, default=8, help="Robot simulation steps to run.")
+parser.add_argument(
+    "--clean-shutdown",
+    action="store_true",
+    help="Call SimulationApp.close() before exiting; useful for debugging Kit shutdown hangs.",
+)
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 
@@ -107,18 +119,25 @@ def main() -> int:
             _check_scene()
         else:
             print("[scene] skipped (--scene none)")
-        print("PASS: assets loaded.")
+        print("PASS: assets loaded.", flush=True)
     except Exception:  # noqa: BLE001
         traceback.print_exc()
-        print("FAIL: asset load verification failed.")
+        print("FAIL: asset load verification failed.", flush=True)
         rc = 1
     finally:
-        simulation_app.close()
+        if args.clean_shutdown:
+            try:
+                print("[shutdown] closing SimulationApp (--clean-shutdown)", flush=True)
+                simulation_app.close()
+            except Exception:  # noqa: BLE001
+                traceback.print_exc()
+                rc = 1 if rc == 0 else rc
     return rc
 
 
 if __name__ == "__main__":
     # os._exit avoids Kit's shutdown masking the process exit code.
+    rc = main()
     sys.stdout.flush()
     sys.stderr.flush()
-    os._exit(main())
+    os._exit(rc)
