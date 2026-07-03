@@ -2,9 +2,16 @@
 
 Per-run artifacts. Everything a single run produces lives under one folder so a
 run is easy to reproduce, compare, and delete. Reusable training data does **not**
-go here — it lives in `../datasets/`.
+go here - it lives in `../datasets/`.
 
-**Gitignored:** everything here except this file.
+**Gitignored by default:** raw run folders, episodes, videos, checkpoints, logs,
+and generated metrics/plots/reports. Keep these local unless a result has been
+deliberately promoted for review.
+
+**Curated evidence:** small, stable artifacts may be committed under
+`outputs/curated/`. Use this only for review material such as `*.md`, `*.json`,
+`*.csv`, `*.png`, `*.svg`, or `*.txt`. Do not place HDF5 episodes, videos,
+checkpoints, or full raw runs there.
 
 ## Layout convention
 

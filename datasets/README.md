@@ -10,15 +10,23 @@ per-run results (`../outputs/`) because a dataset is shared across many runs.
 
 ```
 datasets/<task>/<action_space>/<version>/
-    episodes.<ext>     # episodes conforming to docs/episode_schema.md
-    meta.json          # counts, seeds, generator + git commit, creation time
+    episode_<id8>.hdf5       # one episode per file (docs/episode_schema.md)
+    episode_<id8>.meta.json  # human-readable meta + outcome sidecar
+    episodes.jsonl           # A4 only: struct chunks as JSON lines
+    meta.json                # counts, seeds, generator + git commit, creation time
 ```
 
-- `<task>` — e.g. `door_push`
+A version directory is **one generation pass**: re-exporting the same version
+replaces it (`data_engine/export.py`). Bump `<version>` on any generation change.
+
+- `<task>` — `door_push` (Phase 2 proxy-sphere episodes) or `door_push_alex`
+  (Phase 2.5 Alex-executed episodes with force-sensed contact and joint proprio;
+  a distinct task dir so Alex runs never replace the frozen proxy datasets)
 - `<action_space>` — a tag from [docs/action_spaces.md](../docs/action_spaces.md),
   e.g. `A2_ee_delta` (a dataset holds one action space; re-export produces siblings)
 - `<version>` — `v0`, `v1`, … (bump on any generation change)
 
 Example: `datasets/door_push/A4_obj_centric_chunk/v0/`.
 
-The concrete file format is chosen in Phase 2; the schema is container-agnostic.
+Phase 2 chose HDF5 + JSON sidecar per episode (A4: JSON lines); generate with
+`scripts/run_scripted_baseline.py` (`--robot alex` for Alex episodes).
