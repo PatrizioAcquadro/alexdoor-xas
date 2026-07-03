@@ -1,10 +1,12 @@
 # AlexDoor-XAS
 
-AlexDoor-XAS is a research codebase for humanoid articulated-object manipulation
-in NVIDIA Isaac Sim and Isaac Lab. It focuses on door interaction with the IHMC
-Alex humanoid torso and provides environment scaffolds, scripted control tools,
-recording utilities, dataset export code, and evaluation helpers for comparing
-manipulation action representations.
+## About
+
+AlexDoor-XAS is a lightweight Isaac Sim / Isaac Lab research package for
+studying humanoid door manipulation with the IHMC Alex torso. It provides asset
+loaders, door-task environments, scripted rollout tools, recording and export
+utilities, and evaluation helpers for comparing manipulation action
+representations.
 
 The project is intentionally organized as a lightweight Python package. Isaac
 Sim, Isaac Lab, CUDA, and PyTorch are supplied by the local simulator
