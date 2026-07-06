@@ -29,9 +29,11 @@ from .normalize import (
     DatasetNormStats,
     NormStats,
     compute_norm_stats,
+    dataset_fingerprint,
     load_norm_stats,
     norm_stats_path,
     save_norm_stats,
+    validate_norm_stats,
 )
 from .sampling import (
     A4_FEATURE_DIM,
@@ -58,6 +60,7 @@ from .validate import (
     validate_dataset,
     validate_dataset_dir,
     validate_episode,
+    validate_matched_action_space_datasets,
 )
 
 __all__ = [
@@ -84,6 +87,7 @@ __all__ = [
     "chunk_features",
     "collate_torch",
     "compute_norm_stats",
+    "dataset_fingerprint",
     "discover_episodes",
     "episode_chunk_features",
     "expected_action_space",
@@ -103,4 +107,6 @@ __all__ = [
     "validate_dataset",
     "validate_dataset_dir",
     "validate_episode",
+    "validate_matched_action_space_datasets",
+    "validate_norm_stats",
 ]

@@ -46,6 +46,7 @@ class ChunkSample:
     is_pad: np.ndarray  # (H,) bool, True where the action is padding
     episode_id: str
     t_index: int
+    t_s: float
 
 
 class ChunkSampler:
@@ -99,6 +100,7 @@ class ChunkSampler:
             is_pad=is_pad,
             episode_id=record.episode_id,
             t_index=t,
+            t_s=float(record.t[t]),
         )
 
 
@@ -136,7 +138,9 @@ class BatchIterator:
                 "obs": np.stack([s.obs for s in samples]),
                 "actions": np.stack([s.actions for s in samples]),
                 "is_pad": np.stack([s.is_pad for s in samples]),
+                "t_index": np.array([s.t_index for s in samples], dtype=np.int64),
                 "t": np.array([s.t_index for s in samples], dtype=np.int64),
+                "t_s": np.array([s.t_s for s in samples], dtype=np.float64),
                 "episode_ids": [s.episode_id for s in samples],
                 "action_space": self.sampler.dataset.action_space,
             }

@@ -232,6 +232,7 @@ class A4EpisodeRecord:
     success: bool
     final_door_angle: float
     failure_label: str | None
+    n_steps: int
     control_dt: float
 
 
@@ -278,18 +279,54 @@ class A4ChunkDataset:
 
 
 def _a4_record(data: dict[str, Any]) -> A4EpisodeRecord:
-    meta = dict(data["meta"])
-    outcome = data.get("outcome") or {}
+    if not isinstance(data, dict):
+        raise ValueError("A4 episode record must be a JSON object")
+    meta = _required_mapping(data, "meta", "A4 episode")
+    episode_label = f"A4 episode {str(meta.get('episode_id', '<missing>'))[:8]}"
+    outcome = _required_mapping(data, "outcome", episode_label)
+    _require_keys(
+        meta,
+        ("episode_id", "action_space", "seed", "robot", "scene", "policy", "control_dt"),
+        episode_label,
+    )
+    _require_keys(
+        outcome,
+        ("success", "final_door_angle", "failure_label", "n_steps"),
+        episode_label,
+    )
+    chunks = data.get("chunks", [])
+    if not isinstance(chunks, list):
+        raise ValueError(f"{episode_label}: chunks must be a list")
     return A4EpisodeRecord(
         episode_id=str(meta["episode_id"]),
         action_space=str(meta["action_space"]),
         meta=meta,
-        chunks=tuple(ObjectCentricChunk.from_dict(c) for c in data.get("chunks", [])),
-        success=bool(outcome.get("success", False)),
-        final_door_angle=float(outcome.get("final_door_angle", 0.0)),
+        chunks=tuple(ObjectCentricChunk.from_dict(c) for c in chunks),
+        success=_required_bool(outcome["success"], f"{episode_label}: outcome.success"),
+        final_door_angle=float(outcome["final_door_angle"]),
         failure_label=outcome.get("failure_label"),
+        n_steps=int(outcome["n_steps"]),
         control_dt=float(meta["control_dt"]),
     )
+
+
+def _required_mapping(data: dict[str, Any], key: str, label: str) -> dict[str, Any]:
+    value = data.get(key)
+    if not isinstance(value, dict):
+        raise ValueError(f"{label}: missing required {key} object")
+    return dict(value)
+
+
+def _require_keys(data: dict[str, Any], keys: tuple[str, ...], label: str) -> None:
+    missing = [key for key in keys if key not in data]
+    if missing:
+        raise ValueError(f"{label}: missing required keys {missing}")
+
+
+def _required_bool(value: Any, label: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{label} must be a JSON boolean")
+    return value
 
 
 def expected_action_space(dataset_dir: str | Path) -> str | None:

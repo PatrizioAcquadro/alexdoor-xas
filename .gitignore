@@ -18,6 +18,8 @@ dist/
 coverage.xml
 htmlcov/
 .ipynb_checkpoints/
+/wandb/
+/artifacts/
 
 # ── Generated artifacts (see datasets/README.md, outputs/README.md) ──────────
 # Project docs stay local in this checkout.

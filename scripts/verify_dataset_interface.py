@@ -2,13 +2,17 @@
 """Phase 3.0 gate: the dataset/model interface consumes Phase 2 episodes.
 
 For every exported dataset (task x action space) this verifies, without any
-policy code: episodes load and validate against the frozen schema; episode ids
-agree across action spaces; train/val/test splits generate deterministically
-and save/reload; action + observation normalization stats compute and
-round-trip; seeded chunk batches sample reproducibly; and a dummy linear
-"policy" (numpy, plus a torch Linear when torch is importable) consumes a
-batch end-to-end — proving an ACT/Diffusion-style trainer can train on the
-data shapes. No Kit launch needed::
+policy code: episodes load and validate against the frozen schema; same-ID
+episodes match in provenance/content across action spaces; train/val/test splits
+generate deterministically; action + observation normalization stats compute,
+round-trip, and match the dataset fingerprint; seeded chunk batches sample
+reproducibly; and a dummy linear "policy" (numpy, plus a torch Linear when torch
+is importable) consumes a batch end-to-end — proving an ACT/Diffusion-style
+trainer can train on the data shapes.
+
+By default, split/stat artifacts are written to a temporary directory. Pass
+``--write-artifacts`` to refresh official files under ``datasets/``. No Kit
+launch needed::
 
     PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_dataset_interface.py
 """
@@ -17,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -44,6 +49,8 @@ from alexdoor_xas.dataset import (
     splits_path,
     validate_a4_dataset,
     validate_dataset,
+    validate_matched_action_space_datasets,
+    validate_norm_stats,
 )
 
 
@@ -57,6 +64,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--horizon", type=int, default=20, help="action chunk horizon")
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--seed", type=int, default=0, help="split + batch seed")
+    parser.add_argument(
+        "--write-artifacts",
+        action="store_true",
+        help="write splits/<version>.json and norm_stats.json into datasets/",
+    )
+    parser.add_argument(
+        "--allow-missing-a4",
+        action="store_true",
+        help="compatibility escape hatch for legacy task/version dirs without A4",
+    )
     return parser.parse_args()
 
 
@@ -92,6 +109,8 @@ def verify_task(args: argparse.Namespace, task: str) -> list[str]:
     if not hdf5_datasets:
         failures.append(f"{task}: no HDF5 action-space datasets found")
         return failures
+    if a4_dataset is None and not args.allow_missing_a4:
+        failures.append(f"{task}: missing required {A4_OBJ_CENTRIC_CHUNK} dataset")
 
     # -- validation, per action space --------------------------------------
     for space, dataset in hdf5_datasets.items():
@@ -100,37 +119,42 @@ def verify_task(args: argparse.Namespace, task: str) -> list[str]:
             print(f"  WARN [{space}] {warning}")
         for error in result.errors:
             failures.append(f"{task}/{space}: {error}")
+        action_dim = _safe_action_dim(dataset)
         print(f"  [{'ok ' if result.ok else 'ERR'}] {space}: "
-              f"{len(dataset)} episodes validated, action_dim={dataset.action_dim}")
+              f"{len(dataset)} episodes validated, action_dim={action_dim}")
     if a4_dataset is not None:
         result = validate_a4_dataset(a4_dataset)
         for warning in result.warnings:
             print(f"  WARN [A4] {warning}")
         for error in result.errors:
             failures.append(f"{task}/A4: {error}")
-        features = [episode_chunk_features(record) for record in a4_dataset.records]
+        try:
+            features = [episode_chunk_features(record) for record in a4_dataset.records]
+        except ValueError as exc:
+            failures.append(f"{task}/A4: chunk-feature encoding failed: {exc}")
+            features = []
         bad = [f.shape for f in features if f.ndim != 2 or f.shape[1] != A4_FEATURE_DIM]
         if bad:
             failures.append(f"{task}/A4: bad chunk-feature shapes {bad}")
+        n_chunks = sum(f.shape[0] for f in features)
         print(f"  [{'ok ' if result.ok else 'ERR'}] {A4_OBJ_CENTRIC_CHUNK}: "
               f"{len(a4_dataset)} episodes, "
-              f"{sum(f.shape[0] for f in features)} chunks x {A4_FEATURE_DIM} features")
+              f"{n_chunks} chunks x {A4_FEATURE_DIM} features")
 
-    # -- episode ids must agree across action spaces ------------------------
+    # -- matched-condition checks across action spaces ----------------------
     reference_space = next(iter(hdf5_datasets))
-    reference_ids = set(hdf5_datasets[reference_space].episode_ids)
-    for space, dataset in hdf5_datasets.items():
-        if set(dataset.episode_ids) != reference_ids:
-            failures.append(f"{task}: episode ids of {space} differ from {reference_space}")
-    if a4_dataset is not None and set(a4_dataset.episode_ids) != reference_ids:
-        failures.append(f"{task}: episode ids of A4 differ from {reference_space}")
+    matched = validate_matched_action_space_datasets(hdf5_datasets, a4_dataset)
+    for warning in matched.warnings:
+        print(f"  WARN [matched] {warning}")
+    for error in matched.errors:
+        failures.append(f"{task}: {error}")
 
     # -- splits: shared per task, deterministic, reload-verified ------------
     ids = hdf5_datasets[reference_space].episode_ids
     splits = make_splits(ids, seed=args.seed)
     if make_splits(ids, seed=args.seed) != splits:
         failures.append(f"{task}: make_splits is not deterministic")
-    path = splits_path(root, task, args.version)
+    path = splits_path(_artifact_root(args), task, args.version)
     save_splits(path, splits, seed=args.seed)
     try:
         reloaded = load_splits(path, episode_ids=ids)
@@ -139,8 +163,9 @@ def verify_task(args: argparse.Namespace, task: str) -> list[str]:
         reloaded = splits
     if reloaded != splits:
         failures.append(f"{task}: reloaded splits differ")
+    artifact_mode = "datasets/" if args.write_artifacts else "temp"
     print(f"  [ok ] splits: train={len(splits['train'])} val={len(splits['val'])} "
-          f"test={len(splits['test'])} -> {path.relative_to(root)}")
+          f"test={len(splits['test'])} -> {artifact_mode}:{path.relative_to(_artifact_root(args))}")
 
     # -- per space: norm stats + batches + model consumption ----------------
     for space, dataset in hdf5_datasets.items():
@@ -162,8 +187,10 @@ def _verify_space_consumption(
     label = f"{task}/{space}"
 
     stats = compute_norm_stats(dataset, splits["train"])
-    stats_path = save_norm_stats(norm_stats_path(dataset.dataset_dir), stats)
+    stats_path = save_norm_stats(norm_stats_path(_artifact_dataset_dir(args, dataset)), stats)
     loaded = load_norm_stats(stats_path)
+    for error in validate_norm_stats(loaded, dataset, splits["train"]):
+        failures.append(f"{label}: {error}")
     sample_actions = dataset[0].actions
     roundtrip = loaded.action.denormalize(loaded.action.normalize(sample_actions))
     if not np.allclose(roundtrip, sample_actions, atol=1e-9):
@@ -221,6 +248,25 @@ def _verify_space_consumption(
     return failures
 
 
+def _artifact_root(args: argparse.Namespace) -> Path:
+    return Path(getattr(args, "artifacts_root", args.datasets_root))
+
+
+def _artifact_dataset_dir(args: argparse.Namespace, dataset: EpisodeDataset) -> Path:
+    if args.write_artifacts:
+        return dataset.dataset_dir
+    try:
+        relative = dataset.dataset_dir.resolve().relative_to(args.datasets_root.resolve())
+    except ValueError:
+        relative = Path(dataset.task) / dataset.action_space / args.version
+    return _artifact_root(args) / relative
+
+
+def _safe_action_dim(dataset: EpisodeDataset) -> int | str:
+    actions = np.asarray(dataset[0].actions)
+    return int(actions.shape[1]) if actions.ndim == 2 else "invalid"
+
+
 def main() -> int:
     args = parse_args()
     tasks = discover_tasks(args.datasets_root, args.version)
@@ -229,8 +275,19 @@ def main() -> int:
         return 1
 
     failures: list[str] = []
-    for task in tasks:
-        failures.extend(verify_task(args, task))
+    if args.write_artifacts:
+        args.artifacts_root = args.datasets_root
+        for task in tasks:
+            failures.extend(verify_task(args, task))
+    else:
+        with tempfile.TemporaryDirectory(prefix="alexdoor_dataset_gate_") as tmp:
+            args.artifacts_root = Path(tmp) / "datasets"
+            print(
+                "[artifacts] read-only mode: writing temporary gate files under "
+                f"{args.artifacts_root}"
+            )
+            for task in tasks:
+                failures.extend(verify_task(args, task))
 
     print("-- result --")
     for failure in failures:

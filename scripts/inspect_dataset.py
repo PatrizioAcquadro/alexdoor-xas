@@ -59,9 +59,9 @@ def _stat_line(name: str, array: np.ndarray) -> str:
     )
 
 
-def inspect_a4(dataset: A4ChunkDataset) -> int:
+def inspect_a4(dataset: A4ChunkDataset, episode_ids: list[str] | None = None) -> int:
     print(f"A4 dataset: {len(dataset)} episodes, task {dataset.task}")
-    record = dataset[0]
+    record = dataset.by_id(episode_ids[0]) if episode_ids else dataset[0]
     print(f"episode {record.episode_id[:8]} (success={record.success}, "
           f"final angle {record.final_door_angle:.3f} rad):")
     for chunk in record.chunks:
@@ -78,18 +78,10 @@ def inspect_a4(dataset: A4ChunkDataset) -> int:
 def main() -> int:
     args = parse_args()
     dataset = open_dataset(args.dataset)
+    episode_ids = _selected_episode_ids(args, dataset.episode_ids)
     if isinstance(dataset, A4ChunkDataset):
-        return inspect_a4(dataset)
+        return inspect_a4(dataset, episode_ids)
     assert isinstance(dataset, EpisodeDataset)
-
-    episode_ids = None
-    if args.split is not None:
-        # datasets/<task>/<space>/<version> -> the task's shared split file.
-        version_dir = args.dataset.resolve()
-        split_file = splits_path(
-            version_dir.parents[2], version_dir.parents[1].name, version_dir.name
-        )
-        episode_ids = load_splits(split_file, episode_ids=dataset.episode_ids)[args.split]
 
     sampler = ChunkSampler(
         dataset, horizon=args.horizon, obs_preset=args.obs_preset, episode_ids=episode_ids
@@ -103,21 +95,48 @@ def main() -> int:
     print("batch:")
     for key in ("obs", "actions", "is_pad", "t"):
         print(_stat_line(key, batch[key]))
+    print(_stat_line("valid", _valid_batch_actions(batch)))
     print(f"  action_space tag: {batch['action_space']}")
     print(f"  episodes in batch: {[e[:8] for e in batch['episode_ids']]}")
 
-    figure = _save_figure(args, dataset, batch)
+    figure = _save_figure(args, dataset, batch, episode_ids)
     print(f"figure  : {figure}")
     return 0
 
 
-def _save_figure(args: argparse.Namespace, dataset: EpisodeDataset, batch) -> Path:
+def _selected_episode_ids(
+    args: argparse.Namespace, dataset_episode_ids: list[str]
+) -> list[str] | None:
+    if args.split is None:
+        return None
+    # datasets/<task>/<space>/<version> -> the task's shared split file.
+    version_dir = args.dataset.resolve()
+    split_file = splits_path(
+        version_dir.parents[2], version_dir.parents[1].name, version_dir.name
+    )
+    return load_splits(split_file, episode_ids=dataset_episode_ids)[args.split]
+
+
+def _plot_record(dataset: EpisodeDataset, episode_ids: list[str] | None):
+    return dataset.by_id(episode_ids[0]) if episode_ids else dataset[0]
+
+
+def _valid_batch_actions(batch) -> np.ndarray:
+    return batch["actions"][~batch["is_pad"]]
+
+
+def _save_figure(
+    args: argparse.Namespace,
+    dataset: EpisodeDataset,
+    batch,
+    episode_ids: list[str] | None,
+) -> Path:
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    record = dataset[0]
+    record = _plot_record(dataset, episode_ids)
     fig, (top, bottom) = plt.subplots(2, 1, figsize=(8, 7))
     for dim in range(record.action_dim):
         top.plot(record.t, record.actions[:, dim], lw=1.0, label=f"dim {dim}")
@@ -126,7 +145,7 @@ def _save_figure(args: argparse.Namespace, dataset: EpisodeDataset, batch) -> Pa
     top.set_title(f"episode {record.episode_id[:8]}: action channels")
     top.legend(fontsize=7, ncol=3)
 
-    bottom.hist(batch["actions"].reshape(-1, record.action_dim), bins=30, stacked=True)
+    bottom.hist(_valid_batch_actions(batch), bins=30, stacked=True)
     bottom.set_xlabel(f"batch action values ({dataset.action_space})")
     bottom.set_ylabel("count")
     bottom.set_title(f"sampled batch (B={batch['obs'].shape[0]}, H={args.horizon})")
