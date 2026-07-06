@@ -1,0 +1,37 @@
+run:
+  robot: proxy
+  episodes: 5
+  randomized: 0
+  seed: 0
+  experiment: null
+  run_id: null
+  success_angle_deg: 45.0
+  max_ticks: 600
+  video: false
+  clean_shutdown: false
+
+controller:
+  overrides:
+    panel_width_m: null
+    panel_thickness_m: null
+    ee_radius_m: null
+    push_radius_frac: null
+    push_height_m: null
+    approach_standoff_m: null
+    align_standoff_m: null
+    pre_contact_clearance_m: null
+    contact_clearance_m: null
+    release_standoff_m: null
+    approach_tol_m: null
+    align_tol_m: null
+    pre_contact_tol_m: null
+    contact_eps_m: null
+    target_open_angle_rad: null
+    hold_ticks: null
+    max_step_m: null
+    approach_max_ticks: null
+    align_max_ticks: null
+    pre_contact_max_ticks: null
+    contact_max_ticks: null
+    push_max_ticks: null
+    release_max_ticks: null

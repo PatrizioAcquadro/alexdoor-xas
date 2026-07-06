@@ -34,6 +34,9 @@ metadata, and placeholder README files for artifact directories are tracked.
 - Deterministic scripted baseline controller for door-push rollouts.
 - Episode recording and dataset export utilities for HDF5, JSON, and JSONL
   outputs.
+- Phase 3.0 dataset/model-interface utilities for fail-closed validation,
+  matched action-space checks, deterministic splits, normalization stats, and
+  chunk batching.
 - Evaluation utilities for metrics, failure labels, plots, reports, and sanity
   checks.
 - Verification scripts for environment readiness, asset loading, door-task
@@ -54,6 +57,7 @@ metadata, and placeholder README files for artifact directories are tracked.
 |   |-- policies/
 |   |-- recording/
 |   |-- data_engine/
+|   |-- dataset/
 |   `-- eval/
 |-- scripts/
 |   |-- check_env.py
@@ -83,6 +87,8 @@ The tracked source tree is divided by responsibility:
 - `src/alexdoor_xas/recording/` contains episode buffers and writers.
 - `src/alexdoor_xas/data_engine/` contains generation, export, and run
   orchestration.
+- `src/alexdoor_xas/dataset/` contains the Phase 3.0 hardened dataset/model
+  interface for loading, validation, splits, normalization, and batching.
 - `src/alexdoor_xas/eval/` contains metrics, plots, reports, and sanity checks.
 - `scripts/` contains executable verification and data-generation entrypoints.
 - `tests/` contains pure-Python regression and contract tests.
@@ -150,6 +156,17 @@ PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_alex_ik_pr
 PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_alex_door_baseline.py --viz none --device cpu
 ```
 
+Run the Phase 3.0 dataset/model-interface gate:
+
+```bash
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_dataset_interface.py
+```
+
+By default this gate validates into temporary split/stat files and does not
+rewrite official dataset artifacts. Use `--write-artifacts` only when you
+intend to refresh `datasets/<task>/splits/<version>.json` and each
+`norm_stats.json`.
+
 ## Usage
 
 Generate scripted door-push rollouts with the proxy end-effector backend:
@@ -177,6 +194,11 @@ PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/run_scripted_base
 `datasets/` is reserved for reusable exported episode datasets. `outputs/` is
 reserved for per-run artifacts such as metrics, plots, reports, videos,
 checkpoints, logs, and temporary episode captures.
+
+Phase 3.0 datasets are considered hardened and consumable only after the
+dataset-interface gate passes on the relevant proxy/Alex exports. That wording
+does not imply Phase 3.1 training readiness unless the current gate commands
+have passed without corrupt, stale, or mismatched dataset artifacts.
 
 Both directories are ignored by default except for their README files. This
 keeps large generated files and machine-specific simulator artifacts out of the
