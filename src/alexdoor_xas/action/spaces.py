@@ -35,6 +35,20 @@ EXPORTED_ACTION_SPACES: tuple[str, ...] = (
 # A2/A3 per-step action layout: (dx, dy, dz, drx, dry, drz) for one end-effector.
 EE_DELTA_DIM = 6
 
+A4_PHASE_VOCAB: tuple[str, ...] = (
+    "approach",
+    "align",
+    "pre_contact",
+    "contact",
+    "push",
+    "hold",
+    "release",
+)
+"""Frozen A4 phase vocabulary — the scripted controller's emitting phases
+(``policies/scripted.DoorPushPhase`` minus the terminal ``done``). Hardcoded so
+A4 consumers (dataset, adapters) never import the scripted policy; a unit test
+pins the two."""
+
 
 @dataclass(frozen=True)
 class ObjectCentricChunk:
@@ -84,6 +98,7 @@ __all__ = [
     "A2_EE_DELTA",
     "A3_OBJ_REL_EE_DELTA",
     "A4_OBJ_CENTRIC_CHUNK",
+    "A4_PHASE_VOCAB",
     "ALL_ACTION_SPACES",
     "EE_DELTA_DIM",
     "EXPORTED_ACTION_SPACES",

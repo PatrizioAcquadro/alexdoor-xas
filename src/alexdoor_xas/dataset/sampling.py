@@ -15,22 +15,9 @@ from typing import Any
 
 import numpy as np
 
-from alexdoor_xas.action.spaces import ObjectCentricChunk
+from alexdoor_xas.action.spaces import A4_PHASE_VOCAB, ObjectCentricChunk
 
 from .loader import DEFAULT_OBS_PRESET, A4EpisodeRecord, EpisodeDataset, obs_matrix
-
-A4_PHASE_VOCAB: tuple[str, ...] = (
-    "approach",
-    "align",
-    "pre_contact",
-    "contact",
-    "push",
-    "hold",
-    "release",
-)
-"""Frozen A4 phase vocabulary — the scripted controller's emitting phases
-(``policies/scripted.DoorPushPhase`` minus the terminal ``done``). Hardcoded so
-A4 consumers never import the scripted policy; a unit test pins the two."""
 
 A4_FEATURE_DIM = len(A4_PHASE_VOCAB) + 5
 """Per-chunk numeric encoding: phase one-hot + contact_target_panel (3) +
