@@ -6,13 +6,24 @@ so a bare environment degrades gracefully instead of erroring at collection.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 import torch
 
 pytest.importorskip("diffusers")
 
-from alexdoor_xas.dataset import DatasetNormStats, NormStats  # noqa: E402
+from alexdoor_xas.adapters import (  # noqa: E402
+    A2Adapter,
+    StepContext,
+    limits_for_robot,
+    rollout_chunks,
+)
+from alexdoor_xas.adapters.limits import PROXY_ROBOT_TAG  # noqa: E402
+from alexdoor_xas.dataset import DatasetNormStats, EpisodeRecord, NormStats  # noqa: E402
+from alexdoor_xas.policies.common.inspect import open_loop_report  # noqa: E402
+from alexdoor_xas.policies.common.obs import stop_on_hinge_angle  # noqa: E402
 from alexdoor_xas.policies.diffusion.checkpoint import (  # noqa: E402
     CHECKPOINT_FORMAT,
     load_checkpoint,
@@ -30,6 +41,10 @@ from alexdoor_xas.policies.diffusion.data import (  # noqa: E402
 from alexdoor_xas.policies.diffusion.model import (  # noqa: E402
     diffusion_loss,
 )
+from alexdoor_xas.policies.diffusion.policy import (  # noqa: E402
+    DiffusionPolicy,
+    diffusion_chunk_source,
+)
 from alexdoor_xas.policies.diffusion.schedulers import (  # noqa: E402
     make_inference_scheduler,
     make_train_scheduler,
@@ -42,6 +57,7 @@ from alexdoor_xas.policies.diffusion.train import (  # noqa: E402
     make_seeded_model,
     train_diffusion,
 )
+from conftest import FakeDoorPushEnv  # noqa: E402
 
 ACTION_DIM = 6
 OBS_DIM = 9
@@ -462,3 +478,215 @@ def test_checkpoint_rejects_unknown_format(tmp_path) -> None:
 
 def test_checkpoint_format_tag() -> None:
     assert CHECKPOINT_FORMAT == "alexdoor_xas.diffusion.v1"
+
+
+# --- policy wrapper + chunk source (closed-loop smoke, no Isaac) -------------------
+
+
+def _identity_obs_stats() -> NormStats:
+    return NormStats(
+        mean=np.zeros(OBS_DIM),
+        std=np.ones(OBS_DIM),
+        min=np.zeros(OBS_DIM),
+        max=np.zeros(OBS_DIM),
+        count=1,
+    )
+
+
+def _rollout_policy(**kwargs) -> DiffusionPolicy:
+    """Tiny real model whose denormalized deltas stay within the A2 clamps."""
+    stats = DatasetNormStats(
+        action=_tiny_action_stats(),  # position range ±0.015 m < 0.02 m clamp
+        obs=_identity_obs_stats(),
+        obs_preset="core",
+        train_episode_ids=("ep0",),
+        action_space="A2_ee_delta",
+    )
+    model = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=0)
+    return DiffusionPolicy(model, stats, num_inference_steps=5, **kwargs)
+
+
+def test_diffusion_policy_predict_shape_and_bounds() -> None:
+    policy = _rollout_policy()
+    policy.seed(0)
+
+    chunk = policy.predict(np.zeros(OBS_DIM))
+
+    assert chunk.shape == (TINY_MODEL_CFG.horizon, ACTION_DIM)
+    assert np.isfinite(chunk).all()
+    # clip_sample + min-max denorm bound |dpos| by the train extrema — inside
+    # the 0.02 m adapter clamp by construction.
+    stats = _tiny_action_stats()
+    assert (chunk[:, :3] >= stats.min[:3] - 1e-9).all()
+    assert (chunk[:, :3] <= stats.max[:3] + 1e-9).all()
+    # Constant rotation dims denormalize through scale 1.0 (bounded by ±1).
+    assert np.abs(chunk[:, 3:]).max() <= 1.0
+
+
+def test_diffusion_policy_obs_normalization_and_clip() -> None:
+    stats = DatasetNormStats(
+        action=_tiny_action_stats(),
+        obs=NormStats(
+            mean=np.zeros(OBS_DIM),
+            std=np.full(OBS_DIM, 1e-8),
+            min=np.zeros(OBS_DIM),
+            max=np.zeros(OBS_DIM),
+            count=1,
+        ),
+        obs_preset="core",
+        train_episode_ids=("ep0",),
+        action_space="A2_ee_delta",
+    )
+
+    captured: list[torch.Tensor] = []
+
+    class _CaptureModel(torch.nn.Module):
+        obs_dim = OBS_DIM
+        action_dim = ACTION_DIM
+        cfg = TINY_MODEL_CFG
+
+        def forward(self, x, t, obs):  # noqa: D102
+            captured.append(obs.detach().clone())
+            return torch.zeros_like(x)
+
+    policy = DiffusionPolicy(_CaptureModel(), stats, num_inference_steps=2)
+    policy.seed(0)
+    policy.predict(np.full(OBS_DIM, 1e-3))  # would normalize to 1e5 without the clip
+
+    assert captured
+    assert float(captured[0].abs().max()) == pytest.approx(policy.obs_clip)
+
+
+def test_diffusion_policy_rejects_mismatched_stats() -> None:
+    stats = _tiny_stats()
+    model = make_seeded_model(OBS_DIM + 1, ACTION_DIM, TINY_MODEL_CFG, seed=0)
+    with pytest.raises(ValueError, match="obs dim"):
+        DiffusionPolicy(model, stats)
+
+
+def test_diffusion_policy_seed_makes_sampling_reproducible() -> None:
+    policy = _rollout_policy()
+    obs = np.zeros(OBS_DIM)
+
+    policy.seed(11)
+    first = policy.predict(obs)
+    policy.seed(11)
+    second = policy.predict(obs)
+    policy.seed(12)
+    third = policy.predict(obs)
+
+    np.testing.assert_array_equal(first, second)
+    assert not np.array_equal(first, third)
+
+
+def test_diffusion_policy_from_checkpoint(tmp_path) -> None:
+    model = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=0)
+    stats = _tiny_stats()
+    config = {"dataset": {"space": "A2_ee_delta", "obs_preset": "core"}}
+    path = save_checkpoint(tmp_path / "best.pt", model, config, stats, meta={"run_id": "x"})
+
+    policy = DiffusionPolicy.from_checkpoint(path, sampler="ddim", num_inference_steps=5)
+
+    assert policy.action_space == "A2_ee_delta"
+    assert policy.obs_preset == "core"
+    assert policy.chunk_size == TINY_MODEL_CFG.horizon
+    assert policy.checkpoint_meta is not None and policy.checkpoint_meta["run_id"] == "x"
+    policy.seed(0)
+    chunk = policy.predict(np.zeros(OBS_DIM))
+    assert chunk.shape == (TINY_MODEL_CFG.horizon, ACTION_DIM)
+
+
+def test_diffusion_chunk_source_receding_horizon_drives_a2_rollout() -> None:
+    env = FakeDoorPushEnv()
+    env.reset()
+    policy = _rollout_policy()
+    policy.seed(0)
+    source = diffusion_chunk_source(policy, env, n_action_steps=4)
+    adapter = A2Adapter(limits_for_robot(PROXY_ROBOT_TAG))
+
+    chunk = source(None)
+    assert chunk.shape == (4, ACTION_DIM)
+
+    result = rollout_chunks(env, source, adapter, max_ticks=20)
+
+    assert result.n_ticks == 20
+    assert len(adapter.log.decisions) == 20
+    assert math.isfinite(result.final_angle_rad)
+    # Bounded-by-construction deltas: nothing to clamp, nothing to reject.
+    assert adapter.log.count("corrected") == 0
+    assert adapter.log.count("rejected") == 0
+
+
+def test_diffusion_chunk_source_validates_inputs() -> None:
+    env = FakeDoorPushEnv()
+    env.reset()
+    policy = _rollout_policy()
+    with pytest.raises(ValueError, match="no closed-loop env reader"):
+        diffusion_chunk_source(policy, env, obs_preset="alex_full")
+    with pytest.raises(ValueError, match="n_action_steps"):
+        diffusion_chunk_source(policy, env, n_action_steps=TINY_MODEL_CFG.horizon + 1)
+
+
+def test_stop_on_hinge_angle_wraps_diffusion_source() -> None:
+    env = FakeDoorPushEnv()
+    env.reset()
+    policy = _rollout_policy()
+    policy.seed(0)
+    source = stop_on_hinge_angle(
+        diffusion_chunk_source(policy, env, n_action_steps=2), threshold_rad=math.pi / 4
+    )
+
+    open_ctx = StepContext(
+        door_frame=None,
+        hinge_angle_rad=math.pi / 2,
+        hinge_velocity_rad_s=0.0,
+        ee_pos_w=np.zeros(3),
+    )
+    assert source(open_ctx) is None
+
+    closed_ctx = StepContext(
+        door_frame=None,
+        hinge_angle_rad=0.0,
+        hinge_velocity_rad_s=0.0,
+        ee_pos_w=np.zeros(3),
+    )
+    assert source(closed_ctx).shape == (2, ACTION_DIM)
+
+
+def test_open_loop_report_with_receding_horizon_stride(tmp_path) -> None:
+    n_steps = TINY_MODEL_CFG.horizon + 3  # forces a partial final window
+    actions = np.zeros((n_steps, ACTION_DIM))
+    actions[:, 0] = np.linspace(0.0, 0.011, n_steps)
+    record = EpisodeRecord(
+        episode_id="ep-dp-0001",
+        action_space="A2_ee_delta",
+        schema_version="phase2.v1",
+        meta={},
+        t=np.arange(n_steps, dtype=np.float64) / 60.0,
+        actions=actions,
+        obs={
+            "ee_pos_w": np.zeros((n_steps, 3)),
+            "ee_quat_w_xyzw": np.tile([0.0, 0.0, 0.0, 1.0], (n_steps, 1)),
+            "door_angle_rad": np.zeros(n_steps),
+            "door_angular_velocity_rad_s": np.zeros(n_steps),
+        },
+        success=True,
+        final_door_angle=0.8,
+        failure_label=None,
+        extras={},
+        buffer=None,
+    )
+    policy = _rollout_policy()
+    policy.seed(0)
+
+    report = open_loop_report(
+        policy, [record], json_path=tmp_path / "open_loop.json", stride=4
+    )
+
+    assert report["stride"] == 4
+    assert report["chunk_size"] == TINY_MODEL_CFG.horizon
+    assert report["n_episodes"] == 1
+    assert np.isfinite(report["aggregate"]["l1_mean"])
+    # The frozen invariant the gate also asserts: denormalized position deltas
+    # stay far inside the adapter clamp.
+    assert max(abs(v) for v in report["aggregate"]["l1_per_dim"][:3]) < 0.04
