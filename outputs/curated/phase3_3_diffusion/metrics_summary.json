@@ -1,0 +1,103 @@
+{
+  "phase": "3.3 Diffusion Policy baseline",
+  "date": "2026-07-07",
+  "framing": "pipeline validation on the 22-episode dataset; performance claims deferred",
+  "model": {
+    "backbone": "time-series diffusion transformer",
+    "params": 1111046,
+    "Tp": 16,
+    "Ta": 8,
+    "To": 1,
+    "T": 100,
+    "schedule": "squaredcos_cap_v2",
+    "diffusers": "0.39.0",
+    "device": "NVIDIA GeForce RTX 4090"
+  },
+  "training": {
+    "best_val_sampled_l1": 0.05878,
+    "open_loop_val_l1_raw": 0.00286,
+    "runs": [
+      "20260707_a2_seed0",
+      "20260707_a3_seed0",
+      "20260707_a2_h40_seed0"
+    ]
+  },
+  "closed_loop": {
+    "dp_a2_ddpm100_ta8": {
+      "success": "19/20",
+      "success_rate": 0.95,
+      "final_angle_mean_deg": 45.6,
+      "mean_ticks": 129.2,
+      "adapter": {
+        "n_accepted": 2134,
+        "n_corrected": 450,
+        "n_rejected": 0,
+        "n_warnings": 783,
+        "warning_counts": null
+      },
+      "fixed_determinism_spread_rad": 0.04155147075653076
+    },
+    "dp_a3_ddpm100_ta8": {
+      "success": "19/20",
+      "success_rate": 0.95,
+      "final_angle_mean_deg": 45.6,
+      "mean_ticks": 129.2,
+      "adapter": {
+        "n_accepted": 2134,
+        "n_corrected": 450,
+        "n_rejected": 0,
+        "n_warnings": 783,
+        "warning_counts": null
+      },
+      "fixed_determinism_spread_rad": 0.04155147075653076
+    },
+    "dp_a2_ddim10_ta8": {
+      "success": "20/20",
+      "success_rate": 1.0,
+      "final_angle_mean_deg": 47.9,
+      "mean_ticks": 119.6,
+      "adapter": {
+        "n_accepted": 2086,
+        "n_corrected": 306,
+        "n_rejected": 0,
+        "n_warnings": 614,
+        "warning_counts": null
+      },
+      "fixed_determinism_spread_rad": 0.032031118869781494
+    },
+    "dp_a2_ddpm100_ta16": {
+      "success": "19/20",
+      "success_rate": 0.95,
+      "final_angle_mean_deg": 49.4,
+      "mean_ticks": 135.6,
+      "adapter": {
+        "n_accepted": 2237,
+        "n_corrected": 475,
+        "n_rejected": 0,
+        "n_warnings": 801,
+        "warning_counts": null
+      },
+      "fixed_determinism_spread_rad": 0.16927528381347656
+    },
+    "dp_a2_ddpm100_tp40_ta40": {
+      "success": "20/20",
+      "success_rate": 1.0,
+      "final_angle_mean_deg": 54.0,
+      "mean_ticks": 148.0,
+      "adapter": {
+        "n_accepted": 2848,
+        "n_corrected": 111,
+        "n_rejected": 1,
+        "n_warnings": 325,
+        "warning_counts": null
+      },
+      "fixed_determinism_spread_rad": 0.027247309684753418
+    }
+  },
+  "references": {
+    "act_a2_seedfix": "20/20",
+    "matched_scripted": "20/20 (60.1 deg mean)"
+  },
+  "failure_analysis": "seed 105 (hardest start): DDPM sampling-noise sensitivity; arm pinned at workspace/joint limits, 450/600 ticks corrected, door untouched; DDIM-10 and Tp=Ta=40 both recover (20/20)",
+  "full_report": "docs/phase3_3_report.md (local-only)"
+}
