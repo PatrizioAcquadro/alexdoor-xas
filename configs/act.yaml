@@ -41,5 +41,6 @@ rollout:
   temporal_ensemble: false
   ensemble_m: 0.01
   reference_metrics: null
+  matched_scripted_reference: false
 
 wandb: {}

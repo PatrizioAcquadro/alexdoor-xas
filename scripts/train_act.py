@@ -64,9 +64,8 @@ def main() -> int:
         make_train_factory,
     )
     from alexdoor_xas.policies.act.inspect import open_loop_report
-    from alexdoor_xas.policies.act.model import ACTModel
     from alexdoor_xas.policies.act.policy import ActPolicy
-    from alexdoor_xas.policies.act.train import train_act
+    from alexdoor_xas.policies.act.train import make_seeded_model, train_act
     from alexdoor_xas.tracking import load_wandb_config, start_wandb_run
 
     try:
@@ -83,7 +82,12 @@ def main() -> int:
         train_ids = train_ids[: cfg.train.overfit_episodes]
 
     config_dict = dataclasses.asdict(cfg)
-    model = ACTModel(obs_dim=data.obs_dim, action_dim=data.action_dim, cfg=cfg.model)
+    model = make_seeded_model(
+        obs_dim=data.obs_dim,
+        action_dim=data.action_dim,
+        model_cfg=cfg.model,
+        seed=cfg.train.seed,
+    )
     print(
         f"[train_act] {cfg.dataset.task}/{cfg.dataset.space}/{cfg.dataset.version} "
         f"obs={cfg.dataset.obs_preset}({data.obs_dim}) action_dim={data.action_dim} "

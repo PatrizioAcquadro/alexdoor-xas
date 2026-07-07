@@ -8,10 +8,11 @@ Runs ``rollout.episodes_fixed`` fixed-reset rollouts (deterministic headless
 physics makes this block a determinism probe) plus
 ``rollout.episodes_randomized`` rollouts with seeded EE start-offset
 variations on held-out seeds. Writes per-rollout rows and aggregates
-(success vs. the door-angle threshold, adapter accept/correct/reject counts)
-to ``metrics/act_eval.json`` next to the checkpoint, with the scripted
-baseline's aggregate embedded for side-by-side comparison when
-``rollout.reference_metrics`` is set::
+(success vs. the door-angle threshold, adapter accept/correct/reject/warning
+counts) to ``metrics/act_eval.json`` next to the checkpoint. The legacy
+scripted-baseline aggregate is embedded when ``rollout.reference_metrics`` is
+set; ``rollout.matched_scripted_reference=true`` additionally runs the scripted
+controller on the same fixed/randomized seed plan as ACT::
 
     PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/eval_act.py \
         --viz none --device cpu \
@@ -44,6 +45,12 @@ parser.add_argument(
     help="Scripted-baseline metrics.json to embed for comparison.",
 )
 parser.add_argument(
+    "--matched-scripted-reference",
+    action="store_true",
+    default=None,
+    help="Evaluate the scripted controller on the same rollout seed plan as ACT.",
+)
+parser.add_argument(
     "--clean-shutdown",
     action="store_true",
     help="Call SimulationApp.close() before exiting; useful for debugging Kit shutdown hangs.",
@@ -57,6 +64,7 @@ try:
         cli_overrides={
             "rollout.checkpoint": args.checkpoint,
             "rollout.reference_metrics": args.reference_metrics,
+            "rollout.matched_scripted_reference": args.matched_scripted_reference,
         },
     )
 except ActConfigError as error:
@@ -69,7 +77,6 @@ simulation_app = app_launcher.app
 
 # -- Runtime imports after AppLauncher.
 import gymnasium as gym  # noqa: E402
-import numpy as np  # noqa: E402
 
 import alexdoor_xas.envs.door_task as door_task  # noqa: E402
 from alexdoor_xas import paths  # noqa: E402
@@ -81,17 +88,32 @@ from alexdoor_xas.adapters import (  # noqa: E402
     read_door_frame,
     rollout_chunks,
 )
-from alexdoor_xas.data_engine import apply_start_offset, plan_episodes  # noqa: E402
+from alexdoor_xas.data_engine import (  # noqa: E402
+    DataEngineCfg,
+    apply_start_offset,
+    plan_episodes,
+    run_episode,
+)
 from alexdoor_xas.envs.door_task.door_push_alex_env_cfg import (  # noqa: E402
     ALEX_ROBOT_TAG,
     DoorPushAlexEnvCfg,
 )
+from alexdoor_xas.eval.metrics import aggregate_metrics, episode_metrics  # noqa: E402
 from alexdoor_xas.policies.act.policy import (  # noqa: E402
     ActPolicy,
     act_chunk_source,
     stop_on_hinge_angle,
 )
-from alexdoor_xas.policies.scripted import ALEX_VARIATION_BOUNDS  # noqa: E402
+from alexdoor_xas.policies.act.rollout_eval import (  # noqa: E402
+    aggregate_rollout_rows,
+    scripted_reference_payload,
+    seed_protocol,
+    summarize_decision_warnings,
+)
+from alexdoor_xas.policies.scripted import (  # noqa: E402
+    ALEX_VARIATION_BOUNDS,
+    alex_fixedbase_push_cfg,
+)
 from alexdoor_xas.tracking import load_wandb_config, start_wandb_run  # noqa: E402
 
 
@@ -129,6 +151,7 @@ def _run_rollout(env, policy, seed: int, variation, success_angle_rad: float) ->
         success_angle_rad,
     )
     result = rollout_chunks(env, source, adapter, max_ticks=act_cfg.rollout.max_ticks)
+    warning_summary = summarize_decision_warnings(result.decisions_per_tick)
     return {
         "seed": seed,
         "randomized": variation is not None,
@@ -140,33 +163,9 @@ def _run_rollout(env, policy, seed: int, variation, success_angle_rad: float) ->
         "n_accepted": result.log.n_accepted,
         "n_corrected": result.log.n_corrected,
         "n_rejected": result.log.n_rejected,
+        "n_warnings": warning_summary["n_warnings"],
+        "warning_counts": warning_summary["warning_counts"],
         "notes": result.notes,
-    }
-
-
-def _aggregate(rows: list[dict]) -> dict:
-    finals = [row["final_angle_rad"] for row in rows]
-    fixed_finals = [row["final_angle_rad"] for row in rows if not row["randomized"]]
-    return {
-        "n_rollouts": len(rows),
-        "n_fixed": sum(1 for row in rows if not row["randomized"]),
-        "n_randomized": sum(1 for row in rows if row["randomized"]),
-        "n_success": sum(row["success"] for row in rows),
-        "success_rate": sum(row["success"] for row in rows) / len(rows),
-        "final_angle_rad": {
-            "mean": float(np.mean(finals)),
-            "min": float(np.min(finals)),
-            "max": float(np.max(finals)),
-        },
-        "mean_ticks": float(np.mean([row["n_ticks"] for row in rows])),
-        "adapter": {
-            "n_accepted": sum(row["n_accepted"] for row in rows),
-            "n_corrected": sum(row["n_corrected"] for row in rows),
-            "n_rejected": sum(row["n_rejected"] for row in rows),
-        },
-        "fixed_determinism_spread_rad": (
-            float(np.max(fixed_finals) - np.min(fixed_finals)) if fixed_finals else None
-        ),
     }
 
 
@@ -176,6 +175,45 @@ def _reference_aggregate() -> dict | None:
     path = paths.REPO_ROOT / act_cfg.rollout.reference_metrics
     payload = json.loads(path.read_text())
     return {"path": str(path), "aggregate": payload.get("aggregate", payload)}
+
+
+def _episode_plan():
+    return plan_episodes(
+        act_cfg.rollout.episodes_fixed,
+        act_cfg.rollout.episodes_randomized,
+        act_cfg.rollout.base_seed,
+        ALEX_VARIATION_BOUNDS,
+    )
+
+
+def _seed_protocol() -> dict:
+    return seed_protocol(
+        base_seed=act_cfg.rollout.base_seed,
+        episodes_fixed=act_cfg.rollout.episodes_fixed,
+        episodes_randomized=act_cfg.rollout.episodes_randomized,
+        variation_bounds=ALEX_VARIATION_BOUNDS,
+    )
+
+
+def _run_matched_scripted_reference(env, plan, success_angle_rad: float, protocol: dict) -> dict:
+    engine_cfg = DataEngineCfg(
+        task="door_push_alex",
+        robot=ALEX_ROBOT_TAG,
+        success_angle_rad=success_angle_rad,
+        max_ticks=act_cfg.rollout.max_ticks,
+        limitations=(),
+    )
+    episodes = [
+        run_episode(env, item, engine_cfg, controller_cfg=alex_fixedbase_push_cfg())
+        for item in plan
+    ]
+    per_episode = [episode_metrics(episode) for episode in episodes]
+    aggregate = aggregate_metrics(per_episode)
+    return scripted_reference_payload(
+        per_episode_metrics=per_episode,
+        aggregate=aggregate,
+        protocol=protocol,
+    )
 
 
 def main() -> int:
@@ -194,25 +232,35 @@ def main() -> int:
         )
 
         env = _make_env()
+        plan = _episode_plan()
+        protocol = _seed_protocol()
         rows: list[dict] = []
-        for i in range(act_cfg.rollout.episodes_fixed):
-            row = _run_rollout(
-                env, policy, act_cfg.rollout.base_seed + i, None, success_angle_rad
-            )
-            rows.append(row)
-            print(f"[fixed {i}] {_row_line(row)}", flush=True)
-        plan = plan_episodes(
-            0,
-            act_cfg.rollout.episodes_randomized,
-            act_cfg.rollout.base_seed + act_cfg.rollout.episodes_fixed,
-            ALEX_VARIATION_BOUNDS,
-        )
-        for i, item in enumerate(plan):
+        fixed_i = 0
+        random_i = 0
+        for item in plan:
             row = _run_rollout(env, policy, item.seed, item.variation, success_angle_rad)
             rows.append(row)
-            print(f"[rand {i}] {_row_line(row)}", flush=True)
+            if item.variation is None:
+                print(f"[fixed {fixed_i}] {_row_line(row)}", flush=True)
+                fixed_i += 1
+            else:
+                print(f"[rand {random_i}] {_row_line(row)}", flush=True)
+                random_i += 1
 
-        aggregate = _aggregate(rows)
+        aggregate = aggregate_rollout_rows(rows)
+        matched_scripted_reference = None
+        if act_cfg.rollout.matched_scripted_reference:
+            matched_scripted_reference = _run_matched_scripted_reference(
+                env, plan, success_angle_rad, protocol
+            )
+            matched = matched_scripted_reference["aggregate"]
+            print(
+                f"[matched scripted] success_rate={matched['success_rate']:.2f} "
+                f"({matched['n_success']}/{matched['n_episodes']}) "
+                f"final_angle_mean="
+                f"{math.degrees(matched['final_door_angle_rad']['mean']):.1f} deg",
+                flush=True,
+            )
         payload = {
             "checkpoint": str(checkpoint_path),
             "action_space": policy.action_space,
@@ -222,9 +270,11 @@ def main() -> int:
             "max_ticks": act_cfg.rollout.max_ticks,
             "success_angle_deg": act_cfg.rollout.success_angle_deg,
             "base_seed": act_cfg.rollout.base_seed,
+            "seed_protocol": protocol,
             "rollouts": rows,
             "aggregate": aggregate,
             "scripted_reference": _reference_aggregate(),
+            "scripted_matched_reference": matched_scripted_reference,
         }
         metrics_path = run_dir / "metrics" / "act_eval.json"
         metrics_path.parent.mkdir(parents=True, exist_ok=True)
@@ -245,6 +295,7 @@ def main() -> int:
                     "eval/final_angle_mean_rad": aggregate["final_angle_rad"]["mean"],
                     "eval/n_corrected": aggregate["adapter"]["n_corrected"],
                     "eval/n_rejected": aggregate["adapter"]["n_rejected"],
+                    "eval/n_warnings": aggregate["adapter"]["n_warnings"],
                 }
             )
 
@@ -254,7 +305,8 @@ def main() -> int:
             f"final_angle_mean={math.degrees(aggregate['final_angle_rad']['mean']):.1f} deg "
             f"adapter accepted/corrected/rejected="
             f"{aggregate['adapter']['n_accepted']}/{aggregate['adapter']['n_corrected']}/"
-            f"{aggregate['adapter']['n_rejected']}",
+            f"{aggregate['adapter']['n_rejected']} "
+            f"warnings={aggregate['adapter']['n_warnings']}",
             flush=True,
         )
         print(f"[eval_act] metrics: {metrics_path}", flush=True)
@@ -282,7 +334,8 @@ def _row_line(row: dict) -> str:
     return (
         f"seed={row['seed']} success={row['success']} "
         f"final={math.degrees(row['final_angle_rad']):.1f} deg ticks={row['n_ticks']} "
-        f"a/c/r={row['n_accepted']}/{row['n_corrected']}/{row['n_rejected']}"
+        f"a/c/r={row['n_accepted']}/{row['n_corrected']}/{row['n_rejected']} "
+        f"warnings={row['n_warnings']}"
     )
 
 

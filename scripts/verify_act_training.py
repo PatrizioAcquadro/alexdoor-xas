@@ -33,9 +33,8 @@ from alexdoor_xas.policies.act.data import (
     make_train_factory,
 )
 from alexdoor_xas.policies.act.inspect import open_loop_report
-from alexdoor_xas.policies.act.model import ACTModel
 from alexdoor_xas.policies.act.policy import ActPolicy
-from alexdoor_xas.policies.act.train import train_act
+from alexdoor_xas.policies.act.train import make_seeded_model, train_act
 
 GATE_OVERRIDES = [
     "model.chunk_size=20",
@@ -80,8 +79,12 @@ def check_space(space: str, out_dir, failures: list[str]) -> None:
         data, cfg.model.chunk_size, cfg.train.batch_size, cfg.train.seed, overfit_ids
     )
 
-    torch.manual_seed(cfg.train.seed)
-    model = ACTModel(obs_dim=data.obs_dim, action_dim=data.action_dim, cfg=cfg.model)
+    model = make_seeded_model(
+        obs_dim=data.obs_dim,
+        action_dim=data.action_dim,
+        model_cfg=cfg.model,
+        seed=cfg.train.seed,
+    )
     history = train_act(model, make_train, cfg.train, make_val_batches=make_val)
 
     first, last = history.epochs[0], history.epochs[-1]

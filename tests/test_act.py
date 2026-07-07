@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 import torch
 
-from alexdoor_xas.adapters import A2Adapter, limits_for_robot, rollout_chunks
+from alexdoor_xas.adapters import A2Adapter, StepContext, limits_for_robot, rollout_chunks
 from alexdoor_xas.adapters.limits import PROXY_ROBOT_TAG
 from alexdoor_xas.dataset import DatasetNormStats, EpisodeRecord, NormStats
 from alexdoor_xas.policies.act.checkpoint import load_checkpoint, save_checkpoint
@@ -22,7 +22,13 @@ from alexdoor_xas.policies.act.policy import (
     build_env_obs,
     stop_on_hinge_angle,
 )
-from alexdoor_xas.policies.act.train import train_act
+from alexdoor_xas.policies.act.rollout_eval import (
+    aggregate_rollout_rows,
+    seed_protocol,
+    summarize_decision_warnings,
+)
+from alexdoor_xas.policies.act.train import make_seeded_model, train_act
+from alexdoor_xas.policies.scripted import ALEX_VARIATION_BOUNDS
 from alexdoor_xas.tracking import WandbConfig, start_wandb_run
 from conftest import FakeDoorPushEnv, FakeForceDoorPushEnv
 
@@ -99,6 +105,25 @@ def test_predict_is_deterministic_with_zero_latent() -> None:
 
     assert first.shape == (4, TINY_MODEL_CFG.chunk_size, ACTION_DIM)
     assert torch.equal(first, second)
+
+
+def test_seeded_model_initialization_controls_predictions() -> None:
+    obs = _tiny_batch(seed=10)["obs"]
+    first = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=123)
+    second = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=123)
+    different = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=124)
+
+    first.eval()
+    second.eval()
+    different.eval()
+
+    for key, value in first.state_dict().items():
+        assert torch.equal(value, second.state_dict()[key])
+    assert any(
+        not torch.equal(value, different.state_dict()[key])
+        for key, value in first.state_dict().items()
+    )
+    assert torch.equal(first.predict(obs), second.predict(obs))
 
 
 def test_forward_rejects_wrong_chunk_length() -> None:
@@ -470,6 +495,81 @@ def test_temporal_ensemble_weights_match_the_paper_scheme() -> None:
     weights = np.array([1.0, math.exp(-m)])  # oldest chunk first, weight exp(-m * i)
     expected = (chunk_a[1] * weights[0] + chunk_b[0] * weights[1]) / weights.sum()
     np.testing.assert_allclose(second[0], expected)
+
+
+# --- rollout evaluation summaries -------------------------------------------
+
+
+def test_rollout_eval_warning_summary_and_aggregate() -> None:
+    env = FakeForceDoorPushEnv()
+    env.reset()
+    joint_state = env.robot_joint_state()
+    joint_state["joint_pos_target"][0] = 2.55
+    joint_state["joint_vel"][1] = 12.0
+    joint_limits = env.robot_joint_limits()
+    ctx = StepContext(
+        door_frame=None,
+        hinge_angle_rad=0.0,
+        hinge_velocity_rad_s=0.0,
+        ee_pos_w=np.zeros(3),
+        joint_state=joint_state,
+        joint_limits=joint_limits,
+    )
+    adapter = A2Adapter(limits_for_robot(PROXY_ROBOT_TAG))
+    _, decision = adapter.process(np.zeros(ACTION_DIM), ctx)
+    warnings = summarize_decision_warnings([decision])
+
+    assert warnings["n_warnings"] == 2
+    assert any("position limit" in message for message in warnings["warning_counts"])
+    assert any("velocity exceeds" in message for message in warnings["warning_counts"])
+
+    rows = [
+        {
+            "randomized": False,
+            "success": True,
+            "final_angle_rad": 0.8,
+            "n_ticks": 10,
+            "n_accepted": 10,
+            "n_corrected": 0,
+            "n_rejected": 0,
+            **warnings,
+        },
+        {
+            "randomized": True,
+            "success": False,
+            "final_angle_rad": 0.1,
+            "n_ticks": 20,
+            "n_accepted": 18,
+            "n_corrected": 1,
+            "n_rejected": 1,
+            "n_warnings": 1,
+            "warning_counts": {"synthetic warning": 1},
+        },
+    ]
+    aggregate = aggregate_rollout_rows(rows)
+
+    assert aggregate["n_rollouts"] == 2
+    assert aggregate["n_success"] == 1
+    assert aggregate["adapter"]["n_accepted"] == 28
+    assert aggregate["adapter"]["n_corrected"] == 1
+    assert aggregate["adapter"]["n_rejected"] == 1
+    assert aggregate["adapter"]["n_warnings"] == 3
+    assert aggregate["adapter"]["warning_counts"]["synthetic warning"] == 1
+
+
+def test_seed_protocol_records_fixed_randomized_seeds_and_variation_bounds() -> None:
+    protocol = seed_protocol(
+        base_seed=100,
+        episodes_fixed=2,
+        episodes_randomized=3,
+        variation_bounds=ALEX_VARIATION_BOUNDS,
+    )
+
+    assert protocol["fixed_seeds"] == [100, 101]
+    assert protocol["randomized_seeds"] == [102, 103, 104]
+    assert tuple(protocol["variation_bounds"]["push_radius_frac_range"]) == (
+        ALEX_VARIATION_BOUNDS.push_radius_frac_range
+    )
 
 
 # --- open-loop inspection ------------------------------------------------------

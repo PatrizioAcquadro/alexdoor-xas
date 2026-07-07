@@ -53,6 +53,7 @@ def test_default_config_matches_yaml_defaults() -> None:
     assert cfg.rollout.temporal_ensemble is False
     assert cfg.rollout.ensemble_m == pytest.approx(0.01)
     assert cfg.rollout.reference_metrics is None
+    assert cfg.rollout.matched_scripted_reference is False
 
     assert cfg.wandb_overrides == {}
 
@@ -68,6 +69,7 @@ def test_hydra_overrides_flow_through_all_sections() -> None:
             "train.overfit_episodes=2",
             "run.run_id=test_run",
             "rollout.temporal_ensemble=true",
+            "rollout.matched_scripted_reference=true",
             "+wandb.mode=offline",
         ]
     )
@@ -81,6 +83,7 @@ def test_hydra_overrides_flow_through_all_sections() -> None:
     assert cfg.run.run_id == "test_run"
     assert cfg.resolved_run_id() == "test_run"
     assert cfg.rollout.temporal_ensemble is True
+    assert cfg.rollout.matched_scripted_reference is True
     assert cfg.wandb_overrides == {"mode": "offline"}
 
 

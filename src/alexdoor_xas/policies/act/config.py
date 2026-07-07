@@ -99,6 +99,7 @@ class ActRolloutCfg:
     temporal_ensemble: bool = False
     ensemble_m: float = 0.01
     reference_metrics: str | None = None
+    matched_scripted_reference: bool = False
 
 
 @dataclass(frozen=True)
@@ -306,6 +307,7 @@ def _build_rollout_cfg(node: dict[str, Any]) -> ActRolloutCfg:
         "temporal_ensemble",
         "ensemble_m",
         "reference_metrics",
+        "matched_scripted_reference",
     }
     _reject_unknown("rollout", node, field_names)
     defaults = ActRolloutCfg()
@@ -349,6 +351,10 @@ def _build_rollout_cfg(node: dict[str, Any]) -> ActRolloutCfg:
         ensemble_m=ensemble_m,
         reference_metrics=_optional_str(
             "rollout.reference_metrics", node.get("reference_metrics")
+        ),
+        matched_scripted_reference=_coerce_bool(
+            "rollout.matched_scripted_reference",
+            node.get("matched_scripted_reference", defaults.matched_scripted_reference),
         ),
     )
 

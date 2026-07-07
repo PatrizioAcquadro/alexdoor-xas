@@ -15,12 +15,25 @@ from typing import Any
 import torch
 
 from alexdoor_xas.dataset import collate_torch
-from alexdoor_xas.policies.act.config import ActTrainCfg
+from alexdoor_xas.policies.act.config import ActModelCfg, ActTrainCfg
 from alexdoor_xas.policies.act.model import ACTModel, act_loss
 
 TrainBatchFactory = Callable[[int], Iterable[dict]]
 """``epoch -> iterable of normalized numpy batch dicts`` (fresh shuffle per epoch)."""
 ValBatchFactory = Callable[[], Iterable[dict]]
+
+
+def make_seeded_model(
+    obs_dim: int,
+    action_dim: int,
+    model_cfg: ActModelCfg,
+    seed: int,
+) -> ACTModel:
+    """Construct an ACT model with initialization controlled by ``seed``."""
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    return ACTModel(obs_dim=obs_dim, action_dim=action_dim, cfg=model_cfg)
 
 
 @dataclass(frozen=True)
@@ -156,4 +169,4 @@ def _to_device(batch: dict, device: torch.device) -> dict:
     }
 
 
-__all__ = ["EpochStats", "TrainHistory", "evaluate_l1", "train_act"]
+__all__ = ["EpochStats", "TrainHistory", "evaluate_l1", "make_seeded_model", "train_act"]
