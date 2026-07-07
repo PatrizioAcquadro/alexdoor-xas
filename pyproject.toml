@@ -25,6 +25,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=7", "ruff>=0.5"]
 tracking = ["wandb>=0.28,<0.29"]
+diffusion = ["diffusers>=0.39,<1.0"]  # schedulers only; installed into the Isaac Lab env
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/alexdoor_xas"]
