@@ -1,0 +1,46 @@
+dataset:
+  task: door_push_alex
+  space: A2_ee_delta
+  version: v0
+  obs_preset: core
+
+model:
+  chunk_size: 40
+  d_model: 128
+  n_heads: 4
+  dim_feedforward: 512
+  z_dim: 16
+  cvae_encoder_layers: 2
+  encoder_layers: 2
+  decoder_layers: 2
+  dropout: 0.1
+
+train:
+  epochs: 100
+  batch_size: 64
+  lr: 1.0e-4
+  weight_decay: 1.0e-4
+  kl_weight: 10.0
+  grad_clip: 1.0
+  seed: 0
+  device: cpu
+  val_every: 5
+  overfit_episodes: null
+
+run:
+  experiment: act_door_push
+  run_id: null
+
+rollout:
+  checkpoint: null
+  episodes_fixed: 5
+  episodes_randomized: 15
+  base_seed: 100
+  max_ticks: 600
+  success_angle_deg: 45.0
+  temporal_ensemble: false
+  ensemble_m: 0.01
+  reference_metrics: null
+  matched_scripted_reference: false
+
+wandb: {}
