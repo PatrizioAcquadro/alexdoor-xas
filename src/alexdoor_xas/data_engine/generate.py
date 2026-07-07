@@ -123,7 +123,7 @@ def run_episode(
     active_cfg = base_controller_cfg
     if item.variation is not None:
         active_cfg = item.variation.apply(base_controller_cfg)
-        _apply_start_offset(env, door_frame, item.variation)
+        apply_start_offset(env, door_frame, item.variation)
     controller = DoorPushController(active_cfg)
 
     sim_dt = float(env.cfg.sim.dt)
@@ -349,7 +349,8 @@ def _door_frame_quat(env) -> np.ndarray:
     return _numpy(frame_quat)[0].astype(np.float64)
 
 
-def _apply_start_offset(env, door_frame: ObjectFrame, variation: DoorPushVariation) -> None:
+def apply_start_offset(env, door_frame: ObjectFrame, variation: DoorPushVariation) -> None:
+    """Shift the EE start pose by the variation's door-frame offset (shared with eval)."""
     pos, quat = env.proxy_pose_w()
     offset_w = door_frame.vector_to_world(np.asarray(variation.start_offset_door_frame))
     new_pos = _numpy(pos)[0] + offset_w

@@ -16,7 +16,12 @@ from alexdoor_xas.policies.act.checkpoint import load_checkpoint, save_checkpoin
 from alexdoor_xas.policies.act.config import ActModelCfg, ActTrainCfg
 from alexdoor_xas.policies.act.inspect import open_loop_report
 from alexdoor_xas.policies.act.model import ACTModel, act_loss, sinusoidal_table
-from alexdoor_xas.policies.act.policy import ActPolicy, act_chunk_source, build_env_obs
+from alexdoor_xas.policies.act.policy import (
+    ActPolicy,
+    act_chunk_source,
+    build_env_obs,
+    stop_on_hinge_angle,
+)
 from alexdoor_xas.policies.act.train import train_act
 from alexdoor_xas.tracking import WandbConfig, start_wandb_run
 from conftest import FakeDoorPushEnv, FakeForceDoorPushEnv
@@ -413,6 +418,25 @@ def test_act_chunk_source_rejects_presets_without_live_reader() -> None:
     policy = _rollout_policy()
     with pytest.raises(ValueError, match="no closed-loop env reader"):
         act_chunk_source(policy, env, obs_preset="alex_full")
+
+
+def test_stop_on_hinge_angle_ends_rollout_past_threshold() -> None:
+    class _Ctx:
+        def __init__(self, angle: float) -> None:
+            self.hinge_angle_rad = angle
+
+    inner_calls: list[float] = []
+
+    def inner(ctx):
+        inner_calls.append(ctx.hinge_angle_rad)
+        return np.zeros((1, 6))
+
+    source = stop_on_hinge_angle(inner, threshold_rad=math.pi / 4)
+
+    assert source(_Ctx(0.1)) is not None
+    assert source(_Ctx(math.pi / 4)) is None
+    assert source(_Ctx(1.0)) is None
+    assert inner_calls == [0.1]
 
 
 class _QueuePolicy:

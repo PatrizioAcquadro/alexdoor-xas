@@ -176,10 +176,30 @@ def act_chunk_source(
     return ensemble_source
 
 
+def stop_on_hinge_angle(source: Callable, threshold_rad: float) -> Callable:
+    """End the rollout once the door is open past ``threshold_rad``.
+
+    The demos end when the scripted FSM completes, so a learned policy has no
+    in-distribution behavior after task completion — left running, the
+    extrapolating arm can knock the door shut again. This wrapper terminates
+    at the first source query (chunk boundary) where the hinge angle has
+    passed the threshold, bounding post-task extrapolation the same way the
+    scripted episode termination does.
+    """
+
+    def wrapped(ctx):
+        if ctx.hinge_angle_rad >= threshold_rad:
+            return None
+        return source(ctx)
+
+    return wrapped
+
+
 __all__ = [
     "OBS_CLIP",
     "ROLLOUT_OBS_PRESETS",
     "ActPolicy",
     "act_chunk_source",
     "build_env_obs",
+    "stop_on_hinge_angle",
 ]
