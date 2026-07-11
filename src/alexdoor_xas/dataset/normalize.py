@@ -154,11 +154,27 @@ def dataset_fingerprint(dataset: EpisodeDataset, obs_preset: str = DEFAULT_OBS_P
     digest = hashlib.sha256()
     digest.update(dataset.action_space.encode())
     digest.update(dataset.task.encode())
+    robot_asset = dataset.meta.get("robot_asset")
+    has_robot_provenance = robot_asset is not None or any(
+        record.meta.get("robot_asset_id") or record.meta.get("robot_asset_sha256")
+        for record in dataset.records
+    )
+    # Preserve the exact Phase 3.0/V1 digest byte stream when provenance is
+    # absent.  V2 adds a domain-separated canonical payload and episode refs.
+    if has_robot_provenance:
+        digest.update(b"\0robot_asset\0")
+        digest.update(
+            json.dumps(robot_asset, sort_keys=True, separators=(",", ":")).encode()
+        )
     for record in sorted(dataset.records, key=lambda r: r.episode_id):
         digest.update(record.episode_id.encode())
         for key in ("seed", "robot", "scene", "policy"):
             digest.update(str(record.meta.get(key, "")).encode())
             digest.update(b"\0")
+        if has_robot_provenance:
+            for key in ("robot_asset_id", "robot_asset_sha256"):
+                digest.update(str(record.meta.get(key, "")).encode())
+                digest.update(b"\0")
         digest.update(str(record.success).encode())
         digest.update(np.asarray([record.final_door_angle], dtype=np.float64).tobytes())
         digest.update(str(record.failure_label).encode())

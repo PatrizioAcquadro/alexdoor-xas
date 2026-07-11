@@ -102,7 +102,12 @@ def main() -> int:
         return 1
 
     run_id = cfg.resolved_run_id()
-    run_dir = paths.OUTPUTS_DIR / cfg.run.experiment / run_id
+    output_root = (
+        paths.ALEX_V2_OUTPUTS_DIR
+        if cfg.dataset.task == paths.ALEX_V2_TASK
+        else paths.OUTPUTS_DIR
+    )
+    run_dir = output_root / cfg.run.experiment / run_id
     checkpoint_dir = run_dir / "checkpoints"
     train_ids = data.train_ids
     if cfg.train.overfit_episodes is not None:
@@ -180,7 +185,14 @@ def main() -> int:
                 "device_info": device_info,
             }
             if is_best:
-                save_checkpoint(best_path, eval_model(), config_dict, data.stats, meta=meta)
+                save_checkpoint(
+                    best_path,
+                    eval_model(),
+                    config_dict,
+                    data.stats,
+                    meta=meta,
+                    robot_asset=data.robot_asset,
+                )
 
         history = train_diffusion(
             model,
@@ -202,10 +214,17 @@ def main() -> int:
                 "ema": ema is not None,
                 "device_info": device_info,
             },
+            robot_asset=data.robot_asset,
         )
         if not best_path.is_file():  # no val improvement recorded (degenerate run)
-            save_checkpoint(best_path, eval_model(), config_dict, data.stats,
-                            meta={"run_id": run_id})
+            save_checkpoint(
+                best_path,
+                eval_model(),
+                config_dict,
+                data.stats,
+                meta={"run_id": run_id},
+                robot_asset=data.robot_asset,
+            )
 
         # Open-loop inspection with the DDIM validation sampler (fast, seeded)
         # at the rollout execution stride, so inspection matches deployment.
@@ -214,6 +233,7 @@ def main() -> int:
             device="cpu",
             sampler="ddim",
             num_inference_steps=cfg.train.val_inference_steps,
+            runtime_asset=data.robot_asset,
         )
         policy.seed(cfg.train.seed)
         val_records = [data.dataset.by_id(episode_id) for episode_id in data.val_ids]
@@ -241,6 +261,7 @@ def main() -> int:
                 "run_id": run_id,
                 "n_parameters": model.n_parameters,
                 "stats_source": data.stats_source,
+                "robot_asset": data.robot_asset.to_dict() if data.robot_asset else None,
                 "device_info": device_info,
                 "ema": ema is not None,
                 "train_episode_ids": list(train_ids),

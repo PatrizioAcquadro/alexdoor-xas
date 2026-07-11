@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from .door_push import (
-    ALEX_VARIATION_BOUNDS,
     DoorPushCommand,
     DoorPushController,
     DoorPushControllerCfg,
@@ -11,12 +10,11 @@ from .door_push import (
     DoorPushPhase,
     DoorPushVariation,
     VariationBounds,
-    alex_fixedbase_push_cfg,
     sample_variation,
 )
+from .door_push_alex_v2 import alex_v2_push_cfg, alex_v2_variation_bounds
 
 __all__ = [
-    "ALEX_VARIATION_BOUNDS",
     "DoorPushCommand",
     "DoorPushController",
     "DoorPushControllerCfg",
@@ -24,6 +22,7 @@ __all__ = [
     "DoorPushPhase",
     "DoorPushVariation",
     "VariationBounds",
-    "alex_fixedbase_push_cfg",
+    "alex_v2_push_cfg",
+    "alex_v2_variation_bounds",
     "sample_variation",
 ]

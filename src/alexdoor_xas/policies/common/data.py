@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from alexdoor_xas import paths
+from alexdoor_xas.assets.alex_v2_contract import AlexV2ContractError, RobotAssetRef
 from alexdoor_xas.dataset import (
     BatchIterator,
     ChunkSampler,
@@ -27,6 +28,10 @@ from alexdoor_xas.dataset import (
     norm_stats_path,
     splits_path,
     validate_norm_stats,
+)
+from alexdoor_xas.dataset.robot_asset import (
+    load_dataset_robot_asset,
+    validate_dataset_episode_robot_asset,
 )
 
 EPOCH_SEED_STRIDE = 10_000
@@ -52,6 +57,8 @@ class PolicyData:
     test_ids: tuple[str, ...]
     stats: DatasetNormStats
     stats_source: str  # "official" (norm_stats.json) | "computed" (non-default preset)
+    robot_asset: RobotAssetRef | None
+    robot_asset_manifest: dict[str, Any] | None
 
     @property
     def obs_dim(self) -> int:
@@ -76,6 +83,15 @@ def load_policy_data(cfg, datasets_root: str | Path = paths.DATASETS_DIR) -> Pol
         dataset = EpisodeDataset(dataset_dir)
     except FileNotFoundError as error:
         raise PolicyDataError(str(error)) from error
+
+    try:
+        robot_asset, robot_asset_manifest = load_dataset_robot_asset(
+            dataset_dir, require=cfg.task == paths.ALEX_V2_TASK
+        )
+        if cfg.task == paths.ALEX_V2_TASK and robot_asset is not None:
+            validate_dataset_episode_robot_asset(dataset, robot_asset)
+    except AlexV2ContractError as error:
+        raise PolicyDataError(f"invalid robot asset provenance: {error}") from error
 
     split_file = splits_path(datasets_root, cfg.task, cfg.version)
     if not split_file.is_file():
@@ -116,6 +132,8 @@ def load_policy_data(cfg, datasets_root: str | Path = paths.DATASETS_DIR) -> Pol
         test_ids=tuple(splits["test"]),
         stats=stats,
         stats_source=stats_source,
+        robot_asset=robot_asset,
+        robot_asset_manifest=robot_asset_manifest,
     )
 
 

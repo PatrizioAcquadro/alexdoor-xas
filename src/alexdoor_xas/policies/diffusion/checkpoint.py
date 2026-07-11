@@ -16,6 +16,8 @@ from typing import Any
 
 import torch
 
+from alexdoor_xas import paths
+from alexdoor_xas.assets.alex_v2_contract import RobotAssetRef
 from alexdoor_xas.dataset import DatasetNormStats, NormStats
 from alexdoor_xas.policies.diffusion.config import DiffusionModelCfg
 from alexdoor_xas.policies.diffusion.model import DiffusionTransformer
@@ -32,6 +34,7 @@ class LoadedCheckpoint:
     config: dict[str, Any]
     stats: DatasetNormStats
     meta: dict[str, Any]
+    robot_asset: RobotAssetRef | None = None
 
     @property
     def action_space(self) -> str:
@@ -52,8 +55,11 @@ def save_checkpoint(
     config: dict[str, Any],
     stats: DatasetNormStats,
     meta: dict[str, Any] | None = None,
+    robot_asset: RobotAssetRef | None = None,
 ) -> Path:
     """Write a self-contained checkpoint; returns the written path."""
+    if _is_v2_config(config) and robot_asset is None:
+        raise ValueError("Alex V2 checkpoints require robot asset provenance")
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -71,6 +77,7 @@ def save_checkpoint(
         "scheduler": scheduler_config_payload(model.cfg),
         "config": config,
         "norm_stats": _stats_payload(stats),
+        "robot_asset": robot_asset.to_dict() if robot_asset is not None else None,
         "meta": {
             **(meta or {}),
             "torch_version": str(torch.__version__),
@@ -95,12 +102,26 @@ def load_checkpoint(path: str | Path, map_location: str = "cpu") -> LoadedCheckp
     )
     model.load_state_dict(payload["state_dict"])
     model.eval()
+    config = dict(payload["config"])
+    robot_asset = _asset_from_payload(payload.get("robot_asset"))
+    if _is_v2_config(config) and robot_asset is None:
+        raise ValueError("Alex V2 checkpoint is missing robot asset provenance")
     return LoadedCheckpoint(
         model=model,
-        config=dict(payload["config"]),
+        config=config,
         stats=_stats_from_payload(payload["norm_stats"]),
         meta=dict(payload["meta"]),
+        robot_asset=robot_asset,
     )
+
+
+def _asset_from_payload(payload: Any) -> RobotAssetRef | None:
+    return None if payload is None else RobotAssetRef.from_dict(payload)
+
+
+def _is_v2_config(config: dict[str, Any]) -> bool:
+    dataset = config.get("dataset")
+    return isinstance(dataset, dict) and dataset.get("task") == paths.ALEX_V2_TASK
 
 
 def _stats_payload(stats: DatasetNormStats) -> dict[str, Any]:

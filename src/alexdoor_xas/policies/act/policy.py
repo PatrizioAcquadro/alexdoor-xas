@@ -16,6 +16,11 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from alexdoor_xas import paths
+from alexdoor_xas.assets.alex_v2_contract import (
+    RobotAssetRef,
+    assert_checkpoint_runtime_compatible,
+)
 from alexdoor_xas.dataset import DatasetNormStats
 from alexdoor_xas.policies.act.checkpoint import load_checkpoint
 from alexdoor_xas.policies.act.model import ACTModel
@@ -52,15 +57,37 @@ class ActPolicy:
         self.obs_clip = obs_clip
         self.checkpoint_config: dict | None = None
         self.checkpoint_meta: dict | None = None
+        self.robot_asset: RobotAssetRef | None = None
+        self.robot_compatibility_label: str | None = None
         self.model.to(self.device)
         self.model.eval()
 
     @classmethod
-    def from_checkpoint(cls, path: str | Path, device: str = "cpu") -> ActPolicy:
+    def from_checkpoint(
+        cls,
+        path: str | Path,
+        device: str = "cpu",
+        *,
+        runtime_asset: RobotAssetRef | None = None,
+        allow_cross_model_evaluation: bool = False,
+    ) -> ActPolicy:
         loaded = load_checkpoint(path, map_location=device)
         policy = cls(loaded.model, loaded.stats, device=device)
         policy.checkpoint_config = loaded.config
         policy.checkpoint_meta = loaded.meta
+        policy.robot_asset = loaded.robot_asset
+        dataset = loaded.config.get("dataset", {})
+        checkpoint_is_v2 = (
+            isinstance(dataset, dict) and dataset.get("task") == paths.ALEX_V2_TASK
+        )
+        if checkpoint_is_v2 and runtime_asset is None:
+            raise ValueError("Alex V2 policy loading requires a runtime robot asset")
+        if runtime_asset is not None:
+            policy.robot_compatibility_label = assert_checkpoint_runtime_compatible(
+                loaded.robot_asset,
+                runtime_asset,
+                allow_cross_model_evaluation=allow_cross_model_evaluation,
+            )
         return policy
 
     @property

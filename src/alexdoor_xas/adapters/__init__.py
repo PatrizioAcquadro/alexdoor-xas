@@ -15,14 +15,14 @@ from .a3 import A3Adapter, validate_object_frame
 from .a4 import A4Adapter, A4AdapterCfg, A4ExecutionResult, StageResult
 from .base import AdapterDecision, AdapterLog, AdapterStatus, StepContext
 from .limits import (
-    ALEX_LIMITS,
-    ALEX_ROBOT_TAG,
+    ALEX_V2_ROBOT_TAG,
     MAX_HINGE_ANGLE_RAD,
     PROXY_LIMITS,
     PROXY_ROBOT_TAG,
     DoorPanelGeometry,
     RobotLimitsCfg,
     WorkspaceSphere,
+    alex_v2_limits,
     limits_for_robot,
 )
 from .rollout import (
@@ -37,8 +37,7 @@ from .rollout import (
 )
 
 __all__ = [
-    "ALEX_LIMITS",
-    "ALEX_ROBOT_TAG",
+    "ALEX_V2_ROBOT_TAG",
     "MAX_HINGE_ANGLE_RAD",
     "PROXY_LIMITS",
     "PROXY_ROBOT_TAG",
@@ -57,6 +56,7 @@ __all__ = [
     "StageResult",
     "StepContext",
     "WorkspaceSphere",
+    "alex_v2_limits",
     "limits_for_robot",
     "validate_object_frame",
     "read_door_frame",

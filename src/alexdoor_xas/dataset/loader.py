@@ -35,6 +35,11 @@ CONTACT_FLAG_KEY = "contact_flag"
 """Virtual observation key: ``contact.sensed`` (force-sensing episodes) when
 recorded, else the geometric ``contact.inferred`` fallback."""
 
+DOOR_YAW_SIN_KEY = "door_yaw_sin"
+DOOR_YAW_COS_KEY = "door_yaw_cos"
+"""Virtual observation keys: sin/cos of the recorded per-step ``door_yaw_rad``
+(smooth, wrap-free door-orientation encoding for pose-aware presets)."""
+
 OBS_PRESETS: dict[str, tuple[str, ...]] = {
     # Available in every episode (phase2.v0 and v1): EE pose + door state, 9-dim.
     "core": (
@@ -62,6 +67,23 @@ OBS_PRESETS: dict[str, tuple[str, ...]] = {
         "joint_vel",
         "force_n",
         "sensed",
+    ),
+    # Door-pose-aware core (Phase 3.4+, additive): core + door-frame origin
+    # relative to the robot base + sin/cos of the door yaw, 14-dim. Only valid
+    # for episodes that recorded the door-pose object_state terms (the
+    # stabilization data engine onward); older episodes fail with a clear
+    # missing-key error. Extend with a hinge-origin block if door translation
+    # variation ever needs richer pose context.
+    "core_door_pose": (
+        "ee_pos_w",
+        "ee_quat_w_xyzw",
+        "door_angle_rad",
+        "door_angular_velocity_rad_s",
+        "door_rel_pos_x",
+        "door_rel_pos_y",
+        "door_rel_pos_z",
+        DOOR_YAW_SIN_KEY,
+        DOOR_YAW_COS_KEY,
     ),
 }
 DEFAULT_OBS_PRESET = "core"
@@ -175,6 +197,11 @@ def _preset_keys(preset: str) -> tuple[str, ...]:
 def _obs_key(record: EpisodeRecord, key: str) -> np.ndarray | None:
     if key == CONTACT_FLAG_KEY:
         return record.obs.get("sensed", record.obs.get("inferred"))
+    if key in (DOOR_YAW_SIN_KEY, DOOR_YAW_COS_KEY):
+        yaw = record.obs.get("door_yaw_rad")
+        if yaw is None:
+            return None
+        return np.sin(yaw) if key == DOOR_YAW_SIN_KEY else np.cos(yaw)
     return record.obs.get(key)
 
 

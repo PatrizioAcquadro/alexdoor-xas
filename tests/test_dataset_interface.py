@@ -168,6 +168,60 @@ def test_alex_full_preset_requires_force_sensing_episodes(proxy_a2, alex_a2) -> 
         proxy_a2.obs(0, "nope")
 
 
+def test_frozen_presets_stay_bit_compatible() -> None:
+    """The Phase 3.0 preset freeze: key tuples must never change (additive-only)."""
+    from alexdoor_xas.dataset import OBS_PRESETS
+
+    assert OBS_PRESETS["core"] == (
+        "ee_pos_w",
+        "ee_quat_w_xyzw",
+        "door_angle_rad",
+        "door_angular_velocity_rad_s",
+    )
+    assert OBS_PRESETS["core_contact"] == OBS_PRESETS["core"] + ("contact_flag",)
+    assert OBS_PRESETS["alex_full"] == OBS_PRESETS["core"] + (
+        "joint_pos",
+        "joint_vel",
+        "force_n",
+        "sensed",
+    )
+
+
+def test_core_door_pose_preset_is_14dim_and_encodes_yaw(tmp_path) -> None:
+    yaw = 0.6
+    origin = (1.0, -2.0, 0.5)
+    episode = run_episode(
+        FakeDoorPushEnv(yaw_rad=yaw, origin=origin),
+        plan_episodes(1, 0, 0)[0],
+        DataEngineCfg(),
+    )
+    exported = export_datasets([episode], tmp_path, version="v0")
+    dataset = EpisodeDataset(exported[A2_EE_DELTA])
+    obs = dataset.obs(0, "core_door_pose")
+    assert obs.shape == (dataset[0].n_steps, 14)
+    assert np.isfinite(obs).all()
+    # First 9 dims identical to core; door-pose block is constant per episode.
+    np.testing.assert_array_equal(obs[:, :9], dataset.obs(0, "core"))
+    np.testing.assert_allclose(obs[:, 9:12], np.tile(origin, (obs.shape[0], 1)), atol=1e-12)
+    np.testing.assert_allclose(obs[:, 12], np.sin(yaw), atol=1e-12)
+    np.testing.assert_allclose(obs[:, 13], np.cos(yaw), atol=1e-12)
+
+
+def test_core_door_pose_preset_fails_clearly_on_old_episodes(alex_a2) -> None:
+    """Episodes recorded before the door-pose terms existed must be rejected."""
+    import dataclasses
+
+    record = alex_a2[0]
+    stripped_obs = {
+        key: value
+        for key, value in record.obs.items()
+        if not key.startswith("door_rel_pos") and key != "door_yaw_rad"
+    }
+    old_record = dataclasses.replace(record, obs=stripped_obs)
+    with pytest.raises(ValueError, match="core_door_pose"):
+        obs_matrix(old_record, "core_door_pose")
+
+
 # ── A4 ────────────────────────────────────────────────────────────────────────
 
 

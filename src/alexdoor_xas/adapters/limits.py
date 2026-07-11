@@ -1,9 +1,8 @@
 """Per-robot execution limits and door-panel geometry for adapter checks.
 
-The limit presets are keyed by the frozen robot tags (docs/action_spaces.md).
-The Alex workspace numbers are the Phase 2.5 *measured* constants (probe
-experiments, docs/phase2_5_alex_report.md) — do not retune them here without
-rerunning ``scripts/verify_alex_ik_probe.py``.
+The proxy preset is static. Alex V2 reach limits are constructed from the
+validated door calibration plus a caller-supplied live shoulder center; this
+module never invents or persists a workspace center.
 
 :class:`DoorPanelGeometry` duplicates the panel constants of the scripted
 controller's ``DoorPushControllerCfg`` on purpose: adapters must not import
@@ -17,8 +16,11 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from alexdoor_xas import paths
+from alexdoor_xas.calibration.alex_v2_door import AlexV2DoorCalibration
+
 PROXY_ROBOT_TAG = "proxy_ee_sphere_v0"
-ALEX_ROBOT_TAG = "alex_v1_fullbody_fixedbase_v0"
+ALEX_V2_ROBOT_TAG = paths.ALEX_V2_ROBOT_TAG
 
 
 @dataclass(frozen=True)
@@ -63,30 +65,54 @@ PROXY_LIMITS = RobotLimitsCfg(robot=PROXY_ROBOT_TAG)
 """The proxy sphere is velocity-driven and unconstrained kinematically; only
 the per-tick clamps apply."""
 
-ALEX_LIMITS = RobotLimitsCfg(
-    robot=ALEX_ROBOT_TAG,
-    workspace=WorkspaceSphere(
-        # Measured in Phase 2.5: right SHOULDER_Z link at world (-0.43, -0.10,
-        # 1.39); usable reach 0.584 m. A waypoint 0.218 m from the shoulder
-        # timed out (arm folded near-singular) while the working push arc
-        # starts at 0.25 m — 0.24 m splits the measured pass/fail boundary.
-        center_w=(-0.43, -0.10, 1.39),
-        min_reach_m=0.24,
-        max_reach_m=0.584,
-    ),
-)
 
-_LIMITS_BY_ROBOT = {cfg.robot: cfg for cfg in (PROXY_LIMITS, ALEX_LIMITS)}
+def alex_v2_limits(
+    calibration: AlexV2DoorCalibration,
+    *,
+    workspace_center_w,
+) -> RobotLimitsCfg:
+    """Build V2 limits from calibrated reach bounds and a live shoulder center."""
+
+    center = np.asarray(workspace_center_w, dtype=np.float64).reshape(-1)
+    if center.shape != (3,) or not np.isfinite(center).all():
+        raise ValueError("workspace_center_w must contain exactly three finite values")
+    min_reach_m, max_reach_m = calibration.reach_shell_m
+    if not (
+        np.isfinite(min_reach_m)
+        and np.isfinite(max_reach_m)
+        and 0.0 < min_reach_m < max_reach_m
+    ):
+        raise ValueError("calibration reach_shell_m must be finite, positive, and increasing")
+    return RobotLimitsCfg(
+        robot=ALEX_V2_ROBOT_TAG,
+        workspace=WorkspaceSphere(
+            center_w=tuple(float(value) for value in center),
+            min_reach_m=float(min_reach_m),
+            max_reach_m=float(max_reach_m),
+        ),
+    )
 
 
-def limits_for_robot(robot_tag: str) -> RobotLimitsCfg:
-    """Limit preset for a frozen robot tag; raises on unknown tags."""
-    try:
-        return _LIMITS_BY_ROBOT[robot_tag]
-    except KeyError:
-        raise KeyError(
-            f"no adapter limits for robot {robot_tag!r} (known: {sorted(_LIMITS_BY_ROBOT)})"
-        ) from None
+def limits_for_robot(
+    robot_tag: str,
+    *,
+    calibration: AlexV2DoorCalibration | None = None,
+    workspace_center_w=None,
+) -> RobotLimitsCfg:
+    """Limits for a frozen robot tag, requiring live inputs for Alex V2."""
+
+    if robot_tag == PROXY_ROBOT_TAG:
+        return PROXY_LIMITS
+    if robot_tag == ALEX_V2_ROBOT_TAG:
+        if calibration is None or workspace_center_w is None:
+            raise ValueError(
+                "Alex V2 limits require validated calibration and workspace_center_w"
+            )
+        return alex_v2_limits(calibration, workspace_center_w=workspace_center_w)
+    raise KeyError(
+        f"no adapter limits for robot {robot_tag!r} "
+        f"(known: {[ALEX_V2_ROBOT_TAG, PROXY_ROBOT_TAG]})"
+    )
 
 
 @dataclass(frozen=True)
@@ -150,13 +176,13 @@ MAX_HINGE_ANGLE_RAD = math.pi / 2.0
 
 
 __all__ = [
-    "ALEX_LIMITS",
-    "ALEX_ROBOT_TAG",
+    "ALEX_V2_ROBOT_TAG",
     "MAX_HINGE_ANGLE_RAD",
     "PROXY_LIMITS",
     "PROXY_ROBOT_TAG",
     "DoorPanelGeometry",
     "RobotLimitsCfg",
     "WorkspaceSphere",
+    "alex_v2_limits",
     "limits_for_robot",
 ]

@@ -20,7 +20,7 @@ from alexdoor_xas.policies.scripted import DoorPushControllerCfg
 
 CONFIG_DIR: Path = paths.REPO_ROOT / "configs"
 CONFIG_NAME = "scripted_baseline"
-VALID_ROBOTS = frozenset({"proxy", "alex"})
+VALID_ROBOTS = frozenset({"proxy", "alex_v2"})
 CONTROLLER_FIELD_TYPES = {
     field.name: field.type for field in fields(DoorPushControllerCfg)
 }
@@ -36,6 +36,11 @@ RUN_FIELD_NAMES = frozenset(
         "max_ticks",
         "video",
         "clean_shutdown",
+        "export",
+        "door_yaw_deg",
+        "door_offset_x",
+        "door_offset_y",
+        "door_pose_id",
     }
 )
 
@@ -58,6 +63,11 @@ class ScriptedBaselineRunCfg:
     max_ticks: int = 600
     video: bool = False
     clean_shutdown: bool = False
+    export: bool = True
+    door_yaw_deg: float = 0.0
+    door_offset_x: float = 0.0
+    door_offset_y: float = 0.0
+    door_pose_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -169,6 +179,17 @@ def _build_run_cfg(node: dict[str, Any]) -> ScriptedBaselineRunCfg:
     if not math.isfinite(success_angle_deg):
         raise ScriptedBaselineConfigError("run.success_angle_deg must be finite")
 
+    door_yaw_deg = _coerce_float("run.door_yaw_deg", node.get("door_yaw_deg", 0.0))
+    door_offset_x = _coerce_float("run.door_offset_x", node.get("door_offset_x", 0.0))
+    door_offset_y = _coerce_float("run.door_offset_y", node.get("door_offset_y", 0.0))
+    for name, value in (
+        ("run.door_yaw_deg", door_yaw_deg),
+        ("run.door_offset_x", door_offset_x),
+        ("run.door_offset_y", door_offset_y),
+    ):
+        if not math.isfinite(value):
+            raise ScriptedBaselineConfigError(f"{name} must be finite")
+
     return ScriptedBaselineRunCfg(
         robot=robot,
         episodes=episodes,
@@ -180,6 +201,11 @@ def _build_run_cfg(node: dict[str, Any]) -> ScriptedBaselineRunCfg:
         max_ticks=max_ticks,
         video=_coerce_bool("run.video", node.get("video", False)),
         clean_shutdown=_coerce_bool("run.clean_shutdown", node.get("clean_shutdown", False)),
+        export=_coerce_bool("run.export", node.get("export", True)),
+        door_yaw_deg=door_yaw_deg,
+        door_offset_x=door_offset_x,
+        door_offset_y=door_offset_y,
+        door_pose_id=_optional_str("run.door_pose_id", node.get("door_pose_id")),
     )
 
 

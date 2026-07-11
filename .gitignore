@@ -63,6 +63,7 @@ htmlcov/
 /.claude/
 /CLAUDE.md
 /claude.md
+/prompts/
 
 # ── Editor / OS cruft ────────────────────────────────────────────────────────
 .idea/

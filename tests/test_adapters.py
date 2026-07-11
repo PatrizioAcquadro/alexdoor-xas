@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -12,7 +13,7 @@ import torch
 from alexdoor_xas.action.frames import ObjectFrame, frame_delta_to_world, rot_z
 from alexdoor_xas.action.spaces import A4_PHASE_VOCAB, EE_DELTA_DIM, ObjectCentricChunk
 from alexdoor_xas.adapters import (
-    ALEX_LIMITS,
+    ALEX_V2_ROBOT_TAG,
     MAX_HINGE_ANGLE_RAD,
     PROXY_LIMITS,
     A2Adapter,
@@ -24,6 +25,7 @@ from alexdoor_xas.adapters import (
     RobotLimitsCfg,
     StepContext,
     WorkspaceSphere,
+    alex_v2_limits,
     limits_for_robot,
     replay_source,
     rollout_chunks,
@@ -52,6 +54,11 @@ def _ctx(
 
 def _identity_frame(origin=(0.0, 0.0, 0.0)) -> ObjectFrame:
     return ObjectFrame(origin=np.asarray(origin, dtype=np.float64), rot=np.eye(3))
+
+
+def _v2_limits(center=(1.0, 2.0, 3.0), reach_shell=(0.2, 0.8)):
+    calibration = SimpleNamespace(reach_shell_m=reach_shell)
+    return alex_v2_limits(calibration, workspace_center_w=center)
 
 
 def _chunk(
@@ -105,9 +112,10 @@ def test_a2_rejects_malformed_deltas(bad):
 
 
 def test_a2_rejects_out_of_workspace_command():
-    adapter = A2Adapter(ALEX_LIMITS)
-    center = np.asarray(ALEX_LIMITS.workspace.center_w)
-    ee = center + np.array([ALEX_LIMITS.workspace.max_reach_m + 0.01, 0.0, 0.0])
+    limits = _v2_limits()
+    adapter = A2Adapter(limits)
+    center = np.asarray(limits.workspace.center_w)
+    ee = center + np.array([limits.workspace.max_reach_m + 0.01, 0.0, 0.0])
     applied, decision = adapter.process(
         np.array([0.02, 0.0, 0.0, 0.0, 0.0, 0.0]), _ctx(ee_pos_w=ee)
     )
@@ -118,9 +126,10 @@ def test_a2_rejects_out_of_workspace_command():
 
 
 def test_a2_warns_near_min_reach_but_accepts():
-    adapter = A2Adapter(ALEX_LIMITS)
-    center = np.asarray(ALEX_LIMITS.workspace.center_w)
-    ee = center + np.array([0.22, 0.0, 0.0])  # inside min reach 0.24
+    limits = _v2_limits(reach_shell=(0.24, 0.8))
+    adapter = A2Adapter(limits)
+    center = np.asarray(limits.workspace.center_w)
+    ee = center + np.array([0.22, 0.0, 0.0])
     applied, decision = adapter.process(np.zeros(6), _ctx(ee_pos_w=ee))
     assert decision.status is AdapterStatus.ACCEPTED
     assert any("min reach" in warning for warning in decision.warnings)
@@ -162,8 +171,32 @@ def test_a2_chunk_is_cut_at_first_rejection():
 
 def test_limits_for_robot_rejects_unknown_tag():
     assert limits_for_robot("proxy_ee_sphere_v0") is PROXY_LIMITS
+    with pytest.raises(ValueError, match="workspace_center_w"):
+        limits_for_robot(ALEX_V2_ROBOT_TAG)
     with pytest.raises(KeyError, match="no adapter limits"):
         limits_for_robot("robot_from_the_future_v9")
+
+
+def test_alex_v2_limits_use_calibrated_shell_and_caller_center() -> None:
+    calibration = SimpleNamespace(reach_shell_m=(0.31, 0.77))
+    center = (4.0, -2.0, 1.25)
+
+    limits = limits_for_robot(
+        ALEX_V2_ROBOT_TAG,
+        calibration=calibration,
+        workspace_center_w=center,
+    )
+
+    assert limits.robot == ALEX_V2_ROBOT_TAG
+    assert limits.workspace.center_w == center
+    assert limits.workspace.min_reach_m == pytest.approx(0.31)
+    assert limits.workspace.max_reach_m == pytest.approx(0.77)
+
+
+@pytest.mark.parametrize("center", [(1.0, 2.0), (1.0, float("nan"), 3.0)])
+def test_alex_v2_limits_reject_invalid_caller_center(center) -> None:
+    with pytest.raises(ValueError, match="three finite"):
+        _v2_limits(center=center)
 
 
 # -- A3 -------------------------------------------------------------------------

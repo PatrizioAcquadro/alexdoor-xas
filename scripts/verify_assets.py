@@ -24,7 +24,7 @@ For GUI inspection, use::
     PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p \
         scripts/verify_assets.py --viz kit --device cpu --steps 1
 
-Flags: ``--variant {fullbody,nub}``  ``--scene {combined,none}``  ``--steps N``.
+Flags: ``--scene {combined,none}``  ``--steps N``.
 By default the script exits immediately after flushing the result because Kit
 shutdown can be slow; pass ``--clean-shutdown`` to debug graceful shutdown.
 """
@@ -40,8 +40,6 @@ import traceback
 from isaaclab.app import AppLauncher
 
 parser = argparse.ArgumentParser(description="AlexDoor-XAS Phase-1 asset load check")
-parser.add_argument("--variant", choices=["fullbody", "nub"], default="fullbody",
-                    help="Alex configuration to spawn (default: fullbody).")
 parser.add_argument("--scene", choices=["combined", "none"], default="combined",
                     help="Also compose the combined corridor scene (default: combined).")
 parser.add_argument("--steps", type=int, default=8, help="Robot simulation steps to run.")
@@ -62,7 +60,11 @@ from isaaclab.assets import Articulation  # noqa: E402
 from isaaclab.sim import SimulationContext  # noqa: E402
 
 from alexdoor_xas.assets import scenes  # noqa: E402
-from alexdoor_xas.assets.alex import load_alex_articulation_cfg  # noqa: E402
+from alexdoor_xas.assets.alex_v2 import (  # noqa: E402
+    build_alex_v2_door_asset,
+    load_alex_v2_articulation_cfg,
+)
+from alexdoor_xas.assets.alex_v2_contract import EXPECTED_RUNTIME_JOINTS  # noqa: E402
 
 
 def _check_robot() -> list[str]:
@@ -78,9 +80,14 @@ def _check_robot() -> list[str]:
         "/World/Light", sim_utils.DomeLightCfg(intensity=2000.0)
     )
 
-    robot_cfg = load_alex_articulation_cfg(args.variant)
+    asset, ref = build_alex_v2_door_asset()
+    robot_cfg = load_alex_v2_articulation_cfg(fix_base=True)
+    print(
+        f"[alex] model=v2 asset_id={ref.asset_id} asset_sha256={ref.sha256} "
+        f"manifest_fingerprint={ref.manifest_fingerprint} profile={asset.profile}"
+    )
     robot_cfg.init_state.pos = (0.0, 0.0, 1.0)
-    print(f"[alex] variant={args.variant}  urdf={robot_cfg.spawn.asset_path}")
+    print(f"[alex] model=v2 urdf={robot_cfg.spawn.asset_path}")
     robot = Articulation(robot_cfg.replace(prim_path="/World/Alex"))
 
     sim.reset()  # cooks only Alex + ground → fast
@@ -91,6 +98,11 @@ def _check_robot() -> list[str]:
     joint_names = list(robot.data.joint_names)
     print(f"[alex] spawned OK — {len(joint_names)} joints:")
     print("       " + ", ".join(joint_names))
+    if tuple(joint_names) != EXPECTED_RUNTIME_JOINTS:
+        raise RuntimeError(
+            "Alex V2 runtime joint names/order differ from the frozen asset manifest: "
+            f"expected={list(EXPECTED_RUNTIME_JOINTS)!r}, actual={joint_names!r}"
+        )
     return joint_names
 
 

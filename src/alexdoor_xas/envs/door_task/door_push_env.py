@@ -67,7 +67,9 @@ class DoorPushEnv(DirectRLEnv):
     cfg: DoorPushEnvCfg
 
     def __init__(self, cfg: DoorPushEnvCfg, render_mode: str | None = None, **kwargs):
-        usd_path = ensure_door_task_usd()
+        usd_path = ensure_door_task_usd(
+            door_yaw_rad=cfg.door_yaw_rad, door_xy_offset_m=tuple(cfg.door_offset_xy)
+        )
         cfg.door_task_scene.spawn.usd_path = str(usd_path)
 
         super().__init__(cfg, render_mode, **kwargs)

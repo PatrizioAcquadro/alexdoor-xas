@@ -176,11 +176,11 @@ PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/run_scripted_base
     --viz none --device cpu --robot proxy --episodes 5 --randomized 3
 ```
 
-Generate scripted door-push rollouts with the Alex backend:
+Generate scripted door-push rollouts with the Alex V2 backend:
 
 ```bash
 PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/run_scripted_baseline.py \
-    --viz none --device cpu --robot alex --episodes 5 --randomized 3 --video --enable_cameras
+    --viz none --device cpu --robot alex_v2 --episodes 5 --randomized 3 --video --enable_cameras
 ```
 
 Use `--help` on any script to inspect supported flags:

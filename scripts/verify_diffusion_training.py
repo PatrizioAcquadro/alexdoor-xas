@@ -76,7 +76,7 @@ POSITION_DELTA_BOUND_M = 0.04  # 2x the frozen 0.02 m per-tick clamp
 
 
 def check_space(space: str, out_dir: Path, failures: list[str]) -> None:
-    label = f"door_push_alex/{space}"
+    label = f"{paths.ALEX_V2_TASK}/{space}"
     try:
         cfg = load_diffusion_config([f"dataset.space={space}", *GATE_OVERRIDES])
     except DiffusionConfigError as error:

@@ -12,12 +12,12 @@ from alexdoor_xas.policies.act import ActConfigError, load_act_config
 def test_default_config_matches_yaml_defaults() -> None:
     cfg = load_act_config()
 
-    assert cfg.dataset.task == "door_push_alex"
+    assert cfg.dataset.task == "door_push_alex_v2"
     assert cfg.dataset.space == A2_EE_DELTA
-    assert cfg.dataset.version == "v0"
+    assert cfg.dataset.version == "v2_pose"
     assert cfg.dataset.obs_preset == "core"
     assert cfg.dataset.dataset_dir == (
-        paths.DATASETS_DIR / "door_push_alex" / A2_EE_DELTA / "v0"
+        paths.DATASETS_DIR / "door_push_alex_v2" / A2_EE_DELTA / "v2_pose"
     )
 
     assert cfg.model.chunk_size == 40

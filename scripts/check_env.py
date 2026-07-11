@@ -15,13 +15,29 @@ from __future__ import annotations
 import platform
 import subprocess
 import sys
-from importlib import metadata
+from collections.abc import Callable
+from importlib import metadata, util
 from pathlib import Path
+from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SRC_ROOT = REPO_ROOT / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 
 OFFICIAL_ISAAC_SIM_ROOT = Path("/home/pacquadr/isaacsim")
 OFFICIAL_ISAAC_LAB_ROOT = Path("/home/pacquadr/IsaacLab")
 EXPECTED_ISAAC_SIM_VERSION_PREFIX = "6.0.1"
-EXPECTED_ISAAC_LAB_BRANCH = "release/3.0.0-beta2"
+EXPECTED_ISAAC_LAB_BRANCH = "pacquadr/alex-v2-asset"
+ALEX_V2_ISAACLAB_MODULE = "isaaclab_assets.robots.alex"
+ALEX_V2_ISAACLAB_MODULE_FILE = (
+    OFFICIAL_ISAAC_LAB_ROOT
+    / "source"
+    / "isaaclab_assets"
+    / "isaaclab_assets"
+    / "robots"
+    / "alex.py"
+)
 
 
 def _pkg_version(name: str) -> str:
@@ -71,7 +87,7 @@ def _check_provenance() -> tuple[list[str], list[str]]:
     if branch is None:
         warnings.append("Isaac Lab git state unavailable (not a git checkout?)")
     elif branch != EXPECTED_ISAAC_LAB_BRANCH:
-        warnings.append(
+        failures.append(
             f"Isaac Lab branch is {branch!r}, expected {EXPECTED_ISAAC_LAB_BRANCH!r}"
         )
 
@@ -89,6 +105,34 @@ def _check_provenance() -> tuple[list[str], list[str]]:
         warnings.append("IsaacLab/_isaac_sim symlink absent (Isaac Lab not linked?)")
 
     return failures, warnings
+
+
+def _alex_v2_module_failure(
+    find_spec: Callable[[str], Any] = util.find_spec,
+    module_file: Path = ALEX_V2_ISAACLAB_MODULE_FILE,
+) -> str | None:
+    """Return an actionable failure when the no-Kit V2 factory is unavailable."""
+
+    try:
+        spec = find_spec(ALEX_V2_ISAACLAB_MODULE)
+    except (AttributeError, ImportError, ModuleNotFoundError, ValueError) as error:
+        detail = f"find_spec raised {error.__class__.__name__}: {error}"
+    else:
+        if spec is not None:
+            return None
+        detail = "find_spec returned no module"
+    file_detail = "present" if module_file.is_file() else "missing"
+    return (
+        f"{ALEX_V2_ISAACLAB_MODULE} is not importable ({detail}; module file {file_detail}: "
+        f"{module_file}). Switch the IsaacLab checkout to the "
+        f"{EXPECTED_ISAAC_LAB_BRANCH!r} branch and run through its isaaclab.sh launcher."
+    )
+
+
+def _missing_required_assets(assets: list[tuple[str, Path, bool]]) -> list[str]:
+    """Return required asset names whose paths do not exist."""
+
+    return [name for name, path, required in assets if required and not path.exists()]
 
 
 def main() -> int:
@@ -128,17 +172,22 @@ def main() -> int:
 
     print("-- provenance --")
     provenance_failures, provenance_warnings = _check_provenance()
+    alex_v2_module_failure = _alex_v2_module_failure()
+    if alex_v2_module_failure is None:
+        print(f"  [ok ] {ALEX_V2_ISAACLAB_MODULE}")
+    else:
+        print(f"  [ERR] {ALEX_V2_ISAACLAB_MODULE}")
+        provenance_failures.append(alex_v2_module_failure)
 
     print("-- assets --")
     required_pkgs = ("isaaclab", "torch", "numpy")
     missing_pkgs = [n for n in required_pkgs if versions[n] == "MISSING"]
-    missing_assets = []
-    for name, path, required in paths.iter_assets():
+    assets = paths.iter_assets()
+    missing_assets = _missing_required_assets(assets)
+    for name, path, required in assets:
         ok = path.exists()
         flag = "ok " if ok else ("ERR" if required else "opt")
         print(f"  [{flag}] {name}: {path}")
-        if required and not ok:
-            missing_assets.append(name)
 
     print("-- result --")
     if missing_pkgs:

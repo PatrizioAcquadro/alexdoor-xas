@@ -10,10 +10,12 @@ DOOR_PUSH_ENV_ID = "AlexDoor-DoorPush-Proxy-v0"
 DOOR_PUSH_ENV_ENTRY_POINT = "alexdoor_xas.envs.door_task.door_push_env:DoorPushEnv"
 DOOR_PUSH_ENV_CFG_ENTRY_POINT = "alexdoor_xas.envs.door_task.door_push_env_cfg:DoorPushEnvCfg"
 
-DOOR_PUSH_ALEX_ENV_ID = "AlexDoor-DoorPush-Alex-v0"
-DOOR_PUSH_ALEX_ENV_ENTRY_POINT = "alexdoor_xas.envs.door_task.door_push_alex_env:DoorPushAlexEnv"
-DOOR_PUSH_ALEX_ENV_CFG_ENTRY_POINT = (
-    "alexdoor_xas.envs.door_task.door_push_alex_env_cfg:DoorPushAlexEnvCfg"
+DOOR_PUSH_ALEX_V2_ENV_ID = "AlexDoor-DoorPush-AlexV2-v0"
+DOOR_PUSH_ALEX_V2_ENV_ENTRY_POINT = (
+    "alexdoor_xas.envs.door_task.door_push_alex_v2_env:DoorPushAlexV2Env"
+)
+DOOR_PUSH_ALEX_V2_ENV_CFG_ENTRY_POINT = (
+    "alexdoor_xas.envs.door_task.door_push_alex_v2_env_cfg:DoorPushAlexV2EnvCfg"
 )
 
 
@@ -28,9 +30,9 @@ def _register_gym_envs() -> None:
         (DOOR_TASK_ENV_ID, DOOR_TASK_ENV_ENTRY_POINT, DOOR_TASK_ENV_CFG_ENTRY_POINT),
         (DOOR_PUSH_ENV_ID, DOOR_PUSH_ENV_ENTRY_POINT, DOOR_PUSH_ENV_CFG_ENTRY_POINT),
         (
-            DOOR_PUSH_ALEX_ENV_ID,
-            DOOR_PUSH_ALEX_ENV_ENTRY_POINT,
-            DOOR_PUSH_ALEX_ENV_CFG_ENTRY_POINT,
+            DOOR_PUSH_ALEX_V2_ENV_ID,
+            DOOR_PUSH_ALEX_V2_ENV_ENTRY_POINT,
+            DOOR_PUSH_ALEX_V2_ENV_CFG_ENTRY_POINT,
         ),
     )
     for env_id, entry_point, cfg_entry_point in registrations:
@@ -48,9 +50,9 @@ def _register_gym_envs() -> None:
 _register_gym_envs()
 
 __all__ = [
-    "DOOR_PUSH_ALEX_ENV_CFG_ENTRY_POINT",
-    "DOOR_PUSH_ALEX_ENV_ENTRY_POINT",
-    "DOOR_PUSH_ALEX_ENV_ID",
+    "DOOR_PUSH_ALEX_V2_ENV_CFG_ENTRY_POINT",
+    "DOOR_PUSH_ALEX_V2_ENV_ENTRY_POINT",
+    "DOOR_PUSH_ALEX_V2_ENV_ID",
     "DOOR_PUSH_ENV_CFG_ENTRY_POINT",
     "DOOR_PUSH_ENV_ENTRY_POINT",
     "DOOR_PUSH_ENV_ID",

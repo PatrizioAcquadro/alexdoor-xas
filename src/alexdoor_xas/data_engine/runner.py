@@ -23,6 +23,11 @@ from alexdoor_xas.data_engine.generate import (
 from alexdoor_xas.eval.metrics import aggregate_metrics, episode_metrics
 from alexdoor_xas.eval.plots import door_angle_plot, final_angle_plot
 from alexdoor_xas.eval.report import write_run_report
+from alexdoor_xas.eval.sanity import (
+    FORCE_DATASET_LIMIT_N,
+    check_alex_episode,
+    contact_force_diagnostics,
+)
 from alexdoor_xas.policies.scripted import DoorPushControllerCfg, VariationBounds
 from alexdoor_xas.recording import EpisodeBuffer, write_episode
 
@@ -42,6 +47,7 @@ class RunArtifacts:
     videos: dict[str, Any]
     report_path: Path
     limitations: list[str] = field(default_factory=list)
+    sanity: dict[str, Any] | None = None
 
 
 def run_baseline(
@@ -58,12 +64,23 @@ def run_baseline(
     controller_cfg: DoorPushControllerCfg | None = None,
     variation_bounds: VariationBounds | None = None,
     video: bool = False,
+    export: bool = True,
 ) -> RunArtifacts:
     """Generate, record, export, evaluate, and report one baseline run.
 
     Rerunning the same ``run_id`` replaces its artifacts: the run-owned
     subdirectories (episodes/videos/metrics/plots/logs) and report.md are
     removed up front so a rerun can never leave stale episode files behind.
+
+    Force-sensing (Alex) episodes are sanity-checked (``eval/sanity.py``)
+    before any dataset export: the per-episode summary is always written to
+    ``metrics/sanity.json``, warnings are reported verbatim, and any sanity
+    *error* aborts the run loudly — bad data can no longer reach ``datasets/``
+    silently and fail only at the Phase 3.0 gate.
+
+    ``export=False`` records the run under ``outputs/`` only and never writes
+    ``datasets/`` — the mode multi-pose generation uses so partial per-pose
+    passes cannot masquerade as an official dataset version.
     """
     engine_cfg = engine_cfg or DataEngineCfg()
     run_dir = Path(outputs_root) / experiment / run_id
@@ -94,13 +111,29 @@ def run_baseline(
         json.dumps({"aggregate": aggregate, "episodes": per_episode}, indent=2) + "\n"
     )
 
-    exports = export_datasets(episodes, datasets_root)
+    sanity = _run_sanity_checks(episodes, metrics_dir)
+    limitations = list(engine_cfg.limitations)
+    if sanity is not None and sanity["n_episodes_with_warnings"]:
+        limitations.append(
+            f"Sanity warnings on {sanity['n_episodes_with_warnings']} episode(s) "
+            f"(see metrics/sanity.json)"
+        )
+    if sanity is not None and sanity["n_episodes_with_errors"]:
+        failing = [
+            entry["seed"] for entry in sanity["episodes"] if entry["errors"]
+        ]
+        raise RuntimeError(
+            f"sanity checks failed on {sanity['n_episodes_with_errors']} episode(s) "
+            f"(seeds {failing}); run aborted before export — see "
+            f"{metrics_dir / 'sanity.json'}"
+        )
+
+    exports = export_datasets(episodes, datasets_root) if export else {}
     plots = {
         "door_angle_vs_time": door_angle_plot(episodes, run_dir / "plots" / "door_angle.png"),
         "final_door_angle": final_angle_plot(episodes, run_dir / "plots" / "final_angle.png"),
     }
 
-    limitations = list(engine_cfg.limitations)
     if video and videos_state["status"] != "enabled":
         limitations.append(f"Video capture degraded: {videos_state['status']}")
 
@@ -126,7 +159,49 @@ def run_baseline(
         videos=videos_state,
         report_path=report_path,
         limitations=limitations,
+        sanity=sanity,
     )
+
+
+def _run_sanity_checks(
+    episodes: list[EpisodeBuffer], metrics_dir: Path
+) -> dict[str, Any] | None:
+    """Sanity-check force-sensing (Alex) episodes; write metrics/sanity.json.
+
+    Same episode condition the Phase 3.0 dataset gate uses (joint proprio
+    present). Returns ``None`` for runs with no such episodes (proxy). The
+    summary carries every warning/error message verbatim plus the anti-windup
+    IK clamp telemetry per episode — warnings are reported, never suppressed.
+    """
+    entries: list[dict[str, Any]] = []
+    for episode in episodes:
+        if not episode.steps or "joint_pos" not in episode.steps[0].proprio:
+            continue
+        result = check_alex_episode(
+            episode, force_error_n=FORCE_DATASET_LIMIT_N
+        )
+        entries.append(
+            {
+                "episode_id": episode.meta.episode_id,
+                "seed": episode.meta.seed,
+                "errors": list(result.errors),
+                "warnings": list(result.warnings),
+                "force_diagnostics": contact_force_diagnostics(
+                    episode, force_limit_n=FORCE_DATASET_LIMIT_N
+                ),
+                "ik_clamp_telemetry": episode.extras.get("ik_clamp_telemetry"),
+            }
+        )
+    if not entries:
+        return None
+    summary = {
+        "n_episodes_checked": len(entries),
+        "n_episodes_with_errors": sum(1 for entry in entries if entry["errors"]),
+        "n_episodes_with_warnings": sum(1 for entry in entries if entry["warnings"]),
+        "episodes": entries,
+    }
+    (metrics_dir / "sanity.json").write_text(json.dumps(summary, indent=2) + "\n")
+    return summary
 
 
 def _fresh_run_dir(run_dir: Path) -> None:

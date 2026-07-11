@@ -12,6 +12,7 @@ from collections.abc import Callable
 import numpy as np
 import torch
 
+from alexdoor_xas.action.frames import quat_to_rot_matrix
 from alexdoor_xas.dataset import OBS_PRESETS
 
 OBS_CLIP = 10.0
@@ -19,7 +20,7 @@ OBS_CLIP = 10.0
 floored at 1e-8, so a small absolute rollout deviation would otherwise map to
 an enormous normalized value far outside anything the model saw."""
 
-ROLLOUT_OBS_PRESETS = ("core", "core_contact")
+ROLLOUT_OBS_PRESETS = ("core", "core_contact", "core_door_pose")
 """Presets with a closed-loop env reader. ``alex_full`` training remains
 possible offline, but its joint-state/force layout has no verified live
 reader yet, so rollout refuses it rather than risk a silent mismatch."""
@@ -60,7 +61,38 @@ def build_env_obs(env, preset: str) -> np.ndarray:
                 "this env does not expose force contact sensing"
             )
         parts.append(np.array([_scalar(env.contact_sensed())], dtype=np.float64))
+    if preset == "core_door_pose":
+        parts.append(_door_pose_terms(env))
     return np.concatenate(parts)
+
+
+def _door_pose_terms(env) -> np.ndarray:
+    """Door-pose obs block, dataset-ordered: rel origin (3) + sin/cos yaw (2).
+
+    Mirrors the recorder exactly (data_engine.generate): door-frame origin
+    relative to the robot base (world origin for base-less envs), yaw from the
+    door-frame rotation about +Z.
+    """
+    frame_pos, frame_quat = env.door_frame_pose_w()
+    pos = np.asarray(
+        frame_pos.detach().cpu().numpy() if isinstance(frame_pos, torch.Tensor) else frame_pos,
+        dtype=np.float64,
+    ).reshape(-1)[:3]
+    quat = np.asarray(
+        frame_quat.detach().cpu().numpy() if isinstance(frame_quat, torch.Tensor) else frame_quat,
+        dtype=np.float64,
+    ).reshape(-1)[:4]
+    base = np.zeros(3)
+    if hasattr(env, "robot_base_pos_w"):
+        base_pos = env.robot_base_pos_w()
+        base = np.asarray(
+            base_pos.detach().cpu().numpy() if isinstance(base_pos, torch.Tensor) else base_pos,
+            dtype=np.float64,
+        ).reshape(-1)[:3]
+    rot = quat_to_rot_matrix(quat)
+    yaw = float(np.arctan2(rot[1, 0], rot[0, 0]))
+    rel = pos - base
+    return np.array([rel[0], rel[1], rel[2], np.sin(yaw), np.cos(yaw)], dtype=np.float64)
 
 
 def stop_on_hinge_angle(source: Callable, threshold_rad: float) -> Callable:

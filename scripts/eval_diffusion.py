@@ -1,8 +1,8 @@
 #!/usr/bin/env python
-"""Closed-loop Diffusion Policy evaluation through adapter-v1 on the Alex env (Phase 3.3).
+"""Closed-loop Diffusion Policy evaluation through adapters on calibrated Alex V2.
 
 Loads a trained diffusion checkpoint, rebuilds the policy (norm stats and
-noise schedule embedded), and rolls it out on ``AlexDoor-DoorPush-Alex-v0``
+noise schedule embedded), and rolls it out on ``AlexDoor-DoorPush-AlexV2-v0``
 through the adapter matching the checkpoint's action space (A2: world-frame
 deltas, A3: door-frame deltas). Execution is receding-horizon: each sampled
 ``Tp``-chunk contributes its first ``rollout.n_action_steps`` deltas before
@@ -99,15 +99,17 @@ from alexdoor_xas.adapters import (  # noqa: E402
     read_door_frame,
     rollout_chunks,
 )
+from alexdoor_xas.assets.alex_v2_contract import RobotAssetRef  # noqa: E402
 from alexdoor_xas.data_engine import (  # noqa: E402
     DataEngineCfg,
     apply_start_offset,
     plan_episodes,
     run_episode,
 )
-from alexdoor_xas.envs.door_task.door_push_alex_env_cfg import (  # noqa: E402
-    ALEX_ROBOT_TAG,
-    DoorPushAlexEnvCfg,
+from alexdoor_xas.envs.door_task.alex_v2_runtime import ALEX_V2_LIMITATIONS  # noqa: E402
+from alexdoor_xas.envs.door_task.door_push_alex_v2_env_cfg import (  # noqa: E402
+    ALEX_V2_ROBOT_TAG,
+    DoorPushAlexV2EnvCfg,
 )
 from alexdoor_xas.eval.metrics import aggregate_metrics, episode_metrics  # noqa: E402
 from alexdoor_xas.policies.common.obs import stop_on_hinge_angle  # noqa: E402
@@ -122,21 +124,27 @@ from alexdoor_xas.policies.diffusion.policy import (  # noqa: E402
     diffusion_chunk_source,
 )
 from alexdoor_xas.policies.scripted import (  # noqa: E402
-    ALEX_VARIATION_BOUNDS,
-    alex_fixedbase_push_cfg,
+    alex_v2_push_cfg,
+    alex_v2_variation_bounds,
 )
 from alexdoor_xas.tracking import load_wandb_config, start_wandb_run  # noqa: E402
 
 
 def _make_env():
-    cfg = DoorPushAlexEnvCfg()
+    cfg = DoorPushAlexV2EnvCfg()
     cfg.seed = dp_cfg.rollout.base_seed
     cfg.sim.device = args.device
-    return gym.make(door_task.DOOR_PUSH_ALEX_ENV_ID, cfg=cfg).unwrapped
+    return gym.make(door_task.DOOR_PUSH_ALEX_V2_ENV_ID, cfg=cfg).unwrapped
 
 
-def _fresh_adapter(action_space: str):
-    a2 = A2Adapter(limits_for_robot(ALEX_ROBOT_TAG))
+def _fresh_adapter(action_space: str, env):
+    center_w = env.shoulder_position_world_m()[0].detach().cpu().numpy()
+    limits = limits_for_robot(
+        ALEX_V2_ROBOT_TAG,
+        calibration=env.alex_v2_calibration(),
+        workspace_center_w=center_w,
+    )
+    a2 = A2Adapter(limits)
     if action_space == A2_EE_DELTA:
         return a2
     if action_space == A3_OBJ_REL_EE_DELTA:
@@ -148,7 +156,7 @@ def _run_rollout(env, policy, seed: int, variation, success_angle_rad: float) ->
     env.reset(seed=seed)
     if variation is not None:
         apply_start_offset(env, read_door_frame(env), variation)
-    adapter = _fresh_adapter(policy.action_space)
+    adapter = _fresh_adapter(policy.action_space, env)
     # Per-rollout sampling seed: the physics is deterministic headless, so a
     # seeded generator keeps the fixed-reset block a determinism probe.
     policy.seed(seed)
@@ -186,34 +194,37 @@ def _reference_aggregate() -> dict | None:
     return {"path": str(path), "aggregate": payload.get("aggregate", payload)}
 
 
-def _episode_plan():
+def _episode_plan(env):
+    variation_bounds = alex_v2_variation_bounds(env.alex_v2_calibration())
     return plan_episodes(
         dp_cfg.rollout.episodes_fixed,
         dp_cfg.rollout.episodes_randomized,
         dp_cfg.rollout.base_seed,
-        ALEX_VARIATION_BOUNDS,
+        variation_bounds,
     )
 
 
-def _seed_protocol() -> dict:
+def _seed_protocol(env) -> dict:
+    variation_bounds = alex_v2_variation_bounds(env.alex_v2_calibration())
     return seed_protocol(
         base_seed=dp_cfg.rollout.base_seed,
         episodes_fixed=dp_cfg.rollout.episodes_fixed,
         episodes_randomized=dp_cfg.rollout.episodes_randomized,
-        variation_bounds=ALEX_VARIATION_BOUNDS,
+        variation_bounds=variation_bounds,
     )
 
 
 def _run_matched_scripted_reference(env, plan, success_angle_rad: float, protocol: dict) -> dict:
     engine_cfg = DataEngineCfg(
-        task="door_push_alex",
-        robot=ALEX_ROBOT_TAG,
+        task=paths.ALEX_V2_TASK,
+        robot=ALEX_V2_ROBOT_TAG,
         success_angle_rad=success_angle_rad,
         max_ticks=dp_cfg.rollout.max_ticks,
-        limitations=(),
+        limitations=ALEX_V2_LIMITATIONS,
     )
+    controller_cfg = alex_v2_push_cfg(env.alex_v2_calibration())
     episodes = [
-        run_episode(env, item, engine_cfg, controller_cfg=alex_fixedbase_push_cfg())
+        run_episode(env, item, engine_cfg, controller_cfg=controller_cfg)
         for item in plan
     ]
     per_episode = [episode_metrics(episode) for episode in episodes]
@@ -230,11 +241,14 @@ def main() -> int:
     env = None
     try:
         checkpoint_path = paths.REPO_ROOT / dp_cfg.rollout.checkpoint
+        env = _make_env()
+        runtime_asset = RobotAssetRef.from_dict(env.robot_asset_provenance())
         policy = DiffusionPolicy.from_checkpoint(
             checkpoint_path,
             device=dp_cfg.rollout.policy_device,
             sampler=dp_cfg.rollout.sampler,
             num_inference_steps=dp_cfg.rollout.num_inference_steps,
+            runtime_asset=runtime_asset,
         )
         run_dir = checkpoint_path.parent.parent  # outputs/<experiment>/<run_id>/
         success_angle_rad = math.radians(dp_cfg.rollout.success_angle_deg)
@@ -245,10 +259,8 @@ def main() -> int:
             f"{dp_cfg.rollout.num_inference_steps} device={dp_cfg.rollout.policy_device}",
             flush=True,
         )
-
-        env = _make_env()
-        plan = _episode_plan()
-        protocol = _seed_protocol()
+        plan = _episode_plan(env)
+        protocol = _seed_protocol(env)
         rows: list[dict] = []
         fixed_i = 0
         random_i = 0
@@ -278,6 +290,7 @@ def main() -> int:
             )
         payload = {
             "checkpoint": str(checkpoint_path),
+            "robot_compatibility_label": policy.robot_compatibility_label,
             "action_space": policy.action_space,
             "obs_preset": policy.obs_preset,
             "horizon": policy.chunk_size,

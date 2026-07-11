@@ -26,8 +26,8 @@ ids, so regenerate them with
 `scripts/verify_dataset_interface.py --write-artifacts` when you intentionally
 refresh official artifacts.
 
-- `<task>` — `door_push` (Phase 2 proxy-sphere episodes) or `door_push_alex`
-  (Phase 2.5 Alex-executed episodes with force-sensed contact and joint proprio;
+- `<task>` — `door_push` (Phase 2 proxy-sphere episodes) or `door_push_alex_v2`
+  (Alex V2 episodes with force-sensed contact and joint proprio;
   a distinct task dir so Alex runs never replace the frozen proxy datasets)
 - `<action_space>` — a tag from [docs/action_spaces.md](../docs/action_spaces.md),
   e.g. `A2_ee_delta` (a dataset holds one action space; re-export produces siblings)
@@ -36,7 +36,7 @@ refresh official artifacts.
 Example: `datasets/door_push/A4_obj_centric_chunk/v0/`.
 
 Phase 2 chose HDF5 + JSON sidecar per episode (A4: JSON lines); generate with
-`scripts/run_scripted_baseline.py` (`--robot alex` for Alex episodes). Consume
+`scripts/run_scripted_baseline.py` (`--robot alex_v2` for Alex V2 episodes). Consume
 via `src/alexdoor_xas/dataset/` (docs/dataset_interface.md) — never read the
 HDF5 layout directly from model code.
 

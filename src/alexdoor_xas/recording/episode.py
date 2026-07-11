@@ -34,6 +34,10 @@ class EpisodeMeta:
     control_dt: float
     chunk_len: int
     created_utc: str
+    # Additive V2 provenance. Empty defaults preserve reads of every existing
+    # phase2.v0/v1 episode; V2 generation/export rejects empty values.
+    robot_asset_id: str = ""
+    robot_asset_sha256: str = ""
 
     @classmethod
     def create(
@@ -48,6 +52,8 @@ class EpisodeMeta:
         sim_dt: float,
         control_dt: float,
         chunk_len: int = 1,
+        robot_asset_id: str = "",
+        robot_asset_sha256: str = "",
     ) -> EpisodeMeta:
         return cls(
             episode_id=str(uuid.uuid4()),
@@ -61,6 +67,8 @@ class EpisodeMeta:
             control_dt=control_dt,
             chunk_len=chunk_len,
             created_utc=datetime.now(UTC).isoformat(),
+            robot_asset_id=robot_asset_id,
+            robot_asset_sha256=robot_asset_sha256,
         )
 
     def to_dict(self) -> dict[str, Any]:

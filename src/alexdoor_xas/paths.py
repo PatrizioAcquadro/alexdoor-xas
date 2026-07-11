@@ -1,10 +1,9 @@
 """Canonical path registry for AlexDoor-XAS (single source of truth).
 
-Assets are **referenced in place** — the Alex model lives in ``~/Desktop/Alex-robot``
+Assets are **referenced in place** — the Alex V2 model lives in ``~/Desktop/Alex``
 and the scenes in ``~/Desktop/CombinedScene``; nothing is copied into this repo.
-The root of those peer folders is ``ASSETS_ROOT`` (default ``~/Desktop``), which
-can be overridden with the ``ALEXDOOR_ASSETS_ROOT`` environment variable if the
-folders ever move.
+The Alex root is overridden with ``ALEX_V2_ASSET_ROOT`` to match Isaac Lab.  The
+scene root remains controlled by ``ALEXDOOR_ASSETS_ROOT``.
 
 This module is pure-Python and imports nothing from Isaac — it is safe to import
 anywhere (tests, the light env check, and inside Isaac scripts alike).
@@ -28,28 +27,25 @@ ASSETS_ROOT: Path = Path(
     os.environ.get("ALEXDOOR_ASSETS_ROOT", str(Path.home() / "Desktop"))
 ).expanduser()
 
-# ── Alex model (IHMC Alex V1) ────────────────────────────────────────────────
-ALEX_REPO: Path = ASSETS_ROOT / "Alex-robot"
-ALEX_MODELS: Path = ALEX_REPO / "alex_models"
-ALEX_DESCRIPTION: Path = ALEX_MODELS / "alex_V1_description"
-# Root that the URDF's ``package://alex_V1_description/`` refs resolve against.
-ALEX_MESH_ROOT: Path = ALEX_DESCRIPTION
-ALEX_URDF_DIR: Path = ALEX_DESCRIPTION / "rl_urdf"
-# Vendored IsaacLab articulation/actuator config (imported by absolute path).
-ALEX_ISAAC_CFG_PY: Path = ALEX_MODELS / "alex_V1_isaacsim" / "alex.py"
+# ── Alex V2 simulator-neutral asset ──────────────────────────────────────────
+ALEX_V2_ASSET_ROOT: Path = Path(
+    os.environ.get("ALEX_V2_ASSET_ROOT", str(Path.home() / "Desktop" / "Alex"))
+).expanduser().resolve()
+ALEX_V2_URDF: Path = ALEX_V2_ASSET_ROOT / "urdf" / "alex_v2.urdf"
+ALEX_V2_RUNTIME_CACHE_ROOT: Path = Path(
+    os.environ.get(
+        "ALEXDOOR_V2_RUNTIME_CACHE_ROOT",
+        str(Path.home() / ".cache" / "alexdoor-xas" / "alex-v2"),
+    )
+).expanduser()
 
-# Default (full body, adds wrist/gripper — needed for handle/latch manipulation).
-ALEX_URDF: Path = ALEX_URDF_DIR / "alex_v1.rlModel_fullBody_robotAccurate_torsoFootCollisions.urdf"
-# Fallback (nub forearms, 23 DoF — proven to load; sufficient for door pushing).
-ALEX_URDF_NUB: Path = (
-    ALEX_URDF_DIR / "alex_v1.rlModel_nubForearms_robotAccurate_torsoFootCollisions.urdf"
-)
-# Full body with collision geometry on every link (incl. the arm/gripper) — the
-# torsoFootCollisions variant has NO arm collisions, so any env where the arm
-# must touch the world (e.g. door pushing) needs this one.
-ALEX_URDF_FULLBODY_FULLCOLL: Path = (
-    ALEX_URDF_DIR / "alex_v1.rlModel_fullBody_robotAccurate_fullCollisions.urdf"
-)
+# Canonical Alex V2 runtime, dataset, and output identifiers.
+ALEX_V2_TASK = "door_push_alex_v2"
+ALEX_V2_DATASET_VERSION = "v0"
+ALEX_V2_ROBOT_TAG = "alex_v2_fullbody_fixedbase_standard_forearm_v0"
+ALEX_V2_DATASETS_DIR: Path = DATASETS_DIR / ALEX_V2_TASK
+ALEX_V2_OUTPUTS_DIR: Path = OUTPUTS_DIR / ALEX_V2_TASK
+ALEX_V2_CHECKPOINTS_DIR: Path = ALEX_V2_OUTPUTS_DIR / "checkpoints"
 
 # ── Scenes (CombinedScene) ───────────────────────────────────────────────────
 SCENES_ROOT: Path = ASSETS_ROOT / "CombinedScene"
@@ -59,20 +55,6 @@ COMBINED_SCENE_USD: Path = SCENES_ROOT / "CombinedHallwayScene" / "combinedScene
 DOOR_USD: Path = SCENES_ROOT / "Door.usd"
 
 
-def urdf_for(variant: str = "fullbody") -> Path:
-    """Return the source URDF for one of the registered Alex variants."""
-    if variant == "fullbody":
-        return ALEX_URDF
-    if variant == "fullbody_fullcollisions":
-        return ALEX_URDF_FULLBODY_FULLCOLL
-    if variant == "nub":
-        return ALEX_URDF_NUB
-    raise ValueError(
-        f"unknown Alex variant {variant!r} "
-        "(expected 'fullbody', 'fullbody_fullcollisions', or 'nub')"
-    )
-
-
 def iter_assets() -> list[tuple[str, Path, bool]]:
     """Registered external assets as ``(name, path, required)`` triples.
 
@@ -80,12 +62,15 @@ def iter_assets() -> list[tuple[str, Path, bool]]:
     referenced asset actually exists on this machine.
     """
     return [
-        ("Alex repo", ALEX_REPO, True),
-        ("Alex IsaacLab config", ALEX_ISAAC_CFG_PY, True),
-        ("Alex mesh root", ALEX_MESH_ROOT, True),
-        ("Alex URDF (fullbody)", ALEX_URDF, True),
-        ("Alex URDF (fullbody, full collisions)", ALEX_URDF_FULLBODY_FULLCOLL, True),
-        ("Alex URDF (nub)", ALEX_URDF_NUB, True),
+        *iter_alex_v2_assets(),
         ("Combined scene USD", COMBINED_SCENE_USD, True),
         ("Door USD", DOOR_USD, True),
+    ]
+
+
+def iter_alex_v2_assets() -> list[tuple[str, Path, bool]]:
+    """Static external assets required by the Alex V2 lineage."""
+    return [
+        ("Alex V2 asset root", ALEX_V2_ASSET_ROOT, True),
+        ("Alex V2 URDF", ALEX_V2_URDF, True),
     ]

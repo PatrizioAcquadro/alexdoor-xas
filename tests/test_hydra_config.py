@@ -31,7 +31,7 @@ def test_default_config_matches_legacy_script_defaults() -> None:
 def test_hydra_overrides_update_run_and_controller_settings() -> None:
     cfg = load_scripted_baseline_config(
         [
-            "run.robot=alex",
+            "run.robot=alex_v2",
             "run.episodes=7",
             "run.randomized=2",
             "run.seed=11",
@@ -43,7 +43,7 @@ def test_hydra_overrides_update_run_and_controller_settings() -> None:
         ]
     )
 
-    assert cfg.run.robot == "alex"
+    assert cfg.run.robot == "alex_v2"
     assert cfg.run.episodes == 7
     assert cfg.run.randomized == 2
     assert cfg.run.seed == 11
@@ -59,10 +59,10 @@ def test_hydra_overrides_update_run_and_controller_settings() -> None:
 def test_legacy_cli_overrides_take_precedence_over_hydra() -> None:
     cfg = load_scripted_baseline_config(
         ["run.robot=proxy", "run.episodes=2", "run.video=false"],
-        cli_overrides={"robot": "alex", "episodes": 9, "video": True},
+        cli_overrides={"robot": "alex_v2", "episodes": 9, "video": True},
     )
 
-    assert cfg.run.robot == "alex"
+    assert cfg.run.robot == "alex_v2"
     assert cfg.run.episodes == 9
     assert cfg.run.video is True
 

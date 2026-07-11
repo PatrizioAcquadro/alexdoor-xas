@@ -1,22 +1,21 @@
 #!/usr/bin/env python
-"""Phase 2/2.5 data engine CLI: scripted door-push episodes -> datasets + artifacts.
+"""Scripted door-push data engine CLI for the proxy and calibrated Alex V2.
 
 Rolls out the deterministic scripted controller in the door-push env, records
 episodes to the schema, exports A2/A3/A4 datasets under ``datasets/``, and
 writes metrics/plots/videos/report under ``outputs/<experiment>/<run_id>/``.
-``--robot alex`` runs the fixed-base Alex humanoid (diff-IK right arm, force
-contact sensing) instead of the Phase 2 proxy sphere; Alex datasets go to
-``datasets/door_push_alex/`` so the frozen proxy datasets are never replaced.
+``--robot alex_v2`` runs the calibrated fixed-base V2 humanoid instead of the
+proxy sphere. V2 datasets use the frozen ``door_push_alex_v2`` task identity.
 
 Run through the official Isaac Lab launcher::
 
     PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p \
         scripts/run_scripted_baseline.py --viz none --device cpu \
-        --episodes 5 --randomized 3 [--robot alex]
+        --episodes 5 --randomized 3 [--robot alex_v2]
 
 Add ``--video --enable_cameras`` to also record per-episode rollout videos.
 Run settings can also be supplied as Hydra-style overrides, for example
-``run.robot=alex run.episodes=5 run.randomized=3``.
+``run.robot=alex_v2 run.episodes=5 run.randomized=3``.
 """
 
 from __future__ import annotations
@@ -40,9 +39,9 @@ from alexdoor_xas.scripted_baseline_config import (
 parser = argparse.ArgumentParser(description="AlexDoor-XAS scripted door-push data engine")
 parser.add_argument(
     "--robot",
-    choices=("proxy", "alex"),
+    choices=("proxy", "alex_v2"),
     default=None,
-    help="Executor: the Phase 2 proxy sphere (default) or the fixed-base Alex humanoid.",
+    help="Executor: the proxy sphere (default) or calibrated fixed-base Alex V2.",
 )
 parser.add_argument("--episodes", type=int, default=None, help="Fixed-start episodes.")
 parser.add_argument("--randomized", type=int, default=None, help="Seeded randomized episodes.")
@@ -51,7 +50,7 @@ parser.add_argument(
     "--experiment",
     type=str,
     default=None,
-    help="outputs/<experiment>/ name (default: scripted_door_push or alex_door_push).",
+    help="outputs/<experiment>/ name (default: scripted_door_push or alex_v2_door_push).",
 )
 parser.add_argument(
     "--run-id", type=str, default=None, help="Run id (default: <UTC date>_seed<seed>)."
@@ -65,6 +64,36 @@ parser.add_argument(
     action="store_true",
     default=None,
     help="Record rollout videos (requires --enable_cameras for offscreen rendering).",
+)
+parser.add_argument(
+    "--no-export",
+    action="store_true",
+    default=None,
+    help="Record the run under outputs/ only; never write datasets/ (multi-pose passes).",
+)
+parser.add_argument(
+    "--door-yaw-deg",
+    type=float,
+    default=None,
+    help="Door-task pose variation: yaw about the hinge axis, degrees (default 0).",
+)
+parser.add_argument(
+    "--door-offset-x",
+    type=float,
+    default=None,
+    help="Door-task pose variation: world-x translation in meters (default 0).",
+)
+parser.add_argument(
+    "--door-offset-y",
+    type=float,
+    default=None,
+    help="Door-task pose variation: world-y translation in meters (default 0).",
+)
+parser.add_argument(
+    "--door-pose-id",
+    type=str,
+    default=None,
+    help="Pose label recorded into episodes and manifests (e.g. D0).",
 )
 parser.add_argument(
     "--clean-shutdown",
@@ -89,6 +118,11 @@ try:
             "max_ticks": args.max_ticks,
             "video": args.video,
             "clean_shutdown": args.clean_shutdown,
+            "export": False if args.no_export else None,
+            "door_yaw_deg": args.door_yaw_deg,
+            "door_offset_x": args.door_offset_x,
+            "door_offset_y": args.door_offset_y,
+            "door_pose_id": args.door_pose_id,
         },
     )
 except ScriptedBaselineConfigError as error:
@@ -106,31 +140,36 @@ import gymnasium as gym  # noqa: E402
 import alexdoor_xas.envs.door_task as door_task  # noqa: E402
 from alexdoor_xas import paths  # noqa: E402
 from alexdoor_xas.data_engine import DataEngineCfg, run_baseline  # noqa: E402
-from alexdoor_xas.data_engine.generate import ALEX_LIMITATIONS  # noqa: E402
-from alexdoor_xas.envs.door_task.door_push_alex_env_cfg import (  # noqa: E402
-    ALEX_ROBOT_TAG,
-    DoorPushAlexEnvCfg,
+from alexdoor_xas.envs.door_task.alex_v2_runtime import ALEX_V2_LIMITATIONS  # noqa: E402
+from alexdoor_xas.envs.door_task.door_push_alex_v2_env_cfg import (  # noqa: E402
+    ALEX_V2_ROBOT_TAG,
+    DoorPushAlexV2EnvCfg,
 )
 from alexdoor_xas.envs.door_task.door_push_env_cfg import DoorPushEnvCfg  # noqa: E402
 from alexdoor_xas.policies.scripted import (  # noqa: E402
-    ALEX_VARIATION_BOUNDS,
     DoorPushControllerCfg,
-    alex_fixedbase_push_cfg,
+    alex_v2_push_cfg,
+    alex_v2_variation_bounds,
 )
 
-DEFAULT_EXPERIMENTS = {"proxy": "scripted_door_push", "alex": "alex_door_push"}
+DEFAULT_EXPERIMENTS = {
+    "proxy": "scripted_door_push",
+    "alex_v2": "alex_v2_door_push",
+}
 
 
 def _make_env():
     render_mode = "rgb_array" if run_config.run.video else None
-    if run_config.run.robot == "alex":
-        cfg = DoorPushAlexEnvCfg()
-        env_id = door_task.DOOR_PUSH_ALEX_ENV_ID
+    if run_config.run.robot == "alex_v2":
+        cfg = DoorPushAlexV2EnvCfg()
+        env_id = door_task.DOOR_PUSH_ALEX_V2_ENV_ID
     else:
         cfg = DoorPushEnvCfg()
         env_id = door_task.DOOR_PUSH_ENV_ID
     cfg.seed = run_config.run.seed
     cfg.sim.device = args.device
+    cfg.door_yaw_rad = math.radians(run_config.run.door_yaw_deg)
+    cfg.door_offset_xy = (run_config.run.door_offset_x, run_config.run.door_offset_y)
     return gym.make(env_id, cfg=cfg, render_mode=render_mode).unwrapped
 
 
@@ -143,24 +182,31 @@ def main() -> int:
             f"{datetime.now(UTC).date().isoformat()}_seed{run_config.run.seed}"
         )
         experiment = run_config.run.experiment or DEFAULT_EXPERIMENTS[run_config.run.robot]
-        if run_config.run.robot == "alex":
-            # Distinct task tag => Alex datasets land in datasets/door_push_alex/
-            # and never replace the frozen Phase 2 proxy datasets.
+        door_pose_kwargs = {
+            "door_pose_id": run_config.run.door_pose_id,
+            "door_yaw_rad": math.radians(run_config.run.door_yaw_deg),
+            "door_offset_xy": (run_config.run.door_offset_x, run_config.run.door_offset_y),
+            "scene": str(env.cfg.door_task_scene.spawn.usd_path),
+        }
+        if run_config.run.robot == "alex_v2":
+            calibration = env.alex_v2_calibration()
             engine_cfg = DataEngineCfg(
-                task="door_push_alex",
-                robot=ALEX_ROBOT_TAG,
-                limitations=ALEX_LIMITATIONS,
+                task=paths.ALEX_V2_TASK,
+                robot=ALEX_V2_ROBOT_TAG,
+                limitations=ALEX_V2_LIMITATIONS,
                 success_angle_rad=math.radians(run_config.run.success_angle_deg),
                 max_ticks=run_config.run.max_ticks,
+                **door_pose_kwargs,
             )
             controller_cfg = apply_controller_overrides(
-                alex_fixedbase_push_cfg(), run_config.controller_overrides
+                alex_v2_push_cfg(calibration), run_config.controller_overrides
             )
-            variation_bounds = ALEX_VARIATION_BOUNDS
+            variation_bounds = alex_v2_variation_bounds(calibration)
         else:
             engine_cfg = DataEngineCfg(
                 success_angle_rad=math.radians(run_config.run.success_angle_deg),
                 max_ticks=run_config.run.max_ticks,
+                **door_pose_kwargs,
             )
             controller_cfg = (
                 apply_controller_overrides(
@@ -183,11 +229,21 @@ def main() -> int:
             controller_cfg=controller_cfg,
             variation_bounds=variation_bounds,
             video=run_config.run.video,
+            export=run_config.run.export,
         )
 
         print(f"[run] dir={artifacts.run_dir}", flush=True)
         for action_space, directory in artifacts.exports.items():
             print(f"[export] {action_space} -> {directory}", flush=True)
+        if not artifacts.exports:
+            print("[export] skipped (run.export=false); episodes stay under outputs/", flush=True)
+        if artifacts.sanity is not None:
+            print(
+                f"[sanity] episodes_checked={artifacts.sanity['n_episodes_checked']} "
+                f"warnings={artifacts.sanity['n_episodes_with_warnings']} "
+                f"errors={artifacts.sanity['n_episodes_with_errors']}",
+                flush=True,
+            )
         agg = artifacts.aggregate
         print(
             f"[metrics] episodes={agg['n_episodes']} "

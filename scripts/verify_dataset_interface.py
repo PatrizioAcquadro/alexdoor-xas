@@ -52,6 +52,10 @@ from alexdoor_xas.dataset import (
     validate_matched_action_space_datasets,
     validate_norm_stats,
 )
+from alexdoor_xas.dataset.robot_asset import (
+    load_dataset_robot_asset,
+    validate_dataset_episode_robot_asset,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -59,6 +63,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--datasets_root", type=Path, default=paths.DATASETS_DIR,
         help="datasets root (default: repo datasets/)",
+    )
+    parser.add_argument(
+        "--task",
+        default=None,
+        help="verify only this task (default: discover every task with the requested version)",
     )
     parser.add_argument("--version", default="v0", help="dataset version to verify")
     parser.add_argument("--horizon", type=int, default=20, help="action chunk horizon")
@@ -101,9 +110,21 @@ def verify_task(args: argparse.Namespace, task: str) -> list[str]:
             continue
         try:
             if space == A4_OBJ_CENTRIC_CHUNK:
-                a4_dataset = A4ChunkDataset(dataset_dir)
+                dataset = A4ChunkDataset(dataset_dir)
+                if task == paths.ALEX_V2_TASK:
+                    ref, _ = load_dataset_robot_asset(dataset_dir, require=True)
+                    if ref is None:
+                        raise ValueError("required Alex V2 robot asset is missing")
+                    validate_dataset_episode_robot_asset(dataset, ref)
+                a4_dataset = dataset
             else:
-                hdf5_datasets[space] = EpisodeDataset(dataset_dir)
+                dataset = EpisodeDataset(dataset_dir)
+                if task == paths.ALEX_V2_TASK:
+                    ref, _ = load_dataset_robot_asset(dataset_dir, require=True)
+                    if ref is None:
+                        raise ValueError("required Alex V2 robot asset is missing")
+                    validate_dataset_episode_robot_asset(dataset, ref)
+                hdf5_datasets[space] = dataset
         except Exception as exc:  # noqa: BLE001 - gate reports, never crashes
             failures.append(f"{task}/{space}: failed to load: {exc}")
     if not hdf5_datasets:
@@ -269,7 +290,7 @@ def _safe_action_dim(dataset: EpisodeDataset) -> int | str:
 
 def main() -> int:
     args = parse_args()
-    tasks = discover_tasks(args.datasets_root, args.version)
+    tasks = [args.task] if args.task else discover_tasks(args.datasets_root, args.version)
     if not tasks:
         print(f"FAIL: no datasets under {args.datasets_root} (version {args.version})")
         return 1

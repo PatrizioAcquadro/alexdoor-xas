@@ -7,7 +7,7 @@ structured chunk log and its numeric encoding instead (A4 is symbolic per-phase
 data, not a per-tick tensor stream). No Kit launch needed::
 
     PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/inspect_dataset.py \\
-        --dataset datasets/door_push_alex/A2_ee_delta/v0 --split train
+        --dataset datasets/door_push_alex_v2/A2_ee_delta/v2_pose --split train
 """
 
 from __future__ import annotations

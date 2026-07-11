@@ -44,9 +44,9 @@ class DiffusionConfigError(ValueError):
 class DiffusionDatasetCfg:
     """Which frozen dataset export the trainer consumes."""
 
-    task: str = "door_push_alex"
+    task: str = "door_push_alex_v2"
     space: str = A2_EE_DELTA
-    version: str = "v0"
+    version: str = "v2_pose"
     obs_preset: str = "core"
 
     @property
@@ -229,8 +229,8 @@ def _build_dataset_cfg(node: dict[str, Any]) -> DiffusionDatasetCfg:
             f"dataset.obs_preset must be one of {sorted(OBS_PRESETS)}, got {obs_preset!r}"
         )
 
-    task = _required_str("dataset.task", node.get("task", "door_push_alex"))
-    version = _required_str("dataset.version", node.get("version", "v0"))
+    task = _required_str("dataset.task", node.get("task", "door_push_alex_v2"))
+    version = _required_str("dataset.version", node.get("version", "v2_pose"))
     return DiffusionDatasetCfg(task=task, space=space, version=version, obs_preset=obs_preset)
 
 

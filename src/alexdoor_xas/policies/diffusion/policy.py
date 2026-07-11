@@ -15,6 +15,11 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from alexdoor_xas import paths
+from alexdoor_xas.assets.alex_v2_contract import (
+    RobotAssetRef,
+    assert_checkpoint_runtime_compatible,
+)
 from alexdoor_xas.dataset import DatasetNormStats
 from alexdoor_xas.policies.common.obs import OBS_CLIP, ROLLOUT_OBS_PRESETS, build_env_obs
 from alexdoor_xas.policies.diffusion.checkpoint import load_checkpoint
@@ -58,6 +63,8 @@ class DiffusionPolicy:
         self.obs_clip = obs_clip
         self.checkpoint_config: dict | None = None
         self.checkpoint_meta: dict | None = None
+        self.robot_asset: RobotAssetRef | None = None
+        self.robot_compatibility_label: str | None = None
         self._action_minmax = MinMaxNormalizer.from_norm_stats(stats.action)
         self._scheduler = make_inference_scheduler(model.cfg, sampler, num_inference_steps)
         self._generator = torch.Generator()
@@ -71,6 +78,8 @@ class DiffusionPolicy:
         device: str = "cpu",
         sampler: str = "ddpm",
         num_inference_steps: int = 100,
+        runtime_asset: RobotAssetRef | None = None,
+        allow_cross_model_evaluation: bool = False,
     ) -> DiffusionPolicy:
         loaded = load_checkpoint(path, map_location=device)
         policy = cls(
@@ -82,6 +91,19 @@ class DiffusionPolicy:
         )
         policy.checkpoint_config = loaded.config
         policy.checkpoint_meta = loaded.meta
+        policy.robot_asset = loaded.robot_asset
+        dataset = loaded.config.get("dataset", {})
+        checkpoint_is_v2 = (
+            isinstance(dataset, dict) and dataset.get("task") == paths.ALEX_V2_TASK
+        )
+        if checkpoint_is_v2 and runtime_asset is None:
+            raise ValueError("Alex V2 policy loading requires a runtime robot asset")
+        if runtime_asset is not None:
+            policy.robot_compatibility_label = assert_checkpoint_runtime_compatible(
+                loaded.robot_asset,
+                runtime_asset,
+                allow_cross_model_evaluation=allow_cross_model_evaluation,
+            )
         return policy
 
     @property

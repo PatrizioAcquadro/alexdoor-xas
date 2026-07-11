@@ -215,7 +215,7 @@ def test_run_report_a1_line_and_force_columns_for_alex_episodes(tmp_path) -> Non
 def test_sanity_checks_pass_on_clean_episode_and_catch_bad_data() -> None:
     import numpy as np
 
-    from alexdoor_xas.eval import check_alex_episode
+    from alexdoor_xas.eval import check_alex_episode, contact_force_diagnostics
 
     episode = run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], DataEngineCfg())
     result = check_alex_episode(episode)
@@ -286,6 +286,94 @@ def test_sanity_checks_pass_on_clean_episode_and_catch_bad_data() -> None:
     assert result.ok
     assert any("spiked to 500.0 N" in warning for warning in result.warnings)
 
+    evidence = contact_force_diagnostics(
+        with_step(episode, 3, contact=spike_contact), force_limit_n=200.0
+    )
+    assert evidence["max_force_tick"] == 3
+    assert evidence["ticks_over_limit"] == [3]
+    assert evidence["one_tick_over_limit"] is True
+    assert evidence["sustained_over_limit"] is False
+    assert evidence["peak"]["causal_action_tick"] == 2
+    assert evidence["peak"]["causal_action_phase"] == episode.steps[2].safety[
+        "controller_phase"
+    ]
+
+    # The same threshold is a hard admission limit when a dataset/gate caller opts in.
+    result = check_alex_episode(
+        with_step(episode, 3, contact=spike_contact), force_error_n=200.0
+    )
+    assert not result.ok
+    assert any("exceeded the 200 N force admission limit" in error for error in result.errors)
+
     # Proxy episodes (no joint proprio) are rejected outright.
     result = check_alex_episode(_episode())
     assert not result.ok
+
+
+def test_sanity_checker_rejects_negative_force_magnitude_with_diagnostics() -> None:
+    import dataclasses
+
+    from alexdoor_xas.eval import check_alex_episode, contact_force_diagnostics
+
+    episode = run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], DataEngineCfg())
+    contact = dict(episode.steps[3].contact)
+    contact["force_n"] = -2.5
+    episode.steps[3] = dataclasses.replace(episode.steps[3], contact=contact)
+
+    result = check_alex_episode(episode)
+    assert not result.ok
+    assert any("force magnitude must be non-negative" in error for error in result.errors)
+
+    evidence = contact_force_diagnostics(episode)
+    assert evidence["min_force_n"] == -2.5
+    assert evidence["min_force_tick"] == 3
+    assert evidence["negative_force_ticks"] == [3]
+    assert evidence["non_negative_force_gate_passed"] is False
+    assert evidence["force_admission_passed"] is False
+
+
+@pytest.mark.parametrize(
+    "force_n",
+    (float("nan"), float("inf"), float("-inf")),
+    ids=("nan", "positive_inf", "negative_inf"),
+)
+def test_sanity_checker_rejects_non_finite_force_magnitude(force_n: float) -> None:
+    import dataclasses
+
+    from alexdoor_xas.eval import check_alex_episode, contact_force_diagnostics
+
+    episode = run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], DataEngineCfg())
+    contact = dict(episode.steps[3].contact)
+    contact["force_n"] = force_n
+    episode.steps[3] = dataclasses.replace(episode.steps[3], contact=contact)
+
+    result = check_alex_episode(episode, force_error_n=200.0)
+    assert not result.ok
+    assert any("non-finite contact force values" in error for error in result.errors)
+
+    evidence = contact_force_diagnostics(episode)
+    assert evidence["all_forces_finite"] is False
+    assert evidence["non_finite_force_ticks"] == [3]
+    assert evidence["force_admission_passed"] is False
+
+
+def test_force_admission_accepts_exact_limit_and_preserves_lower_warning() -> None:
+    import dataclasses
+
+    from alexdoor_xas.eval import check_alex_episode, contact_force_diagnostics
+
+    episode = run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], DataEngineCfg())
+    contact = dict(episode.steps[3].contact)
+    contact["force_n"] = 200.0
+    episode.steps[3] = dataclasses.replace(episode.steps[3], contact=contact)
+
+    diagnostic = check_alex_episode(episode, force_warn_n=150.0)
+    assert diagnostic.ok
+    assert any("warn threshold 150 N" in warning for warning in diagnostic.warnings)
+
+    admission = check_alex_episode(episode, force_error_n=200.0)
+    assert admission.ok
+    evidence = contact_force_diagnostics(episode, force_limit_n=200.0)
+    assert evidence["max_force_n"] == 200.0
+    assert evidence["force_admission_passed"] is True
+    assert evidence["ticks_over_limit"] == []
