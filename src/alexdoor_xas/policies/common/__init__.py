@@ -24,6 +24,8 @@ from alexdoor_xas.policies.common.obs import (
 )
 from alexdoor_xas.policies.common.rollout_eval import (
     aggregate_rollout_rows,
+    contact_report,
+    rollout_failure_label,
     scripted_reference_payload,
     seed_protocol,
     summarize_decision_warnings,
@@ -37,12 +39,14 @@ __all__ = [
     "PolicyDataError",
     "aggregate_rollout_rows",
     "build_env_obs",
+    "contact_report",
     "load_policy_data",
     "make_eval_factory",
     "make_train_factory",
     "normalize_batch",
     "open_loop_report",
     "predict_episode_open_loop",
+    "rollout_failure_label",
     "scripted_reference_payload",
     "seed_protocol",
     "stop_on_hinge_angle",

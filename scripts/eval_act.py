@@ -15,7 +15,8 @@ set; ``rollout.matched_scripted_reference=true`` additionally runs the scripted
 controller on the same fixed/randomized seed plan as ACT::
 
     PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/eval_act.py \
-        --viz none --device cpu \
+        --viz none --device cuda:0 \
+        rollout.policy_device=cuda \
         rollout.checkpoint=outputs/act_door_push/<run_id>/checkpoints/best.pt
 """
 
@@ -71,6 +72,18 @@ except ActConfigError as error:
     parser.error(str(error))
 if act_cfg.rollout.checkpoint is None:
     parser.error("rollout.checkpoint is required (--checkpoint or rollout.checkpoint=...)")
+# A non-default door pose must carry an explicit pose label: rows and the
+# per-pose metrics filename are keyed by it, so an unlabeled pose would be
+# silently bucketed as the default pose in the smoke summary.
+if act_cfg.rollout.door_pose_id is None and (
+    act_cfg.rollout.door_yaw_deg != 0.0
+    or act_cfg.rollout.door_offset_x != 0.0
+    or act_cfg.rollout.door_offset_y != 0.0
+):
+    parser.error(
+        "rollout.door_pose_id is required when a non-default door pose is set "
+        "(rollout.door_yaw_deg / rollout.door_offset_x / rollout.door_offset_y)"
+    )
 
 app_launcher = AppLauncher(args)
 simulation_app = app_launcher.app
@@ -101,6 +114,7 @@ from alexdoor_xas.envs.door_task.door_push_alex_v2_env_cfg import (  # noqa: E40
     DoorPushAlexV2EnvCfg,
 )
 from alexdoor_xas.eval.metrics import aggregate_metrics, episode_metrics  # noqa: E402
+from alexdoor_xas.eval.sanity import FORCE_DATASET_LIMIT_N  # noqa: E402
 from alexdoor_xas.policies.act.policy import (  # noqa: E402
     ActPolicy,
     act_chunk_source,
@@ -108,10 +122,13 @@ from alexdoor_xas.policies.act.policy import (  # noqa: E402
 )
 from alexdoor_xas.policies.act.rollout_eval import (  # noqa: E402
     aggregate_rollout_rows,
+    contact_report,
+    rollout_failure_label,
     scripted_reference_payload,
     seed_protocol,
     summarize_decision_warnings,
 )
+from alexdoor_xas.policies.common.eval_metadata import dataset_provenance  # noqa: E402
 from alexdoor_xas.policies.scripted import (  # noqa: E402
     alex_v2_push_cfg,
     alex_v2_variation_bounds,
@@ -123,7 +140,17 @@ def _make_env():
     cfg = DoorPushAlexV2EnvCfg()
     cfg.seed = act_cfg.rollout.base_seed
     cfg.sim.device = args.device
+    cfg.door_yaw_rad = math.radians(act_cfg.rollout.door_yaw_deg)
+    cfg.door_offset_xy = (act_cfg.rollout.door_offset_x, act_cfg.rollout.door_offset_y)
     return gym.make(door_task.DOOR_PUSH_ALEX_V2_ENV_ID, cfg=cfg).unwrapped
+
+
+def _door_pose_payload() -> dict:
+    return {
+        "door_pose_id": act_cfg.rollout.door_pose_id or "D0",
+        "door_yaw_deg": act_cfg.rollout.door_yaw_deg,
+        "door_offset_xy": [act_cfg.rollout.door_offset_x, act_cfg.rollout.door_offset_y],
+    }
 
 
 def _fresh_adapter(action_space: str, env):
@@ -160,14 +187,37 @@ def _run_rollout(env, policy, seed: int, variation, success_angle_rad: float) ->
     )
     result = rollout_chunks(env, source, adapter, max_ticks=act_cfg.rollout.max_ticks)
     warning_summary = summarize_decision_warnings(result.decisions_per_tick)
+    control_dt = float(env.cfg.sim.dt) * int(env.cfg.decimation)
+    contact = contact_report(
+        result.contact_per_tick,
+        result.force_n_per_tick,
+        control_dt,
+        admission_bound_n=FORCE_DATASET_LIMIT_N,
+    )
+    success = bool(result.final_angle_rad >= success_angle_rad)
     return {
         "seed": seed,
         "randomized": variation is not None,
-        "success": bool(result.final_angle_rad >= success_angle_rad),
+        **_door_pose_payload(),
+        "success": success,
+        "failure_label": rollout_failure_label(
+            success=success,
+            n_ticks=result.n_ticks,
+            max_ticks=act_cfg.rollout.max_ticks,
+            contact_ticks=contact["contact_ticks"],
+            n_rejected=result.log.n_rejected,
+            notes=result.notes,
+        ),
         "initial_angle_rad": result.initial_angle_rad,
         "final_angle_rad": result.final_angle_rad,
         "door_angle_change_rad": result.door_angle_change_rad,
         "n_ticks": result.n_ticks,
+        "contact_ticks": contact["contact_ticks"],
+        "contact_source": contact["contact_source"],
+        "force_exceeds_admission_bound": contact["force_exceeds_admission_bound"],
+        "force_n": contact["force_n"],
+        "impulse_ns": contact["impulse_ns"],
+        "contact_unavailable_reason": contact["unavailable_reason"],
         "n_accepted": result.log.n_accepted,
         "n_corrected": result.log.n_corrected,
         "n_rejected": result.log.n_rejected,
@@ -234,13 +284,18 @@ def main() -> int:
         checkpoint_path = paths.REPO_ROOT / act_cfg.rollout.checkpoint
         env = _make_env()
         runtime_asset = RobotAssetRef.from_dict(env.robot_asset_provenance())
-        policy = ActPolicy.from_checkpoint(checkpoint_path, runtime_asset=runtime_asset)
+        policy = ActPolicy.from_checkpoint(
+            checkpoint_path,
+            device=act_cfg.rollout.policy_device,
+            runtime_asset=runtime_asset,
+        )
         run_dir = checkpoint_path.parent.parent  # outputs/<experiment>/<run_id>/
         success_angle_rad = math.radians(act_cfg.rollout.success_angle_deg)
         print(
             f"[eval_act] checkpoint={checkpoint_path} space={policy.action_space} "
             f"obs={policy.obs_preset} chunk={policy.chunk_size} "
-            f"ensemble={act_cfg.rollout.temporal_ensemble}",
+            f"ensemble={act_cfg.rollout.temporal_ensemble} "
+            f"device={act_cfg.rollout.policy_device}",
             flush=True,
         )
         plan = _episode_plan(env)
@@ -279,16 +334,29 @@ def main() -> int:
             "obs_preset": policy.obs_preset,
             "chunk_size": policy.chunk_size,
             "temporal_ensemble": act_cfg.rollout.temporal_ensemble,
+            "policy_device": act_cfg.rollout.policy_device,
             "max_ticks": act_cfg.rollout.max_ticks,
             "success_angle_deg": act_cfg.rollout.success_angle_deg,
             "base_seed": act_cfg.rollout.base_seed,
+            "door_pose": _door_pose_payload(),
+            "control_dt": float(env.cfg.sim.dt) * int(env.cfg.decimation),
+            "dataset_provenance": dataset_provenance(
+                policy.checkpoint_config, run_dir, paths.DATASETS_DIR
+            ),
             "seed_protocol": protocol,
             "rollouts": rows,
             "aggregate": aggregate,
             "scripted_reference": _reference_aggregate(),
             "scripted_matched_reference": matched_scripted_reference,
         }
-        metrics_path = run_dir / "metrics" / "act_eval.json"
+        # Pose-qualified filename so per-pose eval invocations never overwrite
+        # each other (the default/no-pose-id eval keeps the frozen name).
+        eval_name = (
+            f"act_eval_{act_cfg.rollout.door_pose_id}.json"
+            if act_cfg.rollout.door_pose_id
+            else "act_eval.json"
+        )
+        metrics_path = run_dir / "metrics" / eval_name
         metrics_path.parent.mkdir(parents=True, exist_ok=True)
         metrics_path.write_text(json.dumps(payload, indent=2) + "\n")
 

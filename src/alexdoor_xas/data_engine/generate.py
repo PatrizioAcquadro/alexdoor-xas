@@ -282,6 +282,21 @@ def run_episode(
         if render_hook is not None:
             render_hook(tick)
 
+    # A DirectRLEnv auto-resets *inside* env.step when the episode budget is
+    # reached; everything read after that (final angle, final joint targets,
+    # clamp telemetry) would silently be post-reset state. The env's episode
+    # counter zeroes on reset, so a counter smaller than the executed step
+    # count is unambiguous evidence of a mid-episode reset. Fail loudly.
+    if buffer.n_steps and hasattr(env, "episode_length_buf"):
+        env_ticks = int(_numpy(env.episode_length_buf)[0])
+        if env_ticks < buffer.n_steps:
+            raise RuntimeError(
+                f"episode seed {item.seed} hit the env's auto-reset after "
+                f"{buffer.n_steps} executed steps (episode counter {env_ticks}); "
+                "the recorded final state would be invalid — lower engine "
+                "max_ticks or raise the env's episode_length_s"
+            )
+
     final_angle, _ = _hinge_state(env)
     chunk_log = controller.finalize()
     timed_out = bool(last_command is not None and last_command.timed_out)

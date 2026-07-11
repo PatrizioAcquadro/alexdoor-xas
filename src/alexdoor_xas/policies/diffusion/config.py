@@ -87,7 +87,7 @@ class DiffusionTrainCfg:
     use_ema: bool = True
     ema_decay: float = 0.999
     seed: int = 0
-    device: str = "cuda"  # real runs are GPU-backed; gates/smoke override to cpu
+    device: str = "cuda"  # GPU-first; verification gates may override to cpu
     val_every: int = 10
     val_inference_steps: int = 10  # DDIM steps for the sampled-L1 val metric
     overfit_episodes: int | None = None
@@ -114,9 +114,13 @@ class DiffusionRolloutCfg:
     n_action_steps: int = 8  # Ta: executed prefix of each predicted chunk (receding horizon)
     sampler: str = "ddpm"
     num_inference_steps: int = 100
-    policy_device: str = "cpu"
+    policy_device: str = "cuda"
     reference_metrics: str | None = None
     matched_scripted_reference: bool = False
+    door_yaw_deg: float = 0.0
+    door_offset_x: float = 0.0
+    door_offset_y: float = 0.0
+    door_pose_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -405,9 +409,30 @@ def _build_rollout_cfg(node: dict[str, Any]) -> DiffusionRolloutCfg:
         "policy_device",
         "reference_metrics",
         "matched_scripted_reference",
+        "door_yaw_deg",
+        "door_offset_x",
+        "door_offset_y",
+        "door_pose_id",
     }
     _reject_unknown("rollout", node, field_names)
     defaults = DiffusionRolloutCfg()
+
+    door_yaw_deg = _coerce_float(
+        "rollout.door_yaw_deg", node.get("door_yaw_deg", defaults.door_yaw_deg)
+    )
+    door_offset_x = _coerce_float(
+        "rollout.door_offset_x", node.get("door_offset_x", defaults.door_offset_x)
+    )
+    door_offset_y = _coerce_float(
+        "rollout.door_offset_y", node.get("door_offset_y", defaults.door_offset_y)
+    )
+    for name, value in (
+        ("rollout.door_yaw_deg", door_yaw_deg),
+        ("rollout.door_offset_x", door_offset_x),
+        ("rollout.door_offset_y", door_offset_y),
+    ):
+        if not math.isfinite(value):
+            raise DiffusionConfigError(f"{name} must be finite")
 
     episodes_fixed = _coerce_int(
         "rollout.episodes_fixed", node.get("episodes_fixed", defaults.episodes_fixed)
@@ -469,6 +494,10 @@ def _build_rollout_cfg(node: dict[str, Any]) -> DiffusionRolloutCfg:
             "rollout.matched_scripted_reference",
             node.get("matched_scripted_reference", defaults.matched_scripted_reference),
         ),
+        door_yaw_deg=door_yaw_deg,
+        door_offset_x=door_offset_x,
+        door_offset_y=door_offset_y,
+        door_pose_id=_optional_str("rollout.door_pose_id", node.get("door_pose_id")),
     )
 
 

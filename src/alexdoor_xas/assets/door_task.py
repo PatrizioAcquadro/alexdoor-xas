@@ -277,6 +277,16 @@ def _validate_world_joint_anchor(fixed_joint, frame, usd_path: Path) -> None:
             "door frame fixed joint world anchor must match the frame's world pose "
             f"({expected_pos}), got {local_pos0}: {usd_path}"
         )
+    # The rotation half of the anchor must match too: an identity rot0 under a
+    # yawed door pose would pass the position check yet twist the doorframe at
+    # solve time.
+    expected_rot = Gf.Quatf(frame_xf.RemoveScaleShear().ExtractRotationQuat())
+    delta = Gf.Quatf(local_rot0) * expected_rot.GetInverse()
+    if abs(abs(delta.GetReal()) - 1.0) > 1e-5:
+        raise ValueError(
+            "door frame fixed joint world anchor rotation must match the frame's "
+            f"world orientation ({expected_rot}), got {local_rot0}: {usd_path}"
+        )
 
 
 def _validate_dependencies(usd_path: Path, stage, usd_utils) -> None:

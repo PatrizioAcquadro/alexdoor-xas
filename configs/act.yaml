@@ -23,7 +23,7 @@ train:
   kl_weight: 10.0
   grad_clip: 1.0
   seed: 0
-  device: cpu
+  device: cuda                   # GPU-first; verification gates may override to cpu
   val_every: 5
   overfit_episodes: null
 
@@ -40,7 +40,12 @@ rollout:
   success_angle_deg: 45.0
   temporal_ensemble: false
   ensemble_m: 0.01
+  policy_device: cuda            # learned-policy inference runs on GPU by default
   reference_metrics: null
   matched_scripted_reference: false
+  door_yaw_deg: 0.0              # door-task pose for this eval process (yaw about hinge)
+  door_offset_x: 0.0             # door-task pose: world-x translation (m)
+  door_offset_y: 0.0             # door-task pose: world-y translation (m)
+  door_pose_id: null             # pose label recorded per rollout row (e.g. D0)
 
 wandb: {}

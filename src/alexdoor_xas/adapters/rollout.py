@@ -101,6 +101,12 @@ class RolloutResult:
     log: AdapterLog
     notes: str = ""
     decisions_per_tick: list[AdapterDecision] = field(default_factory=list)
+    contact_per_tick: list[bool | None] = field(default_factory=list)
+    """Post-step force-sensed contact flag per executed tick (``None`` when the
+    env exposes no contact sensing). Additive: existing consumers ignore it."""
+    force_n_per_tick: list[float | None] = field(default_factory=list)
+    """Post-step |contact force| in newtons per executed tick (``None`` when
+    the env exposes no ``contact_force_w``)."""
 
     @property
     def door_angle_change_rad(self) -> float:
@@ -139,6 +145,9 @@ def rollout_chunks(
     joint_limits = read_joint_limits(env)
     log: AdapterLog = adapter.log
     decisions: list[AdapterDecision] = []
+    has_force = hasattr(env, "contact_force_w")
+    contact_per_tick: list[bool | None] = []
+    force_n_per_tick: list[float | None] = []
 
     ctx = read_step_context(env, door_frame, joint_limits)
     initial_angle = ctx.hinge_angle_rad
@@ -166,6 +175,10 @@ def rollout_chunks(
             step_env(env, applied)
             ticks += 1
             ctx = read_step_context(env, door_frame, joint_limits)
+            contact_per_tick.append(ctx.contact_sensed)
+            force_n_per_tick.append(
+                float(np.linalg.norm(_numpy(env.contact_force_w())[0])) if has_force else None
+            )
             if ticks >= max_ticks:
                 notes = notes or f"tick budget exhausted ({max_ticks})"
                 stop = True
@@ -180,6 +193,8 @@ def rollout_chunks(
         log=log,
         notes=notes,
         decisions_per_tick=decisions,
+        contact_per_tick=contact_per_tick,
+        force_n_per_tick=force_n_per_tick,
     )
 
 

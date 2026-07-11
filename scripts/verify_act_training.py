@@ -51,6 +51,10 @@ GATE_OVERRIDES = [
     "train.kl_weight=1.0",
     "train.val_every=5",
     "train.overfit_episodes=2",
+    # The gate is a tiny CPU smoke by design; the GPU-first production default
+    # would otherwise leave the gate's direct model calls on mixed devices
+    # (same pin the diffusion training gate carries).
+    "train.device=cpu",
 ]
 L1_IMPROVEMENT_FACTOR = 0.5
 L1_ABSOLUTE_BOUND = 0.15  # normalized units

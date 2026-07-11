@@ -511,3 +511,40 @@ def test_run_baseline_aborts_before_export_on_negative_force(tmp_path, monkeypat
     assert entry["force_diagnostics"]["negative_force_ticks"] == [3]
     assert entry["force_diagnostics"]["force_admission_passed"] is False
     assert not (tmp_path / "datasets").exists()
+
+
+@requires_h5py
+def test_run_baseline_refuses_direct_export_from_posed_runs(tmp_path) -> None:
+    """A posed run with export enabled would replace the official default-pose
+    dataset version; only the merged-export script may write multi-pose data."""
+    from alexdoor_xas.data_engine import run_baseline
+
+    with pytest.raises(RuntimeError, match="non-default door pose"):
+        run_baseline(
+            FakeForceDoorPushEnv(),
+            outputs_root=tmp_path / "outputs",
+            datasets_root=tmp_path / "datasets",
+            experiment="pose_guard",
+            run_id="bad",
+            n_fixed=1,
+            n_randomized=0,
+            base_seed=0,
+            engine_cfg=DataEngineCfg(door_pose_id="D1", door_yaw_rad=0.05),
+        )
+    assert not (tmp_path / "datasets").exists()
+    # export=False stays allowed for posed runs (the multi-pose flow).
+    artifacts = run_baseline(
+        FakeForceDoorPushEnv(),
+        outputs_root=tmp_path / "outputs",
+        datasets_root=tmp_path / "datasets",
+        experiment="pose_guard",
+        run_id="ok",
+        n_fixed=1,
+        n_randomized=0,
+        base_seed=0,
+        engine_cfg=DataEngineCfg(door_pose_id="D1", door_yaw_rad=0.05),
+        export=False,
+    )
+    assert artifacts.exports == {}
+    # Config provenance survives even for runs that would later abort.
+    assert (artifacts.run_dir / "logs" / "run_config.json").exists()

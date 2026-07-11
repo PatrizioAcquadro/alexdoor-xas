@@ -57,7 +57,7 @@ def test_default_config_matches_yaml_defaults() -> None:
     assert cfg.rollout.n_action_steps == 8
     assert cfg.rollout.sampler == "ddpm"
     assert cfg.rollout.num_inference_steps == 100
-    assert cfg.rollout.policy_device == "cpu"
+    assert cfg.rollout.policy_device == "cuda"
     assert cfg.rollout.reference_metrics is None
     assert cfg.rollout.matched_scripted_reference is False
 

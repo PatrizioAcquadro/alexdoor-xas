@@ -9,7 +9,7 @@ prediction report over the validation split. W&B tracking is optional and
 disabled by default (no network or login needed)::
 
     PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/train_act.py \
-        dataset.space=A2_ee_delta
+        dataset.space=A2_ee_delta train.device=cuda
 """
 
 from __future__ import annotations
@@ -56,6 +56,8 @@ def main() -> int:
     cfg = parse_config()
 
     # Heavy imports after config resolution (config layer stays torch-free).
+    import torch
+
     from alexdoor_xas.policies.act.checkpoint import save_checkpoint
     from alexdoor_xas.policies.act.data import (
         ActDataError,
@@ -67,6 +69,18 @@ def main() -> int:
     from alexdoor_xas.policies.act.policy import ActPolicy
     from alexdoor_xas.policies.act.train import make_seeded_model, train_act
     from alexdoor_xas.tracking import load_wandb_config, start_wandb_run
+
+    if cfg.train.device.startswith("cuda") and not torch.cuda.is_available():
+        print(
+            "FAIL: train.device=cuda but torch.cuda.is_available() is False — "
+            "run on the GPU host or explicitly pass train.device=cpu"
+        )
+        return 2
+    device_info = (
+        torch.cuda.get_device_name(torch.device(cfg.train.device))
+        if cfg.train.device.startswith("cuda")
+        else "CPU"
+    )
 
     try:
         data = load_act_data(cfg.dataset)
@@ -97,7 +111,8 @@ def main() -> int:
         f"[train_act] {cfg.dataset.task}/{cfg.dataset.space}/{cfg.dataset.version} "
         f"obs={cfg.dataset.obs_preset}({data.obs_dim}) action_dim={data.action_dim} "
         f"episodes train={len(train_ids)} val={len(data.val_ids)} "
-        f"stats={data.stats_source} params={model.n_parameters:,}"
+        f"stats={data.stats_source} params={model.n_parameters:,} "
+        f"device={cfg.train.device} ({device_info})"
     )
     if cfg.train.overfit_episodes is not None:
         print(f"[train_act] overfit mode: {len(train_ids)} train episode(s)")
@@ -197,6 +212,7 @@ def main() -> int:
                 "config": _jsonable(config_dict),
                 "run_id": run_id,
                 "n_parameters": model.n_parameters,
+                "device_info": device_info,
                 "stats_source": data.stats_source,
                 "robot_asset": data.robot_asset.to_dict() if data.robot_asset else None,
                 "train_episode_ids": list(train_ids),

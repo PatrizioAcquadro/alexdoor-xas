@@ -83,8 +83,41 @@ def run_baseline(
     passes cannot masquerade as an official dataset version.
     """
     engine_cfg = engine_cfg or DataEngineCfg()
+    # Posed runs never export directly: a re-export replaces the version dir,
+    # so one posed run with export=True would silently overwrite the official
+    # default-pose dataset (and its splits/norm stats) the trained checkpoints
+    # depend on. Multi-pose datasets go through scripts/export_merged_dataset.py.
+    non_default_pose = (
+        engine_cfg.door_pose_id is not None
+        or engine_cfg.door_yaw_rad != 0.0
+        or tuple(engine_cfg.door_offset_xy) != (0.0, 0.0)
+    )
+    if export and non_default_pose:
+        raise RuntimeError(
+            "refusing to export datasets from a run with a non-default door pose "
+            f"(door_pose_id={engine_cfg.door_pose_id!r}, "
+            f"door_yaw_rad={engine_cfg.door_yaw_rad}, "
+            f"door_offset_xy={tuple(engine_cfg.door_offset_xy)}); rerun with "
+            "export disabled (--no-export / run.export=false) and merge via "
+            "scripts/export_merged_dataset.py"
+        )
+
     run_dir = Path(outputs_root) / experiment / run_id
     _fresh_run_dir(run_dir)
+    # Config provenance is written up front so an aborted run (sanity error)
+    # still records what produced it.
+    _write_run_config(run_dir, engine_cfg, controller_cfg, n_fixed, n_randomized, base_seed)
+    env_tick_limit = getattr(env, "max_episode_length", None)
+    if env_tick_limit is not None and engine_cfg.max_ticks > int(env_tick_limit):
+        # max_ticks == env budget is the frozen contract (both 600); running
+        # *past* it can only record post-auto-reset garbage. Episodes that
+        # actually reach the env's truncation are caught per-episode by the
+        # auto-reset detector in run_episode.
+        raise RuntimeError(
+            f"engine max_ticks ({engine_cfg.max_ticks}) exceeds the env's episode "
+            f"length ({int(env_tick_limit)} control ticks): steps past the env "
+            "budget would silently record post-auto-reset state"
+        )
     episodes_dir = run_dir / "episodes"
     videos_state: dict[str, Any] = {
         "status": "enabled" if video else "not requested",
@@ -147,7 +180,6 @@ def run_baseline(
         videos=videos_state,
         limitations=limitations,
     )
-    _write_run_config(run_dir, engine_cfg, controller_cfg, n_fixed, n_randomized, base_seed)
 
     return RunArtifacts(
         run_dir=run_dir,
@@ -175,7 +207,14 @@ def _run_sanity_checks(
     """
     entries: list[dict[str, Any]] = []
     for episode in episodes:
-        if not episode.steps or "joint_pos" not in episode.steps[0].proprio:
+        # An Alex episode is identified by joint proprio OR the joint-limit
+        # extras: a degenerate zero-step Alex episode has no steps but must
+        # still reach the checker (which hard-errors on empty episodes)
+        # instead of silently skipping the gate.
+        is_alex = "joint_pos_limits" in episode.extras or (
+            bool(episode.steps) and "joint_pos" in episode.steps[0].proprio
+        )
+        if not is_alex:
             continue
         result = check_alex_episode(
             episode, force_error_n=FORCE_DATASET_LIMIT_N
