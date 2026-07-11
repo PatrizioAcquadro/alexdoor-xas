@@ -78,8 +78,15 @@ def _load_script(path: str):
 
 
 def _export(tmp_root, env_factory):
+    # Distinct start poses per seed: the fake env is deterministic, so equal
+    # fixed episodes would collapse into one content-equivalence group and the
+    # grouped split contract would (correctly) refuse to split them 3 ways.
     episodes = [
-        run_episode(env_factory(), plan_episodes(1, 0, seed)[0], DataEngineCfg())
+        run_episode(
+            env_factory(start_door_frame=(0.7, 0.2 + 0.005 * seed, 0.0)),
+            plan_episodes(1, 0, seed)[0],
+            DataEngineCfg(),
+        )
         for seed in range(N_EPISODES)
     ]
     return export_datasets(episodes, tmp_root, version="v0")
