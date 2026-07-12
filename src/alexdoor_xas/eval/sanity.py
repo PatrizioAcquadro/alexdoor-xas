@@ -86,6 +86,29 @@ def contact_force_diagnostics(
         raise ValueError("force_limit_n must be finite and positive")
     if isinstance(window_radius, bool) or not isinstance(window_radius, int) or window_radius < 0:
         raise ValueError("window_radius must be a non-negative integer")
+
+    # Terminal post-action sample (extras["terminal_contact"]): the response
+    # to the final executed action, recorded at loop exit. Episodes written
+    # before this extra existed report None (readable, but the terminal
+    # response is unverifiable for them).
+    terminal_raw = episode.extras.get("terminal_contact")
+    terminal: dict | None = None
+    terminal_admission_ok = True
+    if terminal_raw is not None:
+        terminal_force = float(terminal_raw.get("force_n", float("nan")))
+        terminal_finite = bool(np.isfinite(terminal_force))
+        terminal_within = terminal_finite and 0.0 <= terminal_force <= limit
+        terminal_admission_ok = terminal_within
+        terminal = {
+            "force_n": terminal_force,
+            "sensed": terminal_raw.get("sensed"),
+            "t_s": terminal_raw.get("t"),
+            "finite": terminal_finite,
+            "within_limit": terminal_within,
+            "passed": terminal_within,
+            "alignment": terminal_raw.get("alignment"),
+        }
+
     forces = np.asarray(
         [float(step.contact.get("force_n", 0.0)) for step in episode.steps],
         dtype=np.float64,
@@ -108,6 +131,7 @@ def contact_force_diagnostics(
             "sustained_over_limit": False,
             "peak": None,
             "window": [],
+            "terminal": terminal,
             "ik_clamp_telemetry": episode.extras.get("ik_clamp_telemetry"),
         }
 
@@ -196,8 +220,13 @@ def contact_force_diagnostics(
         "force_limit_n": limit,
         "upper_force_gate_passed": bool(finite.all() and not over_limit),
         "non_negative_force_gate_passed": bool(finite.all() and not negative_ticks),
+        # Admission covers the response to *every* executed action: all
+        # per-step (pre-action) samples plus the terminal post-action sample.
         "force_admission_passed": bool(
-            finite.all() and not negative_ticks and not over_limit
+            finite.all()
+            and not negative_ticks
+            and not over_limit
+            and terminal_admission_ok
         ),
         "non_finite_force_ticks": non_finite_ticks,
         "negative_force_ticks": negative_ticks,
@@ -206,6 +235,7 @@ def contact_force_diagnostics(
         "sustained_over_limit": sustained,
         "peak": peak,
         "window": window,
+        "terminal": terminal,
         "ik_clamp_telemetry": episode.extras.get("ik_clamp_telemetry"),
     }
 
@@ -340,6 +370,30 @@ def check_alex_episode(
             f"{label}: contact force spiked to {force_evidence['max_force_n']:.1f} N at tick "
             f"{force_evidence['max_force_tick']} (warn threshold {force_warn_n:.0f} N)"
         )
+
+    # Terminal post-action sample: the response to the final executed action.
+    # Absent on episodes recorded before the extra existed (still readable);
+    # when present it is held to the same finiteness/bounds as per-step samples.
+    terminal = force_evidence["terminal"]
+    if terminal is not None:
+        if not terminal["finite"]:
+            result.errors.append(f"{label}: terminal contact force is non-finite")
+        elif terminal["force_n"] < 0.0:
+            result.errors.append(
+                f"{label}: terminal contact force magnitude must be non-negative "
+                f"({terminal['force_n']:.1f} N)"
+            )
+        elif force_error_n is not None and terminal["force_n"] > force_error_n:
+            result.errors.append(
+                f"{label}: terminal contact force (response to the final executed "
+                f"action) exceeded the {force_error_n:.0f} N force admission limit: "
+                f"{terminal['force_n']:.1f} N"
+            )
+        elif terminal["force_n"] > force_warn_n:
+            result.warnings.append(
+                f"{label}: terminal contact force spiked to {terminal['force_n']:.1f} N "
+                f"(warn threshold {force_warn_n:.0f} N)"
+            )
 
     return result
 

@@ -99,6 +99,15 @@ class DoorPushRobotEnvCfg(DirectRLEnvCfg):
     """Physics ticks the reset-time IK settle loop may use to reach a requested
     start EE pose (see ``DoorPushRobotEnv.set_proxy_pose``)."""
 
+    settle_target_m = 0.005
+    """Settle-loop early-exit target: position error below this ends the loop."""
+
+    start_pose_tolerance_m = 0.01
+    """Fail-closed postcondition bound on the realized-vs-requested start EE
+    position (meters): 2x the settle target, half the per-tick command clamp.
+    Exceeding it raises ``StartPoseError`` instead of running the episode from
+    an unrealized start pose (see ``kinematics/settle.py``)."""
+
     hinge_joint_name = "Hinge"
     """Door revolute joint name exposed by the generated task USD."""
 

@@ -2,14 +2,36 @@
 
 from __future__ import annotations
 
+import dataclasses
+import importlib.util
 import json
 
 import pytest
 
-from alexdoor_xas.policies.common.eval_metadata import dataset_provenance
+from alexdoor_xas.action.spaces import A2_EE_DELTA, A3_OBJ_REL_EE_DELTA
+from alexdoor_xas.data_engine import DataEngineCfg, export_datasets, plan_episodes, run_episode
+from alexdoor_xas.dataset import (
+    EpisodeDataset,
+    compute_norm_stats,
+    make_grouped_splits,
+    save_splits,
+    split_entries,
+    splits_path,
+)
+from alexdoor_xas.policies.common.eval_metadata import (
+    EvalProvenanceError,
+    dataset_provenance,
+    file_sha256,
+    verify_checkpoint_dataset_binding,
+)
 from alexdoor_xas.policies.common.rollout_eval import contact_report, rollout_failure_label
+from conftest import FakeForceDoorPushEnv
 
 CONTROL_DT = 1.0 / 60.0
+
+requires_h5py = pytest.mark.skipif(
+    importlib.util.find_spec("h5py") is None, reason="h5py is not installed"
+)
 
 
 def test_contact_report_force_math() -> None:
@@ -140,6 +162,176 @@ def test_rollout_cfg_accepts_door_pose_keys() -> None:
     assert dp.rollout.door_yaw_deg == pytest.approx(-2.5)
     assert dp.rollout.door_offset_y == pytest.approx(-0.02)
     assert dp.rollout.door_pose_id is None
+
+
+@pytest.fixture(scope="module")
+def binding_fixture(tmp_path_factory):
+    """Exported fake dataset + shared splits + run dir: the binding test bed."""
+    root = tmp_path_factory.mktemp("binding")
+    datasets_root = root / "datasets"
+    episodes = [
+        run_episode(
+            FakeForceDoorPushEnv(start_door_frame=(0.7, 0.2 + 0.005 * seed, 0.0)),
+            plan_episodes(1, 0, seed)[0],
+            DataEngineCfg(),
+        )
+        for seed in range(4)
+    ]
+    exports = export_datasets(episodes, datasets_root, version="v0")
+    a2 = EpisodeDataset(exports[A2_EE_DELTA])
+    a3 = EpisodeDataset(exports[A3_OBJ_REL_EE_DELTA])
+    splits, meta = make_grouped_splits(split_entries(a2), seed=0)
+    split_file = splits_path(datasets_root, "door_push", "v0")
+    save_splits(split_file, splits, seed=0, metadata=meta)
+    stats = compute_norm_stats(a2, splits["train"])
+
+    run_dir = root / "run"
+    (run_dir / "logs").mkdir(parents=True)
+    (run_dir / "logs" / "train_log.json").write_text(
+        json.dumps(
+            {
+                "stats_source": "official",
+                "train_episode_ids": list(splits["train"]),
+                "val_episode_ids": list(splits["val"]),
+            }
+        )
+    )
+    checkpoint_config = {
+        "dataset": {"task": "door_push", "space": A2_EE_DELTA, "version": "v0",
+                    "obs_preset": "core"}
+    }
+    return {
+        "datasets_root": datasets_root,
+        "run_dir": run_dir,
+        "a2": a2,
+        "a3": a3,
+        "splits": splits,
+        "split_file": split_file,
+        "stats": stats,
+        "checkpoint_config": checkpoint_config,
+    }
+
+
+@requires_h5py
+def test_a2_a3_exact_fingerprints_differ_for_shared_source(binding_fixture) -> None:
+    a2_stats = binding_fixture["stats"]
+    a3_stats = compute_norm_stats(binding_fixture["a3"], binding_fixture["splits"]["train"])
+    # Same source episodes (same ids), different exact per-space content.
+    assert binding_fixture["a2"].episode_ids == binding_fixture["a3"].episode_ids
+    assert a2_stats.dataset_fingerprint != a3_stats.dataset_fingerprint
+
+
+@requires_h5py
+def test_binding_passes_and_reports_exact_fingerprints(binding_fixture) -> None:
+    provenance = dataset_provenance(
+        binding_fixture["checkpoint_config"],
+        binding_fixture["run_dir"],
+        binding_fixture["datasets_root"],
+    )
+    binding = verify_checkpoint_dataset_binding(
+        binding_fixture["stats"], provenance, binding_fixture["datasets_root"]
+    )
+    assert binding["dataset_fingerprint_match"] is True
+    assert binding["train_split_match"] is True
+    assert binding["val_split_checked"] is True
+    assert (
+        binding["checkpoint_dataset_fingerprint_sha256"]
+        == binding["live_dataset_fingerprint_sha256"]
+    )
+    assert provenance["split_fingerprint_sha256"]
+
+
+@requires_h5py
+def test_binding_fails_on_dataset_fingerprint_mismatch(binding_fixture) -> None:
+    provenance = dataset_provenance(
+        binding_fixture["checkpoint_config"],
+        binding_fixture["run_dir"],
+        binding_fixture["datasets_root"],
+    )
+    tampered = dataclasses.replace(
+        binding_fixture["stats"], dataset_fingerprint="0" * 64
+    )
+    with pytest.raises(EvalProvenanceError, match="does not match the live"):
+        verify_checkpoint_dataset_binding(
+            tampered, provenance, binding_fixture["datasets_root"]
+        )
+
+
+@requires_h5py
+def test_binding_fails_on_changed_split_membership(binding_fixture) -> None:
+    payload = json.loads(binding_fixture["split_file"].read_text())
+    moved = dict(payload["splits"])
+    swapped = {
+        "train": [moved["test"][0]] + moved["train"][1:],
+        "val": moved["val"],
+        "test": [moved["train"][0]] + moved["test"][1:],
+    }
+    provenance = dataset_provenance(
+        binding_fixture["checkpoint_config"],
+        binding_fixture["run_dir"],
+        binding_fixture["datasets_root"],
+    )
+    provenance["split_episode_ids"] = swapped
+    with pytest.raises(EvalProvenanceError, match="train split does not match"):
+        verify_checkpoint_dataset_binding(
+            binding_fixture["stats"], provenance, binding_fixture["datasets_root"]
+        )
+
+
+@requires_h5py
+def test_binding_fails_on_val_split_mismatch(binding_fixture) -> None:
+    provenance = dataset_provenance(
+        binding_fixture["checkpoint_config"],
+        binding_fixture["run_dir"],
+        binding_fixture["datasets_root"],
+    )
+    provenance["train_log_split_ids"] = {
+        "train": list(binding_fixture["splits"]["train"]),
+        "val": ["not-a-real-episode"],
+    }
+    with pytest.raises(EvalProvenanceError, match="val split"):
+        verify_checkpoint_dataset_binding(
+            binding_fixture["stats"], provenance, binding_fixture["datasets_root"]
+        )
+
+
+@requires_h5py
+def test_binding_fails_without_split_file(binding_fixture) -> None:
+    provenance = dataset_provenance(
+        binding_fixture["checkpoint_config"],
+        binding_fixture["run_dir"],
+        binding_fixture["datasets_root"],
+    )
+    provenance["split_episode_ids"] = None
+    with pytest.raises(EvalProvenanceError, match="split"):
+        verify_checkpoint_dataset_binding(
+            binding_fixture["stats"], provenance, binding_fixture["datasets_root"]
+        )
+
+
+def test_provenance_keeps_source_fingerprint_separately_named(tmp_path) -> None:
+    datasets = tmp_path / "datasets"
+    version_dir = datasets / "door_push_alex_v2" / "A2_ee_delta" / "v2_pose"
+    version_dir.mkdir(parents=True)
+    (version_dir / "manifest.json").write_text(
+        json.dumps({"source_fingerprint_sha256": "abc123"})
+    )
+    config = {
+        "dataset": {"task": "door_push_alex_v2", "space": "A2_ee_delta", "version": "v2_pose"}
+    }
+    out = dataset_provenance(config, tmp_path / "run", datasets)
+    # Legacy field retained; canonical name carries the same source value.
+    assert out["fingerprint_sha256"] == "abc123"
+    assert out["source_fingerprint_sha256"] == "abc123"
+
+
+def test_file_sha256_matches_content(tmp_path) -> None:
+    path = tmp_path / "ckpt.pt"
+    path.write_bytes(b"checkpoint-bytes")
+    assert file_sha256(path) == file_sha256(path)
+    other = tmp_path / "other.pt"
+    other.write_bytes(b"different")
+    assert file_sha256(path) != file_sha256(other)
 
 
 def test_contact_report_flags_admission_bound_exceedance() -> None:

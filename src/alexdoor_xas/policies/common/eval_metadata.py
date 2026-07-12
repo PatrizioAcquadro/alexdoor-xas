@@ -2,18 +2,47 @@
 
 The later unified report needs every eval JSON to be self-describing: which
 dataset (task/space/version/obs preset) the checkpoint was trained on, the
-dataset content fingerprint, and the train/val/test split membership. All of
-it is recoverable from the checkpoint's embedded config, the run dir's
-``train_log.json``, and the dataset version's ``manifest.json`` / shared
-splits file — this helper gathers them and records *why* a field is missing
-instead of silently omitting it.
+dataset content fingerprints, and the train/val/test split membership. Two
+fingerprints exist and are never conflated:
+
+- ``source_fingerprint_sha256`` — the *shared source* fingerprint from the
+  version's ``manifest.json`` (sha256 over the source episode HDF5 files;
+  identical for A2/A3 exports of one generation pass);
+- ``checkpoint_dataset_fingerprint_sha256`` / ``live_dataset_fingerprint_sha256``
+  — the *exact per-action-space* content fingerprint
+  (:func:`alexdoor_xas.dataset.dataset_fingerprint`), embedded in the
+  checkpoint's norm stats at train time and recomputed from the on-disk
+  dataset at eval time. A2 and A3 legitimately differ here while sharing the
+  same source fingerprint.
+
+:func:`verify_checkpoint_dataset_binding` fails evaluation loudly when the
+checkpoint and the live dataset disagree (content fingerprint, episode ids,
+or split membership), so an eval JSON can never silently describe a
+checkpoint evaluated against data it was not trained on.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
+
+from alexdoor_xas.dataset import (
+    EpisodeDataset,
+    dataset_fingerprint,
+    load_split_payload,
+    split_fingerprint,
+)
+
+
+class EvalProvenanceError(RuntimeError):
+    """Checkpoint/live dataset or split mismatch detected at evaluation time."""
+
+
+def file_sha256(path: str | Path) -> str:
+    """sha256 of one file (stable checkpoint identity for eval payloads)."""
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def dataset_provenance(
@@ -21,14 +50,22 @@ def dataset_provenance(
     run_dir: Path,
     datasets_root: Path,
 ) -> dict[str, Any]:
-    """Dataset + split metadata block for an eval payload."""
+    """Dataset + split metadata block for an eval payload (gather-only).
+
+    ``fingerprint_sha256`` is retained for existing consumers and is the same
+    value as ``source_fingerprint_sha256`` (the shared source-manifest
+    fingerprint) — it has never been the exact per-space dataset fingerprint;
+    the exact fingerprints come from :func:`verify_checkpoint_dataset_binding`.
+    """
     notes: list[str] = []
     dataset = dict((checkpoint_config or {}).get("dataset") or {})
     out: dict[str, Any] = {
         "dataset": dataset or None,
         "fingerprint_sha256": None,
+        "source_fingerprint_sha256": None,
         "manifest_path": None,
         "splits_path": None,
+        "split_fingerprint_sha256": None,
         "split_summary": None,
         "split_episode_ids": None,
         "norm_stats_source": None,
@@ -44,15 +81,20 @@ def dataset_provenance(
         manifest_path = datasets_root / task / space / version / "manifest.json"
         if manifest_path.is_file():
             manifest = json.loads(manifest_path.read_text())
-            out["fingerprint_sha256"] = manifest.get("source_fingerprint_sha256")
+            source = manifest.get("source_fingerprint_sha256")
+            out["fingerprint_sha256"] = source
+            out["source_fingerprint_sha256"] = source
             out["manifest_path"] = str(manifest_path)
         else:
             notes.append(f"dataset version has no manifest.json ({manifest_path})")
         splits_path = datasets_root / task / "splits" / f"{version}.json"
         if splits_path.is_file():
-            splits = json.loads(splits_path.read_text())
+            splits = load_split_payload(splits_path)
             out["splits_path"] = str(splits_path)
             split_ids = splits.get("splits") or {}
+            out["split_fingerprint_sha256"] = splits.get(
+                "split_fingerprint_sha256"
+            ) or split_fingerprint({name: list(ids) for name, ids in split_ids.items()})
             out["split_summary"] = {
                 "n_episodes": splits.get("n_episodes"),
                 "fractions": splits.get("fractions"),
@@ -76,4 +118,92 @@ def dataset_provenance(
     return out
 
 
-__all__ = ["dataset_provenance"]
+def verify_checkpoint_dataset_binding(
+    checkpoint_stats,
+    provenance: dict[str, Any],
+    datasets_root: Path,
+) -> dict[str, Any]:
+    """Bind an eval to the exact dataset the checkpoint was trained on.
+
+    ``checkpoint_stats`` is the checkpoint-embedded ``DatasetNormStats``
+    (exact dataset fingerprint + episode ids + train split). The live dataset
+    named by the checkpoint's config is loaded from disk, its exact content
+    fingerprint recomputed, and the shared split file cross-checked. Any
+    mismatch raises :class:`EvalProvenanceError` — evaluation must not
+    proceed. On success the returned block is merged into the eval payload's
+    ``dataset_provenance`` so the JSON stays auditable after the dataset
+    directory changes.
+    """
+    dataset_cfg = provenance.get("dataset") or {}
+    task, space, version = (
+        dataset_cfg.get("task"),
+        dataset_cfg.get("space"),
+        dataset_cfg.get("version"),
+    )
+    if not (task and space and version):
+        raise EvalProvenanceError(
+            "checkpoint has no embedded dataset task/space/version — cannot bind "
+            "the evaluation to its training dataset"
+        )
+    dataset_dir = Path(datasets_root) / task / space / version
+    try:
+        dataset = EpisodeDataset(dataset_dir)
+    except (FileNotFoundError, ValueError) as error:
+        raise EvalProvenanceError(
+            f"live dataset {dataset_dir} is unavailable: {error}"
+        ) from error
+
+    checkpoint_fp = str(checkpoint_stats.dataset_fingerprint)
+    live_fp = dataset_fingerprint(dataset)
+    if not checkpoint_fp:
+        raise EvalProvenanceError("checkpoint norm stats carry no dataset fingerprint")
+    if checkpoint_fp != live_fp:
+        raise EvalProvenanceError(
+            f"checkpoint dataset fingerprint {checkpoint_fp[:16]}… does not match the "
+            f"live {space} dataset {live_fp[:16]}… — the dataset was re-exported or "
+            "modified after training; retrain or restore the exact dataset"
+        )
+    if tuple(checkpoint_stats.dataset_episode_ids) and tuple(
+        checkpoint_stats.dataset_episode_ids
+    ) != tuple(dataset.episode_ids):
+        raise EvalProvenanceError(
+            "checkpoint dataset episode ids do not match the live dataset"
+        )
+
+    split_ids = provenance.get("split_episode_ids")
+    if not split_ids:
+        raise EvalProvenanceError(
+            f"no shared splits file for {task}/{version} — cannot validate the "
+            "checkpoint's split membership"
+        )
+    live_train = tuple(split_ids.get("train") or ())
+    checkpoint_train = tuple(checkpoint_stats.train_episode_ids)
+    if sorted(checkpoint_train) != sorted(live_train):
+        raise EvalProvenanceError(
+            "checkpoint train split does not match the live split contract "
+            f"({len(checkpoint_train)} checkpoint train ids vs {len(live_train)} live)"
+        )
+    train_log_ids = (provenance.get("train_log_split_ids") or {}).get("val")
+    live_val = tuple(split_ids.get("val") or ())
+    val_checked = train_log_ids is not None
+    if val_checked and sorted(train_log_ids) != sorted(live_val):
+        raise EvalProvenanceError(
+            "run train_log val split does not match the live split contract"
+        )
+
+    return {
+        "checkpoint_dataset_fingerprint_sha256": checkpoint_fp,
+        "live_dataset_fingerprint_sha256": live_fp,
+        "dataset_fingerprint_match": True,
+        "train_split_match": True,
+        "val_split_checked": val_checked,
+        "n_live_episodes": len(dataset),
+    }
+
+
+__all__ = [
+    "EvalProvenanceError",
+    "dataset_provenance",
+    "file_sha256",
+    "verify_checkpoint_dataset_binding",
+]

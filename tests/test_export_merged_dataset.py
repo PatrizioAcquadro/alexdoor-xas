@@ -33,6 +33,10 @@ def test_merged_export_rechecks_force_limit_instead_of_trusting_stored_sanity() 
     contact["force_n"] = 500.0
     episode.steps[3] = dataclasses.replace(episode.steps[3], contact=contact)
     force_summary = _module().episode_contact_safety(episode)
+    # Terminal post-action sample: additive block, checked separately (its
+    # values come from the fake env's final contact state).
+    terminal = force_summary["force_admission"].pop("terminal")
+    assert terminal["passed"] is True
     assert force_summary["force_admission"] == {
         "limit_n": 200.0,
         "passed": False,

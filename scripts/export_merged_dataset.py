@@ -234,6 +234,7 @@ def episode_contact_safety(episode: EpisodeBuffer) -> dict:
             "negative_force_ticks": force_diagnostics["negative_force_ticks"],
             "max_force_n": force_diagnostics["max_force_n"],
             "ticks_over_limit": force_diagnostics["ticks_over_limit"],
+            "terminal": force_diagnostics["terminal"],
         },
         "impulse_ns": float((forces * control_dt).sum()),
         "safety_clamp_flags": {

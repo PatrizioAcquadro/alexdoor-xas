@@ -24,6 +24,7 @@ from isaaclab.envs import DirectRLEnv
 from isaaclab.sensors import ContactSensor
 
 from alexdoor_xas.assets.door_task import ensure_door_task_usd
+from alexdoor_xas.kinematics import check_settle_postcondition
 
 from .door_env import resolve_hinge_joint_id
 from .door_push_env import read_doorframe_from_stage
@@ -114,6 +115,7 @@ class DoorPushRobotEnv(DirectRLEnv):
             (self.num_envs, n_arm), dtype=torch.long, device=self.device
         )
         self._clamp_solve_ticks = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        self._last_settle_report: dict | None = None
 
     # -- scene ------------------------------------------------------------------
 
@@ -249,6 +251,7 @@ class DoorPushRobotEnv(DirectRLEnv):
             self._clamp_excess_max[env_ids] = 0.0
             self._clamp_count[env_ids] = 0
             self._clamp_solve_ticks[env_ids] = 0
+            self._last_settle_report = None
 
     # -- Phase 2 state accessors (used by the scripted controller / recorder) ----
 
@@ -278,18 +281,23 @@ class DoorPushRobotEnv(DirectRLEnv):
         Unlike the teleporting proxy sphere, a robot EE can only move through its
         kinematics: this runs up to ``cfg.settle_ticks`` physics-only control
         ticks of the same clamped IK tracking the policy path uses. Orientation
-        is ignored (the scripted task commands no rotation). Residual error is
-        absorbed by the controller's APPROACH phase.
+        is ignored (the scripted task commands no rotation), so no orientation
+        residual is defined. Fail-closed postcondition: the realized EE
+        position must land within ``cfg.start_pose_tolerance_m`` of the request
+        or :class:`StartPoseError` aborts the episode/rollout; the measured
+        requested/realized/residual record is kept for provenance
+        (:meth:`start_pose_settle_report`).
         """
         if env_ids is None:
             env_ids = self._all_env_ids
         goal = pos_w.to(device=self.device, dtype=torch.float32).reshape(len(env_ids), 3)
         del quat_w  # orientation intentionally not tracked
 
+        ticks_used = 0
         for _ in range(self.cfg.settle_ticks):
             ee_pos, _ = self._ee_pose_w()
             error = goal - ee_pos[env_ids]
-            if bool((error.norm(dim=-1) < 0.005).all()):
+            if bool((error.norm(dim=-1) < self.cfg.settle_target_m).all()):
                 break
             delta = torch.zeros((self.num_envs, 6), device=self.device)
             delta[env_ids, :3] = error.clamp(
@@ -301,6 +309,25 @@ class DoorPushRobotEnv(DirectRLEnv):
                 self.scene.write_data_to_sim()
                 self.sim.step(render=False)
                 self.scene.update(dt=self.physics_dt)
+            ticks_used += 1
+
+        ee_pos, _ = self._ee_pose_w()
+        report = check_settle_postcondition(
+            goal[0].detach().cpu().numpy(),
+            ee_pos[env_ids][0].detach().cpu().numpy(),
+            settle_ticks_used=ticks_used,
+            max_settle_ticks=int(self.cfg.settle_ticks),
+            tolerance_m=float(self.cfg.start_pose_tolerance_m),
+        )
+        self._last_settle_report = report.to_dict()
+
+    def start_pose_settle_report(self) -> dict | None:
+        """Requested/realized/residual record of the last ``set_proxy_pose``.
+
+        ``None`` when no start pose was requested since the last reset (the
+        default fixed reset needs no settle).
+        """
+        return self._last_settle_report
 
     # -- Phase 2.5 accessors (force contact + joint proprio) ----------------------
 

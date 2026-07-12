@@ -160,9 +160,10 @@ def run_episode(
     door_frame = _read_door_frame(env)
 
     active_cfg = base_controller_cfg
+    settle_report: dict | None = None
     if item.variation is not None:
         active_cfg = item.variation.apply(base_controller_cfg)
-        apply_start_offset(env, door_frame, item.variation)
+        settle_report = apply_start_offset(env, door_frame, item.variation)
     controller = DoorPushController(active_cfg)
 
     sim_dt = float(env.cfg.sim.dt)
@@ -297,6 +298,23 @@ def run_episode(
                 "max_ticks or raise the env's episode_length_s"
             )
 
+    # Terminal post-action safety sample (additive, phase2.v1-compatible):
+    # per-step contact samples are read *before* each tick's action, so the
+    # force/contact response to the final executed action is only visible in
+    # the env state at loop exit — capture it so the dataset admission bound
+    # covers the response to every executed action, including the last one.
+    if buffer.n_steps and has_force_contact:
+        buffer.extras["terminal_contact"] = {
+            "sensed": bool(_numpy(env.contact_sensed())[0]),
+            "force_n": float(np.linalg.norm(_numpy(env.contact_force_w())[0])),
+            "t": buffer.n_steps * control_dt,
+            "alignment": (
+                "post-step env state at loop exit: the contact/force response to "
+                "the final executed action (steps[t].contact is pre-action, i.e. "
+                "the response to action t-1)"
+            ),
+        }
+
     final_angle, _ = _hinge_state(env)
     chunk_log = controller.finalize()
     timed_out = bool(last_command is not None and last_command.timed_out)
@@ -312,6 +330,7 @@ def run_episode(
             "door_frame_quat_w_xyzw": _door_frame_quat(env),
             "a4_chunks": chunk_log.to_list(),
             "variation": item.variation.to_dict() if item.variation is not None else None,
+            "start_pose_settle": settle_report,
             "controller_cfg": asdict(active_cfg),
             "engine_cfg": engine_cfg.to_dict(),
             "door_pose_id": engine_cfg.door_pose_id,
@@ -432,14 +451,26 @@ def _door_frame_quat(env) -> np.ndarray:
     return _numpy(frame_quat)[0].astype(np.float64)
 
 
-def apply_start_offset(env, door_frame: ObjectFrame, variation: DoorPushVariation) -> None:
-    """Shift the EE start pose by the variation's door-frame offset (shared with eval)."""
+def apply_start_offset(
+    env, door_frame: ObjectFrame, variation: DoorPushVariation
+) -> dict | None:
+    """Shift the EE start pose by the variation's door-frame offset (shared with eval).
+
+    Returns the env's realized-state settle report when it exposes one
+    (``start_pose_settle_report``): requested/realized position, residual,
+    settle ticks, and pass/fail — the fail-closed postcondition itself lives
+    in the env's ``set_proxy_pose``. Teleporting envs (proxy sphere, test
+    fakes) realize the request exactly and return ``None``.
+    """
     pos, quat = env.proxy_pose_w()
     offset_w = door_frame.vector_to_world(np.asarray(variation.start_offset_door_frame))
     new_pos = _numpy(pos)[0] + offset_w
     env.set_proxy_pose(
         torch.as_tensor(new_pos, dtype=torch.float32).reshape(1, 3), quat.reshape(1, 4)
     )
+    if hasattr(env, "start_pose_settle_report"):
+        return env.start_pose_settle_report()
+    return None
 
 
 def _hinge_state(env) -> tuple[float, float]:
