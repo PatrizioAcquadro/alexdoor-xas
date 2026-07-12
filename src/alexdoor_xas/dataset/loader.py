@@ -68,7 +68,7 @@ OBS_PRESETS: dict[str, tuple[str, ...]] = {
         "force_n",
         "sensed",
     ),
-    # Door-pose-aware core (Phase 3.4+, additive): core + door-frame origin
+    # Door-pose-aware core (local post-Phase 3.3, additive): core + door-frame origin
     # relative to the robot base + sin/cos of the door yaw, 14-dim. Only valid
     # for episodes that recorded the door-pose object_state terms (the
     # stabilization data engine onward); older episodes fail with a clear

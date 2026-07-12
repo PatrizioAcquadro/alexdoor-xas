@@ -304,7 +304,7 @@ def test_reexport_replaces_the_version_dir(tmp_path) -> None:
     assert len(a4_lines) == 1
 
 
-# -- Phase 3.4 local stabilization: door-pose obs, sanity enforcement, no-export --
+# -- Local post-Phase 3.3 stabilization: door-pose obs, sanity, no-export --
 
 
 def test_door_pose_obs_terms_recorded_and_round_trip(tmp_path) -> None:
