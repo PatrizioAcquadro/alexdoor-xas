@@ -27,10 +27,15 @@ from alexdoor_xas.action.frames import ObjectFrame, door_frame_from_body_pose
 from alexdoor_xas.action.spaces import EE_DELTA_DIM
 
 from .base import AdapterDecision, AdapterLog, AdapterStatus, StepContext
+from .limits import RobotLimitsCfg
 
 ChunkSource = Callable[[StepContext], Any]
 """Emits the next ``(H, 6)`` action chunk given the current step context, or
 ``None`` to end the rollout."""
+
+
+class InvalidSimulatorStateError(RuntimeError):
+    """A simulator accessor returned state unsafe for adapter execution."""
 
 
 def _numpy(value) -> np.ndarray:
@@ -39,48 +44,204 @@ def _numpy(value) -> np.ndarray:
     return np.asarray(value)
 
 
+def _finite_array(name: str, value) -> np.ndarray:
+    """Convert a numeric accessor value and fail closed on NaN/Inf/non-numeric data."""
+    try:
+        array = np.asarray(_numpy(value), dtype=np.float64)
+    except (TypeError, ValueError) as exc:
+        raise InvalidSimulatorStateError(
+            f"invalid simulator state: {name} is not numeric"
+        ) from exc
+    if array.size == 0:
+        raise InvalidSimulatorStateError(f"invalid simulator state: {name} is empty")
+    if not np.isfinite(array).all():
+        raise InvalidSimulatorStateError(
+            f"invalid simulator state: {name} contains NaN or Inf"
+        )
+    return array
+
+
+def _first_vector(name: str, value, width: int) -> np.ndarray:
+    array = _finite_array(name, value)
+    if array.ndim == 1 and array.shape == (width,):
+        return array.copy()
+    if array.ndim >= 2 and array.shape[-1] == width:
+        return array.reshape(-1, width)[0].copy()
+    raise InvalidSimulatorStateError(
+        f"invalid simulator state: {name} must end in shape ({width},), got {array.shape}"
+    )
+
+
+def _validate_execution_limits(limits: RobotLimitsCfg | None) -> None:
+    """Validate every numeric execution-limit input used by adapter checks."""
+    if limits is None:
+        return
+    scalar_rules = (
+        ("max_pos_delta_m", limits.max_pos_delta_m, True),
+        ("max_rot_delta_rad", limits.max_rot_delta_rad, True),
+        ("reach_margin_m", limits.reach_margin_m, False),
+    )
+    for name, value, strictly_positive in scalar_rules:
+        scalar = _finite_array(f"adapter limits {name}", value).reshape(-1)
+        if scalar.shape != (1,) or (scalar[0] <= 0.0 if strictly_positive else scalar[0] < 0.0):
+            qualifier = "positive" if strictly_positive else "non-negative"
+            raise InvalidSimulatorStateError(
+                f"invalid simulator state: adapter limits {name} must be finite and {qualifier}"
+            )
+    for name in (
+        "contact_surface_x_m",
+        "contact_approach_start_clearance_m",
+        "contact_approach_max_step_m",
+    ):
+        value = getattr(limits, name)
+        if value is not None:
+            _finite_array(f"adapter limits {name}", value)
+    workspace = limits.workspace
+    if workspace is None:
+        return
+    center = _finite_array("workspace center_w", workspace.center_w).reshape(-1)
+    if center.shape != (3,):
+        raise InvalidSimulatorStateError(
+            f"invalid simulator state: workspace center_w must have shape (3,), got {center.shape}"
+        )
+    min_reach = _finite_array("workspace min_reach_m", workspace.min_reach_m).reshape(-1)
+    max_reach = _finite_array("workspace max_reach_m", workspace.max_reach_m).reshape(-1)
+    if (
+        min_reach.shape != (1,)
+        or max_reach.shape != (1,)
+        or min_reach[0] < 0.0
+        or min_reach[0] >= max_reach[0]
+    ):
+        raise InvalidSimulatorStateError(
+            "invalid simulator state: workspace reach bounds must be finite, non-negative, "
+            "and increasing"
+        )
+
+
+def _adapter_limits(adapter) -> RobotLimitsCfg | None:
+    limits = getattr(adapter, "limits", None)
+    if limits is not None:
+        return limits
+    return getattr(getattr(adapter, "a2", None), "limits", None)
+
+
 def read_door_frame(env) -> ObjectFrame:
     """Hinge-anchored door frame from the env (stage-read at reset, static)."""
     frame_pos, frame_quat = env.door_frame_pose_w()
-    return door_frame_from_body_pose(_numpy(frame_pos)[0], _numpy(frame_quat)[0])
+    position = _first_vector("door frame position", frame_pos, 3)
+    orientation = _first_vector("door frame orientation", frame_quat, 4)
+    orientation_norm = float(np.linalg.norm(orientation))
+    if not np.isfinite(orientation_norm) or orientation_norm <= 0.0:
+        raise InvalidSimulatorStateError(
+            "invalid simulator state: door frame orientation quaternion has invalid norm"
+        )
+    try:
+        return door_frame_from_body_pose(position, orientation)
+    except ValueError as exc:
+        raise InvalidSimulatorStateError(
+            f"invalid simulator state: door frame is invalid ({exc})"
+        ) from exc
 
 
 def read_joint_limits(env) -> dict[str, np.ndarray] | None:
     """Isaac-reported joint limits, when the env exposes them (read once)."""
     if not hasattr(env, "robot_joint_limits"):
         return None
-    return {
-        name: np.asarray(value, dtype=np.float64)
-        for name, value in env.robot_joint_limits().items()
-    }
+    raw = env.robot_joint_limits()
+    if not isinstance(raw, dict):
+        raise InvalidSimulatorStateError(
+            "invalid simulator state: robot_joint_limits() must return a dict"
+        )
+    return {name: _finite_array(f"joint limits {name}", value) for name, value in raw.items()}
 
 
 def read_step_context(
     env,
     door_frame: ObjectFrame | None,
     joint_limits: dict[str, np.ndarray] | None = None,
+    execution_limits: RobotLimitsCfg | None = None,
 ) -> StepContext:
-    """Snapshot the per-tick world state the adapters check commands against."""
+    """Snapshot and validate all physical state used by adapter execution."""
+    _validate_execution_limits(execution_limits)
     angle, velocity = env.hinge_state()
-    ee_pos, _ = env.proxy_pose_w()
+    angle_array = _finite_array("hinge angle", angle).reshape(-1)
+    velocity_array = _finite_array("hinge velocity", velocity).reshape(-1)
+    ee_pos, ee_quat = env.proxy_pose_w()
+    position = _first_vector("end-effector position", ee_pos, 3)
+    orientation = _first_vector("end-effector orientation", ee_quat, 4)
+    orientation_norm = float(np.linalg.norm(orientation))
+    if not np.isfinite(orientation_norm) or orientation_norm <= 0.0:
+        raise InvalidSimulatorStateError(
+            "invalid simulator state: end-effector orientation quaternion has invalid norm"
+        )
     contact_sensed: bool | None = None
     if hasattr(env, "contact_sensed"):
-        raw_contact = _numpy(env.contact_sensed()).reshape(-1)[0]
-        if not np.isfinite(raw_contact):
-            raise RuntimeError("non-finite rollout contact value")
+        raw_contact = _finite_array("contact value", env.contact_sensed()).reshape(-1)[0]
         contact_sensed = bool(raw_contact)
+    contact_force_n: float | None = None
+    if hasattr(env, "contact_force_w"):
+        force = _finite_array("contact force", env.contact_force_w())
+        if force.ndim == 0 or force.shape[-1] != 3:
+            raise InvalidSimulatorStateError(
+                f"invalid simulator state: contact force must end in shape (3,), got {force.shape}"
+            )
+        contact_force_n = float(np.linalg.norm(force.reshape(-1, 3)[0]))
+        if not np.isfinite(contact_force_n):
+            raise InvalidSimulatorStateError(
+                "invalid simulator state: contact force magnitude is non-finite"
+            )
     joint_state: dict[str, np.ndarray] | None = None
     if hasattr(env, "robot_joint_state"):
+        raw_joint_state = env.robot_joint_state()
+        if not isinstance(raw_joint_state, dict):
+            raise InvalidSimulatorStateError(
+                "invalid simulator state: robot_joint_state() must return a dict"
+            )
+        required_state = ("joint_pos", "joint_vel", "joint_pos_target")
+        missing_state = [name for name in required_state if name not in raw_joint_state]
+        if missing_state:
+            raise InvalidSimulatorStateError(
+                f"invalid simulator state: joint state is missing {missing_state}"
+            )
         joint_state = {
-            name: np.asarray(value, dtype=np.float64)
-            for name, value in env.robot_joint_state().items()
+            name: _finite_array(f"joint state {name}", raw_joint_state[name]).reshape(-1)
+            for name in required_state
         }
+        state_shapes = {value.shape for value in joint_state.values()}
+        if len(state_shapes) != 1:
+            raise InvalidSimulatorStateError(
+                "invalid simulator state: joint positions, velocities, and targets "
+                "must have matching shapes"
+            )
+    if joint_limits is not None:
+        required_limits = ("joint_pos_limits", "joint_vel_limits")
+        missing_limits = [name for name in required_limits if name not in joint_limits]
+        if missing_limits:
+            raise InvalidSimulatorStateError(
+                f"invalid simulator state: joint limits are missing {missing_limits}"
+            )
+        pos_limits = _finite_array("joint position limits", joint_limits["joint_pos_limits"])
+        vel_limits = _finite_array("joint velocity limits", joint_limits["joint_vel_limits"])
+        if pos_limits.ndim != 2 or pos_limits.shape[1] != 2:
+            raise InvalidSimulatorStateError(
+                "invalid simulator state: joint position limits must have shape (N, 2)"
+            )
+        vel_limits = vel_limits.reshape(-1)
+        if joint_state is not None and (
+            pos_limits.shape[0] != joint_state["joint_pos"].size
+            or vel_limits.size != joint_state["joint_pos"].size
+        ):
+            raise InvalidSimulatorStateError(
+                "invalid simulator state: joint state and limit sizes do not match"
+            )
     return StepContext(
         door_frame=door_frame,
-        hinge_angle_rad=float(_numpy(angle)[0]),
-        hinge_velocity_rad_s=float(_numpy(velocity)[0]),
-        ee_pos_w=_numpy(ee_pos)[0].astype(np.float64),
+        hinge_angle_rad=float(angle_array[0]),
+        hinge_velocity_rad_s=float(velocity_array[0]),
+        ee_pos_w=position,
+        ee_quat_w_xyzw=orientation,
         contact_sensed=contact_sensed,
+        contact_force_n=contact_force_n,
         joint_state=joint_state,
         joint_limits=joint_limits,
     )
@@ -109,6 +270,7 @@ TERMINATION_REASONS = (
     "policy_exhausted",
     "rejection_stop",
     "env_truncated",
+    "invalid_simulator_state",
     "tick_budget",
 )
 """Every rollout ends with exactly one of these:
@@ -119,6 +281,8 @@ TERMINATION_REASONS = (
 - ``rejection_stop`` — a rejected command with ``stop_on_reject``;
 - ``env_truncated`` — ``env.step`` reported terminated/truncated (the env
   auto-reset internally; no post-reset state is consumed);
+- ``invalid_simulator_state`` — a required numeric simulator state or adapter
+  limit was invalid; no command is adapted from that snapshot;
 - ``tick_budget`` — the rollout's ``max_ticks`` budget ran out.
 """
 
@@ -209,15 +373,27 @@ def rollout_chunks(
     The env must already be reset; the door frame is read once up front (the
     stage-read pose is static for the episode in this build).
     """
-    door_frame = read_door_frame(env)
-    joint_limits = read_joint_limits(env)
     log: AdapterLog = adapter.log
+    execution_limits = _adapter_limits(adapter)
     decisions: list[AdapterDecision] = []
-    has_force = hasattr(env, "contact_force_w")
     contact_per_tick: list[bool | None] = []
     force_n_per_tick: list[float | None] = []
 
-    ctx = read_step_context(env, door_frame, joint_limits)
+    try:
+        door_frame = read_door_frame(env)
+        joint_limits = read_joint_limits(env)
+        ctx = read_step_context(env, door_frame, joint_limits, execution_limits)
+    except InvalidSimulatorStateError as exc:
+        notes = str(exc)
+        return RolloutResult(
+            n_ticks=0,
+            initial_angle_rad=float("nan"),
+            final_angle_rad=float("nan"),
+            log=log,
+            notes=notes,
+            termination_reason="invalid_simulator_state",
+            success=False if success_angle_rad is not None else None,
+        )
     initial_angle = ctx.hinge_angle_rad
     ticks = 0
     notes = ""
@@ -265,14 +441,14 @@ def rollout_chunks(
                     f"at tick {ticks}; rollout state frozen at the last valid read"
                 )
                 break
-            ctx = read_step_context(env, door_frame, joint_limits)
+            try:
+                ctx = read_step_context(env, door_frame, joint_limits, execution_limits)
+            except InvalidSimulatorStateError as exc:
+                reason = "invalid_simulator_state"
+                notes = f"{exc} after tick {ticks}"
+                break
             contact_per_tick.append(ctx.contact_sensed)
-            force_n = (
-                float(np.linalg.norm(_numpy(env.contact_force_w())[0])) if has_force else None
-            )
-            if force_n is not None and not np.isfinite(force_n):
-                raise RuntimeError(f"non-finite rollout force value at tick {ticks}")
-            force_n_per_tick.append(force_n)
+            force_n_per_tick.append(ctx.contact_force_n)
             if first_success_tick is None and crossed():
                 first_success_tick = ticks
                 if not post_success_diagnostic:
@@ -338,6 +514,7 @@ def replay_source(actions) -> ChunkSource:
 __all__ = [
     "TERMINATION_REASONS",
     "ChunkSource",
+    "InvalidSimulatorStateError",
     "RolloutResult",
     "read_door_frame",
     "read_joint_limits",

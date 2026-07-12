@@ -202,7 +202,9 @@ class A2Adapter:
                 hinge_angle_rad=ctx.hinge_angle_rad,
                 hinge_velocity_rad_s=ctx.hinge_velocity_rad_s,
                 ee_pos_w=ee_pos.copy(),
+                ee_quat_w_xyzw=ctx.ee_quat_w_xyzw,
                 contact_sensed=ctx.contact_sensed,
+                contact_force_n=ctx.contact_force_n,
                 joint_state=ctx.joint_state if i == 0 else None,
                 joint_limits=ctx.joint_limits if i == 0 else None,
             )

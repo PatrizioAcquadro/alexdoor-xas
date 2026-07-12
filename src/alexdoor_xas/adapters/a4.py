@@ -501,7 +501,7 @@ class A4Adapter:
 
         door_frame = read_door_frame(env)
         joint_limits = read_joint_limits(env)
-        ctx = read_step_context(env, door_frame, joint_limits)
+        ctx = read_step_context(env, door_frame, joint_limits, self.limits)
         initial_angle = ctx.hinge_angle_rad
 
         validated: list[ObjectCentricChunk] = []
@@ -653,7 +653,7 @@ class A4Adapter:
             step_env(env, applied)
             ticks += 1
             stage_ticks += 1
-            ctx = read_step_context(env, door_frame, joint_limits)
+            ctx = read_step_context(env, door_frame, joint_limits, self.limits)
 
         result = StageResult(
             phase=stage.phase,

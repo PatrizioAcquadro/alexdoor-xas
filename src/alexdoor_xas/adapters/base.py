@@ -106,14 +106,17 @@ class StepContext:
     Mirrors the scripted controller's :class:`DoorPushObservation` but stays
     adapter-owned (adapters never import policies). ``joint_state`` /
     ``joint_limits`` carry the env's optional proprio accessors when available
-    (Alex); ``contact_sensed`` is ``None`` for envs without force sensing.
+    (Alex); EE orientation is captured even though v1 adapters do not command
+    it directly; contact/force fields are ``None`` when sensing is unavailable.
     """
 
     door_frame: ObjectFrame | None
     hinge_angle_rad: float
     hinge_velocity_rad_s: float
     ee_pos_w: np.ndarray  # (3,)
+    ee_quat_w_xyzw: np.ndarray | None = None  # (4,); populated by env snapshots
     contact_sensed: bool | None = None
+    contact_force_n: float | None = None
     joint_state: dict[str, np.ndarray] | None = None
     joint_limits: dict[str, np.ndarray] | None = None
 

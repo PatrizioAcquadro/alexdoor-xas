@@ -12,10 +12,13 @@ import torch
 from alexdoor_xas.adapters import (
     PROXY_LIMITS,
     A2Adapter,
+    A3Adapter,
     AdapterDecision,
     AdapterLog,
     AdapterStatus,
+    RobotLimitsCfg,
     RolloutResult,
+    WorkspaceSphere,
     rollout_chunks,
 )
 from alexdoor_xas.policies.common.rollout_eval import (
@@ -128,6 +131,83 @@ class NonFiniteForceEnv(FakeForceDoorPushEnv):
 class NonFiniteContactEnv(FakeForceDoorPushEnv):
     def contact_sensed(self):
         return torch.tensor([float("nan")], dtype=torch.float64)
+
+
+class NonFiniteStateEnv(FakeForceDoorPushEnv):
+    """Inject one non-finite value into the shared adapter state surface."""
+
+    def __init__(self, field: str):
+        super().__init__()
+        self.field = field
+
+    def hinge_state(self):
+        angle, velocity = super().hinge_state()
+        if self.field == "hinge_angle":
+            angle[0] = float("nan")
+        elif self.field == "hinge_velocity":
+            velocity[0] = float("inf")
+        return angle, velocity
+
+    def proxy_pose_w(self):
+        position, orientation = super().proxy_pose_w()
+        if self.field == "ee_position":
+            position[0, 0] = float("nan")
+        elif self.field == "ee_orientation":
+            orientation[0, 3] = float("inf")
+        return position, orientation
+
+    def robot_joint_state(self):
+        state = super().robot_joint_state()
+        field_to_key = {
+            "joint_positions": "joint_pos",
+            "joint_velocities": "joint_vel",
+            "joint_targets": "joint_pos_target",
+        }
+        if self.field in field_to_key:
+            state[field_to_key[self.field]][0] = float("nan")
+        return state
+
+    def robot_joint_limits(self):
+        limits = super().robot_joint_limits()
+        if self.field == "joint_position_limits":
+            limits["joint_pos_limits"][0, 0] = float("-inf")
+        elif self.field == "joint_velocity_limits":
+            limits["joint_vel_limits"][0] = float("nan")
+        return limits
+
+    def door_frame_pose_w(self):
+        position, orientation = super().door_frame_pose_w()
+        if self.field == "frame_position":
+            position[0, 0] = float("nan")
+        elif self.field == "frame_orientation":
+            orientation[0, 3] = float("inf")
+        return position, orientation
+
+    def contact_sensed(self):
+        if self.field == "contact":
+            return torch.tensor([float("nan")], dtype=torch.float64)
+        return super().contact_sensed()
+
+    def contact_force_w(self):
+        force = super().contact_force_w()
+        if self.field == "force":
+            force[0, 0] = float("inf")
+        return force
+
+
+def _state_validation_adapter(kind: str, field: str):
+    workspace = WorkspaceSphere(
+        center_w=(
+            (float("nan") if field == "workspace_center" else 0.0),
+            0.0,
+            0.0,
+        ),
+        min_reach_m=(float("-inf") if field == "workspace_min_reach" else 0.01),
+        max_reach_m=(float("inf") if field == "workspace_max_reach" else 2.0),
+    )
+    limits = RobotLimitsCfg(robot="test", workspace=workspace)
+    a2 = A2Adapter(limits)
+    return a2 if kind == "a2" else A3Adapter(a2)
 
 
 class FirstContactImpactEnv(FakeForceDoorPushEnv):
@@ -288,16 +368,70 @@ def test_force_env_records_same_termination_fields() -> None:
     assert result.force_n_per_tick and result.force_n_per_tick[-1] is not None
 
 
-@pytest.mark.parametrize("env", [NonFiniteForceEnv(), NonFiniteContactEnv()])
-def test_non_finite_rollout_force_or_contact_fails_loudly(env) -> None:
+@pytest.mark.parametrize("adapter_kind", ["a2", "a3"])
+@pytest.mark.parametrize(
+    "field",
+    [
+        "hinge_angle",
+        "hinge_velocity",
+        "ee_position",
+        "ee_orientation",
+        "joint_positions",
+        "joint_velocities",
+        "joint_targets",
+        "joint_position_limits",
+        "joint_velocity_limits",
+        "workspace_center",
+        "workspace_min_reach",
+        "workspace_max_reach",
+        "contact",
+        "force",
+    ],
+)
+def test_non_finite_physical_state_stops_before_a2_or_a3_execution(
+    adapter_kind: str, field: str
+) -> None:
+    env = NonFiniteStateEnv(field)
     env.reset(seed=0)
-    with pytest.raises(RuntimeError, match="non-finite rollout (force|contact)"):
-        rollout_chunks(
-            env,
-            _push_source(1),
-            A2Adapter(PROXY_LIMITS),
-            max_ticks=1,
+    result = rollout_chunks(
+        env,
+        _push_source(1),
+        _state_validation_adapter(adapter_kind, field),
+        max_ticks=1,
+    )
+
+    assert result.termination_reason == "invalid_simulator_state"
+    assert result.n_ticks == 0
+    assert result.decisions_per_tick == []
+    assert result.log.n_accepted == 0
+    assert result.log.n_corrected == 0
+    assert "invalid simulator state" in result.notes
+
+
+@pytest.mark.parametrize("field", ["frame_position", "frame_orientation"])
+def test_non_finite_a3_frame_state_is_an_explicit_simulator_failure(field: str) -> None:
+    env = NonFiniteStateEnv(field)
+    env.reset(seed=0)
+    result = rollout_chunks(
+        env,
+        _push_source(1),
+        _state_validation_adapter("a3", field),
+        max_ticks=1,
+    )
+
+    assert result.termination_reason == "invalid_simulator_state"
+    assert result.n_ticks == 0
+    assert result.decisions_per_tick == []
+
+
+def test_invalid_simulator_state_has_a_distinct_failure_label() -> None:
+    base = dict(success=False, n_ticks=0, max_ticks=600, contact_ticks=0, n_rejected=0, notes="")
+    assert (
+        rollout_failure_label(
+            **base, termination_reason="invalid_simulator_state"
         )
+        == "invalid_simulator_state"
+    )
 
 
 def test_calibrated_first_contact_correction_is_enforced_in_execution() -> None:

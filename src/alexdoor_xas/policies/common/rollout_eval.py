@@ -177,6 +177,8 @@ def rollout_failure_label(
     per-run prose. ``termination_reason`` (``RolloutResult.termination_reason``)
     disambiguates env truncation from a plain tick-budget timeout.
     """
+    if termination_reason == "invalid_simulator_state":
+        return "invalid_simulator_state"
     if success:
         return None
     # Rejections take precedence over no_contact: a rejection storm executes

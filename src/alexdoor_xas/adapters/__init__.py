@@ -28,6 +28,7 @@ from .limits import (
 from .rollout import (
     TERMINATION_REASONS,
     ChunkSource,
+    InvalidSimulatorStateError,
     RolloutResult,
     read_door_frame,
     read_joint_limits,
@@ -52,6 +53,7 @@ __all__ = [
     "AdapterLog",
     "AdapterStatus",
     "ChunkSource",
+    "InvalidSimulatorStateError",
     "DoorPanelGeometry",
     "RobotLimitsCfg",
     "RolloutResult",
