@@ -2,9 +2,22 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections import Counter
 from dataclasses import asdict
 from typing import Any
+
+import numpy as np
+
+DETERMINISM_TOLERANCES = {
+    "command_abs": 1e-9,
+    "angle_abs_rad": 1e-9,
+    "force_abs_n": 1e-6,
+}
+"""Repeat-same-seed comparison tolerances. Headless physics is deterministic
+in this build and the policy sampling generator is reseeded identically, so
+repeats are expected to be bit-identical; the tolerances only absorb
+float32<->float64 round-trips in the readers."""
 
 
 def seed_protocol(
@@ -91,22 +104,26 @@ def rollout_failure_label(
     contact_ticks: int,
     n_rejected: int,
     notes: str,
+    termination_reason: str = "",
 ) -> str | None:
     """Coarse per-rollout failure taxonomy (None on success).
 
     Mirrors the data-engine convention of labeling every non-success; kept
     deliberately coarse — the later unified report needs stable buckets, not
-    per-run prose.
+    per-run prose. ``termination_reason`` (``RolloutResult.termination_reason``)
+    disambiguates env truncation from a plain tick-budget timeout.
     """
     if success:
         return None
     # Rejections take precedence over no_contact: a rejection storm executes
     # zero motion and therefore zero contact — labeling it no_contact would
     # misdiagnose an adapter/frame problem as a policy-reach problem.
-    if "rejected" in notes:
+    if termination_reason == "rejection_stop" or "rejected" in notes:
         return "stopped_on_rejection"
     if n_rejected > 0:
         return "commands_rejected"
+    if termination_reason == "env_truncated":
+        return "env_truncated"
     if contact_ticks == 0:
         return "no_contact"
     if n_ticks >= max_ticks:
@@ -156,9 +173,138 @@ def aggregate_rollout_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "n_warnings": sum(int(row.get("n_warnings", 0)) for row in rows),
             "warning_counts": dict(sorted(warning_counts.items())),
         },
-        "fixed_determinism_spread_rad": (
+        # Across-seed spread of the fixed-reset block (randomization disabled,
+        # *different* reset/sampling seeds). This is output variability across
+        # seeds — never determinism evidence; the repeat-same-seed probe
+        # (determinism_probe) carries the actual determinism claim.
+        "fixed_reset_spread_rad": (
             max(fixed_finals) - min(fixed_finals) if fixed_finals else None
         ),
+    }
+
+
+def _rollout_traces(result) -> dict[str, Any]:
+    """Comparable trace arrays/sequences of one ``RolloutResult``."""
+    requested = [
+        np.zeros(6) if d.requested is None else np.asarray(d.requested, dtype=np.float64)
+        for d in result.decisions_per_tick
+    ]
+    applied = [
+        np.zeros(6) if d.applied is None else np.asarray(d.applied, dtype=np.float64)
+        for d in result.decisions_per_tick
+    ]
+    return {
+        "n_ticks": int(result.n_ticks),
+        "requested": np.stack(requested) if requested else np.zeros((0, 6)),
+        "applied": np.stack(applied) if applied else np.zeros((0, 6)),
+        "statuses": [str(d.status) for d in result.decisions_per_tick],
+        "first_success_tick": result.first_success_tick,
+        "termination_reason": result.termination_reason,
+        "final_angle_rad": float(result.final_angle_rad),
+        "contact": [None if c is None else bool(c) for c in result.contact_per_tick],
+        "force": [None if f is None else float(f) for f in result.force_n_per_tick],
+    }
+
+
+def rollout_trace_hash(result) -> str:
+    """sha256 over one rollout's command/state traces (exact bytes)."""
+    traces = _rollout_traces(result)
+    digest = hashlib.sha256()
+    digest.update(str(traces["n_ticks"]).encode())
+    digest.update(traces["requested"].tobytes())
+    digest.update(traces["applied"].tobytes())
+    digest.update("|".join(traces["statuses"]).encode())
+    digest.update(str(traces["first_success_tick"]).encode())
+    digest.update(traces["termination_reason"].encode())
+    digest.update(np.float64(traces["final_angle_rad"]).tobytes())
+    digest.update("|".join(str(c) for c in traces["contact"]).encode())
+    digest.update(
+        np.asarray(
+            [np.nan if f is None else f for f in traces["force"]], dtype=np.float64
+        ).tobytes()
+    )
+    return digest.hexdigest()
+
+
+def determinism_probe_report(
+    results: list,
+    *,
+    seed: int,
+    tolerances: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """Genuine repeat-same-seed determinism evidence for one rollout config.
+
+    ``results`` are >= 2 ``RolloutResult`` runs of the *same* environment
+    reset seed, policy sampling seed, pose, checkpoint, and configuration.
+    Every repeat is compared to the first: tick counts, per-tick
+    requested/adapted command traces, adapter decision statuses, the success
+    crossing tick, termination reason, final state, and force/contact traces,
+    within explicit tolerances. This — not the across-seed ``fixed_reset``
+    spread — is the determinism claim.
+    """
+    if len(results) < 2:
+        raise ValueError("determinism probe needs at least 2 repeat rollouts")
+    tolerances = dict(DETERMINISM_TOLERANCES if tolerances is None else tolerances)
+    reference = _rollout_traces(results[0])
+    mismatches: list[str] = []
+    max_diffs = {"requested": 0.0, "applied": 0.0, "final_angle_rad": 0.0, "force_n": 0.0}
+
+    for index, result in enumerate(results[1:], start=1):
+        label = f"repeat {index}"
+        traces = _rollout_traces(result)
+        if traces["n_ticks"] != reference["n_ticks"]:
+            mismatches.append(
+                f"{label}: n_ticks {traces['n_ticks']} != {reference['n_ticks']}"
+            )
+            continue  # trace lengths differ; elementwise comparison is meaningless
+        for key in ("first_success_tick", "termination_reason"):
+            if traces[key] != reference[key]:
+                mismatches.append(f"{label}: {key} {traces[key]!r} != {reference[key]!r}")
+        if traces["statuses"] != reference["statuses"]:
+            mismatches.append(f"{label}: adapter decision statuses differ")
+        if traces["contact"] != reference["contact"]:
+            mismatches.append(f"{label}: contact trace differs")
+        for key, tol_name in (("requested", "command_abs"), ("applied", "command_abs")):
+            diff = (
+                float(np.max(np.abs(traces[key] - reference[key])))
+                if reference[key].size
+                else 0.0
+            )
+            max_diffs[key] = max(max_diffs[key], diff)
+            if diff > tolerances[tol_name]:
+                mismatches.append(
+                    f"{label}: {key} command trace differs by {diff:.3g} "
+                    f"(> {tolerances[tol_name]:.3g})"
+                )
+        angle_diff = abs(traces["final_angle_rad"] - reference["final_angle_rad"])
+        max_diffs["final_angle_rad"] = max(max_diffs["final_angle_rad"], angle_diff)
+        if angle_diff > tolerances["angle_abs_rad"]:
+            mismatches.append(
+                f"{label}: final angle differs by {angle_diff:.3g} rad "
+                f"(> {tolerances['angle_abs_rad']:.3g})"
+            )
+        force_pairs = [
+            (a, b)
+            for a, b in zip(traces["force"], reference["force"], strict=True)
+            if a is not None and b is not None
+        ]
+        force_diff = max((abs(a - b) for a, b in force_pairs), default=0.0)
+        max_diffs["force_n"] = max(max_diffs["force_n"], force_diff)
+        if force_diff > tolerances["force_abs_n"]:
+            mismatches.append(
+                f"{label}: force trace differs by {force_diff:.3g} N "
+                f"(> {tolerances['force_abs_n']:.3g})"
+            )
+
+    return {
+        "kind": "repeat_same_seed",
+        "seed": seed,
+        "repeats": len(results),
+        "tolerances": tolerances,
+        "trace_sha256": [rollout_trace_hash(result) for result in results],
+        "max_abs_diffs": max_diffs,
+        "mismatches": mismatches,
+        "passed": not mismatches,
     }
 
 
@@ -183,9 +329,12 @@ def scripted_reference_payload(
 
 
 __all__ = [
+    "DETERMINISM_TOLERANCES",
     "aggregate_rollout_rows",
     "contact_report",
+    "determinism_probe_report",
     "rollout_failure_label",
+    "rollout_trace_hash",
     "scripted_reference_payload",
     "seed_protocol",
     "summarize_decision_warnings",

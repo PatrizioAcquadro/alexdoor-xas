@@ -26,6 +26,7 @@ from .limits import (
     limits_for_robot,
 )
 from .rollout import (
+    TERMINATION_REASONS,
     ChunkSource,
     RolloutResult,
     read_door_frame,
@@ -41,6 +42,7 @@ __all__ = [
     "MAX_HINGE_ANGLE_RAD",
     "PROXY_LIMITS",
     "PROXY_ROBOT_TAG",
+    "TERMINATION_REASONS",
     "A2Adapter",
     "A3Adapter",
     "A4Adapter",

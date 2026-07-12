@@ -83,12 +83,41 @@ def read_step_context(
     )
 
 
-def step_env(env, delta_world: np.ndarray) -> None:
-    """Execute one adapted world-frame EE delta on the env."""
+def step_env(env, delta_world: np.ndarray) -> tuple[bool, bool]:
+    """Execute one adapted world-frame EE delta; returns ``(terminated, truncated)``.
+
+    A ``DirectRLEnv`` auto-resets *inside* ``env.step`` when either flag is
+    set, so any state read after a flagged step is post-reset — callers must
+    stop consuming the env immediately.
+    """
     action = torch.as_tensor(
         np.asarray(delta_world, dtype=np.float64), dtype=torch.float32
     ).reshape(1, -1)
-    env.step(action)
+    result = env.step(action)
+    if isinstance(result, tuple) and len(result) >= 4:
+        terminated = bool(_numpy(result[2]).reshape(-1)[0])
+        truncated = bool(_numpy(result[3]).reshape(-1)[0])
+        return terminated, truncated
+    return False, False
+
+
+TERMINATION_REASONS = (
+    "success",
+    "policy_exhausted",
+    "rejection_stop",
+    "env_truncated",
+    "tick_budget",
+)
+"""Every rollout ends with exactly one of these:
+
+- ``success`` — the hinge crossed the success threshold (checked after every
+  executed control tick, independent of policy chunk size);
+- ``policy_exhausted`` — the chunk source returned ``None``;
+- ``rejection_stop`` — a rejected command with ``stop_on_reject``;
+- ``env_truncated`` — ``env.step`` reported terminated/truncated (the env
+  auto-reset internally; no post-reset state is consumed);
+- ``tick_budget`` — the rollout's ``max_ticks`` budget ran out.
+"""
 
 
 @dataclass
@@ -103,10 +132,25 @@ class RolloutResult:
     decisions_per_tick: list[AdapterDecision] = field(default_factory=list)
     contact_per_tick: list[bool | None] = field(default_factory=list)
     """Post-step force-sensed contact flag per executed tick (``None`` when the
-    env exposes no contact sensing). Additive: existing consumers ignore it."""
+    env exposes no contact sensing). Additive: existing consumers ignore it.
+    On ``env_truncated`` the final tick has no valid post-step read, so these
+    lists are one entry shorter than ``n_ticks``."""
     force_n_per_tick: list[float | None] = field(default_factory=list)
     """Post-step |contact force| in newtons per executed tick (``None`` when
     the env exposes no ``contact_force_w``)."""
+    termination_reason: str = "tick_budget"
+    """One of :data:`TERMINATION_REASONS`."""
+    first_success_tick: int | None = None
+    """Executed-tick count at the first success-threshold crossing (0 = the
+    reset state already satisfied it); ``None`` = never crossed or no
+    threshold was given. Chunk-size independent by construction."""
+    success: bool | None = None
+    """First-crossing success (``None`` when no threshold was given). A
+    cross-then-rebound trajectory stays successful with its original
+    crossing tick."""
+    env_truncated: bool = False
+    """``env.step`` flagged terminated/truncated: the env auto-reset itself and
+    ``final_angle_rad`` is the last valid pre-step read."""
 
     @property
     def door_angle_change_rad(self) -> float:
@@ -118,6 +162,10 @@ class RolloutResult:
             "initial_angle_rad": self.initial_angle_rad,
             "final_angle_rad": self.final_angle_rad,
             "door_angle_change_rad": self.door_angle_change_rad,
+            "termination_reason": self.termination_reason,
+            "first_success_tick": self.first_success_tick,
+            "success": self.success,
+            "env_truncated": self.env_truncated,
             "notes": self.notes,
             "log": self.log.to_dict(),
         }
@@ -129,14 +177,31 @@ def rollout_chunks(
     adapter,
     max_ticks: int = 600,
     stop_on_reject: bool = False,
+    success_angle_rad: float | None = None,
+    post_success_diagnostic: bool = False,
 ) -> RolloutResult:
-    """Drive the env with adapter-mediated chunks until exhaustion or budget.
+    """Drive the env with adapter-mediated chunks until success/exhaustion/budget.
 
     ``adapter`` is anything with ``process(delta, ctx) -> (applied, decision)``
     (:class:`A2Adapter` for world-frame chunks, :class:`A3Adapter` for
     door-frame chunks). Every emitted step is adapted against a fresh context
     and executed; a rejected step executes zero motion (tick accounting stays
     aligned with the source's chunk clock) unless ``stop_on_reject``.
+
+    ``success_angle_rad`` enables per-tick success semantics: the hinge
+    threshold is checked after **every executed control tick**, so
+    ``first_success_tick`` is the exact first crossing independent of the
+    policy's chunk size, and the rollout stops there unless
+    ``post_success_diagnostic`` explicitly requests post-success execution
+    (success and its crossing tick are latched either way — a later rebound
+    cannot unlabel it).
+
+    ``env.step`` termination/truncation ends the rollout immediately with
+    ``env_truncated``: a ``DirectRLEnv`` auto-resets inside ``step``, so no
+    post-reset state is read (the final angle is the last valid pre-step
+    read). A defensive episode-counter guard (``env.episode_length_buf``)
+    additionally fails loudly if an unreported mid-rollout reset slipped
+    through — analogous to the data-engine guard.
 
     The env must already be reset; the door frame is read once up front (the
     stage-read pose is static for the episode in this build).
@@ -153,9 +218,22 @@ def rollout_chunks(
     initial_angle = ctx.hinge_angle_rad
     ticks = 0
     notes = ""
-    while ticks < max_ticks:
+    reason: str | None = None
+    first_success_tick: int | None = None
+    env_truncated = False
+
+    def crossed() -> bool:
+        return success_angle_rad is not None and ctx.hinge_angle_rad >= success_angle_rad
+
+    if crossed():
+        first_success_tick = 0
+        if not post_success_diagnostic:
+            reason = "success"
+
+    while reason is None and ticks < max_ticks:
         chunk = chunk_source(ctx)
         if chunk is None:
+            reason = "policy_exhausted"
             break
         chunk = np.asarray(chunk, dtype=np.float64)
         if chunk.ndim == 1:
@@ -164,27 +242,56 @@ def rollout_chunks(
             raise ValueError(
                 f"chunk source must emit (H, {EE_DELTA_DIM}) chunks, got {chunk.shape}"
             )
-        stop = False
         for delta in chunk:
             applied, decision = adapter.process(delta, ctx)
             decisions.append(decision)
             if decision.status is AdapterStatus.REJECTED and stop_on_reject:
                 notes = f"stopped on rejected command: {decision.reason}"
-                stop = True
+                reason = "rejection_stop"
                 break
-            step_env(env, applied)
+            terminated, truncated = step_env(env, applied)
             ticks += 1
+            if terminated or truncated:
+                # The env auto-reset inside step: everything readable now is
+                # post-reset state. Keep the last valid pre-step context as
+                # the final state and stop without any further env reads.
+                env_truncated = True
+                reason = "env_truncated"
+                notes = (
+                    f"env reported {'termination' if terminated else 'truncation'} "
+                    f"at tick {ticks}; rollout state frozen at the last valid read"
+                )
+                break
             ctx = read_step_context(env, door_frame, joint_limits)
             contact_per_tick.append(ctx.contact_sensed)
             force_n_per_tick.append(
                 float(np.linalg.norm(_numpy(env.contact_force_w())[0])) if has_force else None
             )
+            if first_success_tick is None and crossed():
+                first_success_tick = ticks
+                if not post_success_diagnostic:
+                    reason = "success"
+                    break
             if ticks >= max_ticks:
                 notes = notes or f"tick budget exhausted ({max_ticks})"
-                stop = True
                 break
-        if stop:
-            break
+        # An exhausted chunk loops back for the next chunk unless a stop
+        # reason was latched or the budget ran out (reason set on re-check).
+
+    if reason is None:
+        # Diagnostic post-success execution still records why it *stopped*;
+        # the first-crossing success/tick are latched separately above.
+        reason = "tick_budget"
+        notes = notes or f"tick budget exhausted ({max_ticks})"
+
+    if not env_truncated and hasattr(env, "episode_length_buf"):
+        env_ticks = int(_numpy(env.episode_length_buf).reshape(-1)[0])
+        if env_ticks < ticks:
+            raise RuntimeError(
+                f"rollout executed {ticks} ticks but the env's episode counter reads "
+                f"{env_ticks}: the env auto-reset mid-rollout without reporting "
+                "termination — recorded state past the reset would be invalid"
+            )
 
     return RolloutResult(
         n_ticks=ticks,
@@ -195,6 +302,10 @@ def rollout_chunks(
         decisions_per_tick=decisions,
         contact_per_tick=contact_per_tick,
         force_n_per_tick=force_n_per_tick,
+        termination_reason=reason,
+        first_success_tick=first_success_tick,
+        success=(first_success_tick is not None) if success_angle_rad is not None else None,
+        env_truncated=env_truncated,
     )
 
 
@@ -219,6 +330,7 @@ def replay_source(actions) -> ChunkSource:
 
 
 __all__ = [
+    "TERMINATION_REASONS",
     "ChunkSource",
     "RolloutResult",
     "read_door_frame",
