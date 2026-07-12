@@ -24,7 +24,7 @@ from isaaclab.envs import DirectRLEnv
 from isaaclab.sensors import ContactSensor
 
 from alexdoor_xas.assets.door_task import ensure_door_task_usd
-from alexdoor_xas.kinematics import check_settle_postcondition
+from alexdoor_xas.kinematics import StartPoseError, check_settle_postcondition
 
 from .door_env import resolve_hinge_joint_id
 from .door_push_env import read_doorframe_from_stage
@@ -312,13 +312,17 @@ class DoorPushRobotEnv(DirectRLEnv):
             ticks_used += 1
 
         ee_pos, _ = self._ee_pose_w()
-        report = check_settle_postcondition(
-            goal[0].detach().cpu().numpy(),
-            ee_pos[env_ids][0].detach().cpu().numpy(),
-            settle_ticks_used=ticks_used,
-            max_settle_ticks=int(self.cfg.settle_ticks),
-            tolerance_m=float(self.cfg.start_pose_tolerance_m),
-        )
+        try:
+            report = check_settle_postcondition(
+                goal[0].detach().cpu().numpy(),
+                ee_pos[env_ids][0].detach().cpu().numpy(),
+                settle_ticks_used=ticks_used,
+                max_settle_ticks=int(self.cfg.settle_ticks),
+                tolerance_m=float(self.cfg.start_pose_tolerance_m),
+            )
+        except StartPoseError as error:
+            self._last_settle_report = error.report.to_dict()
+            raise
         self._last_settle_report = report.to_dict()
 
     def start_pose_settle_report(self) -> dict | None:

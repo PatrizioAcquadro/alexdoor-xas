@@ -120,6 +120,16 @@ class SilentResetEnv(FakeDoorPushEnv):
         return result
 
 
+class NonFiniteForceEnv(FakeForceDoorPushEnv):
+    def contact_force_w(self):
+        return torch.tensor([[float("nan"), 0.0, 0.0]], dtype=torch.float64)
+
+
+class NonFiniteContactEnv(FakeForceDoorPushEnv):
+    def contact_sensed(self):
+        return torch.tensor([float("nan")], dtype=torch.float64)
+
+
 # ── per-tick success timing ──────────────────────────────────────────────────
 
 
@@ -255,6 +265,18 @@ def test_force_env_records_same_termination_fields() -> None:
     assert result.termination_reason == "success"
     assert result.first_success_tick == result.n_ticks
     assert result.force_n_per_tick and result.force_n_per_tick[-1] is not None
+
+
+@pytest.mark.parametrize("env", [NonFiniteForceEnv(), NonFiniteContactEnv()])
+def test_non_finite_rollout_force_or_contact_fails_loudly(env) -> None:
+    env.reset(seed=0)
+    with pytest.raises(RuntimeError, match="non-finite rollout (force|contact)"):
+        rollout_chunks(
+            env,
+            _push_source(1),
+            A2Adapter(PROXY_LIMITS),
+            max_ticks=1,
+        )
 
 
 # ── repeat-same-seed determinism helpers ─────────────────────────────────────

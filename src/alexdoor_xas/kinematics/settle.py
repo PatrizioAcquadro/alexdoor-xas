@@ -26,6 +26,10 @@ pose that was genuinely not reached."""
 class StartPoseError(RuntimeError):
     """The requested start pose was not realized within tolerance."""
 
+    def __init__(self, message: str, report: SettleReport):
+        super().__init__(message)
+        self.report = report
+
 
 @dataclass(frozen=True)
 class SettleReport:
@@ -91,7 +95,8 @@ def check_settle_postcondition(
             f"start pose not realized: residual {residual:.4f} m exceeds the "
             f"{tolerance_m:.4f} m tolerance after {settle_ticks_used}/"
             f"{max_settle_ticks} settle ticks (requested "
-            f"{report.requested_pos_m}, realized {report.realized_pos_m})"
+            f"{report.requested_pos_m}, realized {report.realized_pos_m})",
+            report,
         )
     return report
 

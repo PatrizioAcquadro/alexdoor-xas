@@ -34,13 +34,23 @@ def test_realized_pose_within_tolerance_passes_and_records() -> None:
 
 
 def test_excessive_residual_fails_closed() -> None:
-    with pytest.raises(StartPoseError, match="residual 0.0300 m exceeds"):
+    with pytest.raises(StartPoseError, match="residual 0.0300 m exceeds") as raised:
         check_settle_postcondition(
             (0.5, 0.2, 0.1),
             (0.53, 0.2, 0.1),
             settle_ticks_used=90,
             max_settle_ticks=90,
         )
+    assert raised.value.report.to_dict() == {
+        "requested_pos_m": [0.5, 0.2, 0.1],
+        "realized_pos_m": [0.53, 0.2, 0.1],
+        "residual_m": pytest.approx(0.03),
+        "tolerance_m": DEFAULT_START_POSE_TOLERANCE_M,
+        "settle_ticks_used": 90,
+        "max_settle_ticks": 90,
+        "passed": False,
+        "orientation_checked": False,
+    }
 
 
 def test_non_strict_mode_records_failure_without_raising() -> None:

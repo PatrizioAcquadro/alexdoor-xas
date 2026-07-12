@@ -357,6 +357,17 @@ def test_validate_rejects_bad_contact_flags_and_sources(proxy_a2) -> None:
     assert any("contact source" in error for error in result.errors)
 
 
+def test_validate_episode_reports_malformed_observation_shape(proxy_a2) -> None:
+    record = proxy_a2[0]
+    bad_obs = dict(record.obs)
+    bad_obs["door_angle_rad"] = np.asarray(0.0)
+
+    result = validate_episode(dataclasses.replace(record, obs=bad_obs))
+
+    assert not result.ok
+    assert any("obs 'door_angle_rad'" in error and "shape" in error for error in result.errors)
+
+
 def test_validate_rejects_mislabeled_a3_actions(alex_exports) -> None:
     a3 = EpisodeDataset(alex_exports[A3_OBJ_REL_EE_DELTA])
     record = a3[0]

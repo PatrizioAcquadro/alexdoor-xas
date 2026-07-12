@@ -65,7 +65,10 @@ def read_step_context(
     ee_pos, _ = env.proxy_pose_w()
     contact_sensed: bool | None = None
     if hasattr(env, "contact_sensed"):
-        contact_sensed = bool(_numpy(env.contact_sensed())[0])
+        raw_contact = _numpy(env.contact_sensed()).reshape(-1)[0]
+        if not np.isfinite(raw_contact):
+            raise RuntimeError("non-finite rollout contact value")
+        contact_sensed = bool(raw_contact)
     joint_state: dict[str, np.ndarray] | None = None
     if hasattr(env, "robot_joint_state"):
         joint_state = {
@@ -264,9 +267,12 @@ def rollout_chunks(
                 break
             ctx = read_step_context(env, door_frame, joint_limits)
             contact_per_tick.append(ctx.contact_sensed)
-            force_n_per_tick.append(
+            force_n = (
                 float(np.linalg.norm(_numpy(env.contact_force_w())[0])) if has_force else None
             )
+            if force_n is not None and not np.isfinite(force_n):
+                raise RuntimeError(f"non-finite rollout force value at tick {ticks}")
+            force_n_per_tick.append(force_n)
             if first_success_tick is None and crossed():
                 first_success_tick = ticks
                 if not post_success_diagnostic:
