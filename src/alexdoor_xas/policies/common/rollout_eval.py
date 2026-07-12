@@ -49,10 +49,12 @@ def contact_report(
 ) -> dict[str, Any]:
     """Per-rollout contact/force summary from the rollout's per-tick capture.
 
-    ``contact_ticks`` counts force-sensed contact ticks; force stats
-    (mean/max/p95, newtons) are over contact ticks only, and ``impulse_ns`` is
-    the |force|·dt sum over the whole rollout. When the env exposed no force
-    sensing the summary says so explicitly instead of reporting zeros.
+    ``contact_ticks`` counts force-sensed contact ticks; ``force_n`` stats
+    (mean/max/p95, newtons) are over contact ticks only. Admission evidence in
+    ``force_n_all_samples`` inspects every sensed sample independently of the
+    contact classifier. ``impulse_ns`` is the |force|·dt sum over the whole
+    rollout. When the env exposed no force sensing the summary says so
+    explicitly instead of reporting zeros.
     """
     # One contact_ticks definition for both branches: the sensed-contact flag
     # count (force presence only gates the force *statistics*).
@@ -63,10 +65,13 @@ def contact_report(
             "contact_ticks": contact_ticks,
             "contact_source": None,
             "force_n": None,
+            "force_n_all_samples": None,
             "impulse_ns": None,
             "force_exceeds_admission_bound": None,
             "unavailable_reason": "env exposes no contact force sensing",
         }
+    if not np.isfinite(forces).all():
+        raise RuntimeError("non-finite rollout force trace cannot become evidence")
     contact_forces = sorted(
         f
         for f, c in zip(force_n_per_tick, contact_per_tick, strict=True)
@@ -81,16 +86,25 @@ def contact_report(
         }
     else:
         force_stats = {"mean": 0.0, "max": 0.0, "p95": 0.0}
+    n_exceedance_ticks = (
+        sum(force > admission_bound_n for force in forces)
+        if admission_bound_n is not None
+        else None
+    )
     return {
         "contact_ticks": contact_ticks,
         "contact_source": "force_sensor",
         "force_n": force_stats,
+        "force_n_all_samples": {
+            "max": max(forces),
+            "n_exceedance_ticks": n_exceedance_ticks,
+        },
         "impulse_ns": sum(forces) * control_dt,
         # Watch-item flag: the dataset admission policy bounds *recorded* demo
         # forces; a learned policy exceeding the bound is not an eval failure,
         # but the unified report must be able to see it (None = no bound given).
         "force_exceeds_admission_bound": (
-            force_stats["max"] > admission_bound_n if admission_bound_n is not None else None
+            n_exceedance_ticks > 0 if n_exceedance_ticks is not None else None
         ),
         "unavailable_reason": None,
     }

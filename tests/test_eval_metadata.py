@@ -89,6 +89,46 @@ def test_force_trace_evidence_binds_peak_to_commands_and_hash() -> None:
     assert [sample["tick"] for sample in evidence["window"]] == [2, 3, 4]
 
 
+def test_force_admission_counts_over_bound_sample_without_contact() -> None:
+    import numpy as np
+
+    from alexdoor_xas.adapters import AdapterDecision, AdapterLog, AdapterStatus, RolloutResult
+
+    report = contact_report(
+        [False, False], [10.0, 250.0], CONTROL_DT, admission_bound_n=200.0
+    )
+    assert report["force_n"] == {"mean": 0.0, "max": 0.0, "p95": 0.0}
+    assert report["force_exceeds_admission_bound"] is True
+    assert report["force_n_all_samples"] == {"max": 250.0, "n_exceedance_ticks": 1}
+
+    decision = AdapterDecision(
+        status=AdapterStatus.ACCEPTED,
+        requested=np.zeros(6),
+        applied=np.zeros(6),
+    )
+    result = RolloutResult(
+        n_ticks=2,
+        initial_angle_rad=0.0,
+        final_angle_rad=0.0,
+        log=AdapterLog(),
+        decisions_per_tick=[decision, decision],
+        contact_per_tick=[False, False],
+        force_n_per_tick=[10.0, 250.0],
+    )
+    evidence = force_trace_evidence(result, admission_bound_n=200.0)
+    assert evidence is not None
+    assert evidence["n_exceedance_ticks"] == 1
+    assert evidence["peak_contact"] is False
+
+
+@pytest.mark.parametrize("non_finite", [float("nan"), float("inf")])
+def test_contact_report_rejects_non_finite_force_samples(non_finite: float) -> None:
+    with pytest.raises(RuntimeError, match="non-finite rollout force"):
+        contact_report(
+            [False, False], [10.0, non_finite], CONTROL_DT, admission_bound_n=200.0
+        )
+
+
 def test_act_compatibility_module_reexports_force_trace_evidence() -> None:
     from alexdoor_xas.policies.act.rollout_eval import force_trace_evidence as act_export
 

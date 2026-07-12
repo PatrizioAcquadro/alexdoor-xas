@@ -64,6 +64,7 @@ REQUIRED_ROW_FIELDS = (
     "contact_ticks",
     "contact_source",
     "force_n",
+    "force_n_all_samples",
     "force_trace_evidence",
     "impulse_ns",
     "contact_unavailable_reason",
@@ -159,6 +160,11 @@ UNSAFE_WARNING_MARKERS = ("non-finite", "invalid", "unsafe", "nan")
 # A rejection storm is an adapter/frame problem; a stray rejection is a watch
 # item. Threshold on the run's total rejected fraction of all commands.
 SYSTEMATIC_REJECTION_FRACTION = 0.02
+
+
+def _force_exceedance_ticks(row: dict) -> int:
+    evidence = row.get("force_trace_evidence") or {}
+    return int(evidence.get("n_exceedance_ticks") or 0)
 
 
 def parse_args() -> argparse.Namespace:
@@ -309,17 +315,28 @@ def check_file_protocol(
                 f"{path}: rollout {i} success={row.get('success')} inconsistent with "
                 f"failure_label={row.get('failure_label')!r}"
             )
-        if row.get("force_exceeds_admission_bound"):
-            evidence = row.get("force_trace_evidence") or {}
-            force_max = (row.get("force_n") or {}).get("max")
-            if (
-                evidence.get("peak_force_n") != force_max
-                or int(evidence.get("n_exceedance_ticks") or 0) < 1
-                or not evidence.get("exceedance_ticks")
-            ):
+        evidence = row.get("force_trace_evidence")
+        all_samples = row.get("force_n_all_samples")
+        if evidence is None or all_samples is None:
+            if evidence is not None or all_samples is not None:
+                problems.append(
+                    f"{path}: rollout {i} all-sample force summary and trace evidence "
+                    "availability disagree"
+                )
+        else:
+            n_exceedance_ticks = int(evidence.get("n_exceedance_ticks") or 0)
+            exceedance_ticks = evidence.get("exceedance_ticks") or []
+            evidence_binds = (
+                evidence.get("peak_force_n") == all_samples.get("max")
+                and n_exceedance_ticks == all_samples.get("n_exceedance_ticks")
+                and len(exceedance_ticks) == n_exceedance_ticks
+                and bool(row.get("force_exceeds_admission_bound"))
+                == (n_exceedance_ticks > 0)
+            )
+            if not evidence_binds:
                 problems.append(
                     f"{path}: rollout {i} force trace evidence does not bind the "
-                    "reported admission-bound exceedance"
+                    "all-sample admission summary"
                 )
 
     # Seed protocol: declared fixed/randomized seeds, exactly once each.
@@ -517,8 +534,16 @@ def assess_safety(run_name: str, rows: list[dict]) -> dict[str, Any]:
     non_finite_rows: list[int | None] = []
     for row in rows:
         force = row.get("force_n")
+        all_samples = row.get("force_n_all_samples")
+        evidence = row.get("force_trace_evidence")
         values = [] if force is None else [force.get(key) for key in ("mean", "max", "p95")]
-        values.append(row.get("impulse_ns"))
+        values.extend(
+            [
+                None if all_samples is None else all_samples.get("max"),
+                None if evidence is None else evidence.get("peak_force_n"),
+                row.get("impulse_ns"),
+            ]
+        )
         if any(
             value is not None
             and (not isinstance(value, (int, float)) or not math.isfinite(value))
@@ -560,10 +585,12 @@ def assess_safety(run_name: str, rows: list[dict]) -> dict[str, Any]:
     if unsafe_warnings:
         fail_reasons.append(f"unsafe/invalid adapter warnings: {unsafe_warnings}")
 
-    force_rows = [row for row in rows if row.get("force_exceeds_admission_bound")]
+    force_rows = [row for row in rows if _force_exceedance_ticks(row) > 0]
+    n_force_exceedance_ticks = sum(_force_exceedance_ticks(row) for row in rows)
     if force_rows:
         peak = max(
-            (row.get("force_n") or {}).get("max") or 0.0 for row in force_rows
+            (row.get("force_trace_evidence") or {}).get("peak_force_n") or 0.0
+            for row in force_rows
         )
         review_reasons.append(
             f"{len(force_rows)} rollout(s) exceed the 200 N dataset-admission force "
@@ -587,6 +614,7 @@ def assess_safety(run_name: str, rows: list[dict]) -> dict[str, Any]:
             "n_rejected": n_rejected,
             "n_warnings": n_warnings,
             "n_force_exceeds_admission_bound": len(force_rows),
+            "n_force_exceedance_ticks": n_force_exceedance_ticks,
             "n_env_truncated": len(truncated),
         },
         "run": run_name,
@@ -709,11 +737,16 @@ def summarize(
                     {row["failure_label"] for row in rows_all if row.get("failure_label")}
                 ),
                 "n_force_exceeds_admission_bound": sum(
-                    1 for row in rows_all if row.get("force_exceeds_admission_bound")
+                    1
+                    for row in rows_all
+                    if _force_exceedance_ticks(row) > 0
+                ),
+                "n_force_exceedance_ticks": sum(
+                    _force_exceedance_ticks(row) for row in rows_all
                 ),
                 "peak_force_n": max(
                     (
-                        (row.get("force_n") or {}).get("max") or 0.0
+                        (row.get("force_n_all_samples") or {}).get("max") or 0.0
                         for row in rows_all
                     ),
                     default=None,
