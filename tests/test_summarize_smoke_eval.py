@@ -101,11 +101,12 @@ def _payload(pose_id: str, plan_pose: dict) -> dict:
             "variation_bounds": {},
         },
         "determinism_probe": {
-            "kind": "repeat_same_seed",
+            "kind": "repeat_same_seed_fresh_process",
             "seed": 100,
             "repeats": 2,
             "tolerances": {},
             "trace_sha256": ["a", "a"],
+            "reference_traces": {},
             "max_abs_diffs": {},
             "mismatches": [],
             "passed": True,
@@ -304,7 +305,18 @@ def test_failed_determinism_probe_fails(valid_run) -> None:
     payloads["D1"]["determinism_probe"]["mismatches"] = ["repeat 1: n_ticks 5 != 6"]
     summary = _summarize(tmp_path, payloads)
     assert summary["protocol_consistency"] == "FAIL"
-    assert any("determinism probe failed" in p for p in summary["protocol_problems"])
+    assert any("determinism probe not passed" in p for p in summary["protocol_problems"])
+
+
+def test_pending_replay_probe_fails(valid_run) -> None:
+    # A probe with only the in-process reference (no fresh-process replay yet)
+    # is not determinism evidence.
+    tmp_path, payloads = valid_run
+    payloads["D1"]["determinism_probe"]["repeats"] = 1
+    payloads["D1"]["determinism_probe"]["passed"] = None
+    summary = _summarize(tmp_path, payloads)
+    assert summary["protocol_consistency"] == "FAIL"
+    assert any("fresh-process replay has not run" in p for p in summary["protocol_problems"])
 
 
 def test_single_repeat_probe_rejected(valid_run) -> None:
@@ -320,7 +332,16 @@ def test_across_seed_spread_is_not_determinism_evidence(valid_run) -> None:
     payloads["D0"]["determinism_probe"]["kind"] = "fixed_reset_spread"
     summary = _summarize(tmp_path, payloads)
     assert summary["protocol_consistency"] == "FAIL"
-    assert any("repeat_same_seed" in p for p in summary["protocol_problems"])
+    assert any("repeat_same_seed_fresh_process" in p for p in summary["protocol_problems"])
+
+
+def test_in_process_repeats_are_not_determinism_evidence(valid_run) -> None:
+    # Same-seed repeats inside one sim process are history-dependent; the gate
+    # only accepts the fresh-process replay kind.
+    tmp_path, payloads = valid_run
+    payloads["D0"]["determinism_probe"]["kind"] = "repeat_same_seed"
+    summary = _summarize(tmp_path, payloads)
+    assert summary["protocol_consistency"] == "FAIL"
 
 
 # ── diagnostics separation ───────────────────────────────────────────────────

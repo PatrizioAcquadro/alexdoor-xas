@@ -121,9 +121,6 @@ class DiffusionRolloutCfg:
     door_offset_x: float = 0.0
     door_offset_y: float = 0.0
     door_pose_id: str | None = None
-    determinism_repeats: int = 2
-    """Repeat-same-seed determinism probe: total runs of the first fixed seed
-    (same env reset seed + policy sampling seed) compared trace-by-trace."""
 
 
 @dataclass(frozen=True)
@@ -416,7 +413,6 @@ def _build_rollout_cfg(node: dict[str, Any]) -> DiffusionRolloutCfg:
         "door_offset_x",
         "door_offset_y",
         "door_pose_id",
-        "determinism_repeats",
     }
     _reject_unknown("rollout", node, field_names)
     defaults = DiffusionRolloutCfg()
@@ -478,13 +474,6 @@ def _build_rollout_cfg(node: dict[str, Any]) -> DiffusionRolloutCfg:
     if num_inference_steps <= 0:
         raise DiffusionConfigError("rollout.num_inference_steps must be positive")
 
-    determinism_repeats = _coerce_int(
-        "rollout.determinism_repeats",
-        node.get("determinism_repeats", defaults.determinism_repeats),
-    )
-    if determinism_repeats < 2:
-        raise DiffusionConfigError("rollout.determinism_repeats must be at least 2")
-
     return DiffusionRolloutCfg(
         checkpoint=_optional_str("rollout.checkpoint", node.get("checkpoint")),
         episodes_fixed=episodes_fixed,
@@ -509,7 +498,6 @@ def _build_rollout_cfg(node: dict[str, Any]) -> DiffusionRolloutCfg:
         door_offset_x=door_offset_x,
         door_offset_y=door_offset_y,
         door_pose_id=_optional_str("rollout.door_pose_id", node.get("door_pose_id")),
-        determinism_repeats=determinism_repeats,
     )
 
 

@@ -265,19 +265,26 @@ def check_file_protocol(
                     f"for pose {pose_id}"
                 )
 
-    # Genuine repeat-same-seed determinism evidence, required per primary file.
+    # Genuine repeat-same-seed determinism evidence, required per primary
+    # file: the recorded first-fixed-rollout traces must have been reproduced
+    # by at least one fresh-process replay (same reset seed, sampling seed,
+    # pose, checkpoint, configuration). Within-process repeats are not
+    # acceptable evidence (sim state is history-dependent per episode).
     probe = payload.get("determinism_probe")
     if not probe:
         problems.append(f"{path}: no repeat-same-seed determinism probe recorded")
     else:
-        if probe.get("kind") != "repeat_same_seed":
+        if probe.get("kind") != "repeat_same_seed_fresh_process":
             problems.append(f"{path}: determinism probe kind {probe.get('kind')!r} is not "
-                            "repeat_same_seed")
+                            "repeat_same_seed_fresh_process")
         if int(probe.get("repeats") or 0) < 2:
-            problems.append(f"{path}: determinism probe has {probe.get('repeats')} repeats (< 2)")
+            problems.append(
+                f"{path}: determinism probe repeats={probe.get('repeats')} (< 2) — "
+                "the fresh-process replay has not run"
+            )
         if probe.get("passed") is not True:
             problems.append(
-                f"{path}: determinism probe failed: {probe.get('mismatches')}"
+                f"{path}: determinism probe not passed: {probe.get('mismatches')}"
             )
 
 

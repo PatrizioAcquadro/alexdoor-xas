@@ -183,20 +183,25 @@ def aggregate_rollout_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _rollout_traces(result) -> dict[str, Any]:
-    """Comparable trace arrays/sequences of one ``RolloutResult``."""
+def rollout_traces_payload(result) -> dict[str, Any]:
+    """JSON-able trace record of one ``RolloutResult`` (determinism evidence).
+
+    Everything the repeat-same-seed comparison needs: per-tick
+    requested/adapted commands, adapter decision statuses, contact/force
+    traces, the success crossing tick, termination reason, and final state.
+    """
     requested = [
-        np.zeros(6) if d.requested is None else np.asarray(d.requested, dtype=np.float64)
+        [0.0] * 6 if d.requested is None else np.asarray(d.requested, dtype=np.float64).tolist()
         for d in result.decisions_per_tick
     ]
     applied = [
-        np.zeros(6) if d.applied is None else np.asarray(d.applied, dtype=np.float64)
+        [0.0] * 6 if d.applied is None else np.asarray(d.applied, dtype=np.float64).tolist()
         for d in result.decisions_per_tick
     ]
     return {
         "n_ticks": int(result.n_ticks),
-        "requested": np.stack(requested) if requested else np.zeros((0, 6)),
-        "applied": np.stack(applied) if applied else np.zeros((0, 6)),
+        "requested": requested,
+        "applied": applied,
         "statuses": [str(d.status) for d in result.decisions_per_tick],
         "first_success_tick": result.first_success_tick,
         "termination_reason": result.termination_reason,
@@ -206,16 +211,15 @@ def _rollout_traces(result) -> dict[str, Any]:
     }
 
 
-def rollout_trace_hash(result) -> str:
+def trace_payload_hash(traces: dict[str, Any]) -> str:
     """sha256 over one rollout's command/state traces (exact bytes)."""
-    traces = _rollout_traces(result)
     digest = hashlib.sha256()
     digest.update(str(traces["n_ticks"]).encode())
-    digest.update(traces["requested"].tobytes())
-    digest.update(traces["applied"].tobytes())
+    digest.update(np.asarray(traces["requested"], dtype=np.float64).tobytes())
+    digest.update(np.asarray(traces["applied"], dtype=np.float64).tobytes())
     digest.update("|".join(traces["statuses"]).encode())
     digest.update(str(traces["first_success_tick"]).encode())
-    digest.update(traces["termination_reason"].encode())
+    digest.update(str(traces["termination_reason"]).encode())
     digest.update(np.float64(traces["final_angle_rad"]).tobytes())
     digest.update("|".join(str(c) for c in traces["contact"]).encode())
     digest.update(
@@ -226,76 +230,144 @@ def rollout_trace_hash(result) -> str:
     return digest.hexdigest()
 
 
+def rollout_trace_hash(result) -> str:
+    """sha256 over one rollout's command/state traces (exact bytes)."""
+    return trace_payload_hash(rollout_traces_payload(result))
+
+
+def compare_trace_payloads(
+    reference: dict[str, Any],
+    candidate: dict[str, Any],
+    tolerances: dict[str, float],
+    label: str = "repeat 1",
+) -> tuple[list[str], dict[str, float]]:
+    """Trace-by-trace comparison of two rollout trace payloads."""
+    mismatches: list[str] = []
+    max_diffs = {"requested": 0.0, "applied": 0.0, "final_angle_rad": 0.0, "force_n": 0.0}
+    if candidate["n_ticks"] != reference["n_ticks"]:
+        mismatches.append(
+            f"{label}: n_ticks {candidate['n_ticks']} != {reference['n_ticks']}"
+        )
+        return mismatches, max_diffs  # lengths differ; elementwise is meaningless
+    for key in ("first_success_tick", "termination_reason"):
+        if candidate[key] != reference[key]:
+            mismatches.append(f"{label}: {key} {candidate[key]!r} != {reference[key]!r}")
+    if list(candidate["statuses"]) != list(reference["statuses"]):
+        mismatches.append(f"{label}: adapter decision statuses differ")
+    if list(candidate["contact"]) != list(reference["contact"]):
+        mismatches.append(f"{label}: contact trace differs")
+    for key, tol_name in (("requested", "command_abs"), ("applied", "command_abs")):
+        ref = np.asarray(reference[key], dtype=np.float64)
+        cand = np.asarray(candidate[key], dtype=np.float64)
+        diff = float(np.max(np.abs(cand - ref))) if ref.size else 0.0
+        max_diffs[key] = max(max_diffs[key], diff)
+        if diff > tolerances[tol_name]:
+            mismatches.append(
+                f"{label}: {key} command trace differs by {diff:.3g} "
+                f"(> {tolerances[tol_name]:.3g})"
+            )
+    angle_diff = abs(candidate["final_angle_rad"] - reference["final_angle_rad"])
+    max_diffs["final_angle_rad"] = angle_diff
+    if angle_diff > tolerances["angle_abs_rad"]:
+        mismatches.append(
+            f"{label}: final angle differs by {angle_diff:.3g} rad "
+            f"(> {tolerances['angle_abs_rad']:.3g})"
+        )
+    force_pairs = [
+        (a, b)
+        for a, b in zip(candidate["force"], reference["force"], strict=True)
+        if a is not None and b is not None
+    ]
+    force_diff = max((abs(a - b) for a, b in force_pairs), default=0.0)
+    max_diffs["force_n"] = force_diff
+    if force_diff > tolerances["force_abs_n"]:
+        mismatches.append(
+            f"{label}: force trace differs by {force_diff:.3g} N "
+            f"(> {tolerances['force_abs_n']:.3g})"
+        )
+    return mismatches, max_diffs
+
+
+DETERMINISM_PROBE_KIND = "repeat_same_seed_fresh_process"
+"""The determinism contract of this build: the k-th episode of a process is
+bit-reproducible across fresh processes for the same seeds/configuration, but
+same-seed repeats *within* one process are history-dependent (PhysX internal
+state evolves per episode — measured at pose D4: 4 distinct trajectories in 6
+in-process repeats, all exactly reproducible across processes). The probe
+therefore compares the *first* fixed-seed rollout of the primary eval process
+against the first rollout of one or more fresh replay processes with identical
+reset seed, policy sampling seed, pose, checkpoint, and configuration."""
+
+
+def determinism_probe_reference(result, *, seed: int) -> dict[str, Any]:
+    """Pending fresh-process probe block for an eval payload (repeats=1).
+
+    A replay invocation (``--determinism-replay``) re-runs the same rollout as
+    the first episode of a fresh process and completes the block via
+    :func:`determinism_probe_update`.
+    """
+    traces = rollout_traces_payload(result)
+    return {
+        "kind": DETERMINISM_PROBE_KIND,
+        "seed": seed,
+        "repeats": 1,
+        "tolerances": dict(DETERMINISM_TOLERANCES),
+        "trace_sha256": [trace_payload_hash(traces)],
+        "reference_traces": traces,
+        "max_abs_diffs": None,
+        "mismatches": [],
+        "passed": None,
+        "note": "replay pending: rerun this eval with --determinism-replay",
+    }
+
+
+def determinism_probe_update(probe: dict[str, Any], result) -> dict[str, Any]:
+    """Fold one fresh-process replay rollout into a pending/complete probe block."""
+    if probe.get("kind") != DETERMINISM_PROBE_KIND:
+        raise ValueError(f"unexpected determinism probe kind {probe.get('kind')!r}")
+    candidate = rollout_traces_payload(result)
+    label = f"repeat {probe['repeats']}"
+    mismatches, max_diffs = compare_trace_payloads(
+        probe["reference_traces"], candidate, probe["tolerances"], label=label
+    )
+    probe = dict(probe)
+    probe["repeats"] = int(probe["repeats"]) + 1
+    probe["trace_sha256"] = list(probe["trace_sha256"]) + [trace_payload_hash(candidate)]
+    probe["mismatches"] = list(probe["mismatches"]) + mismatches
+    previous = probe.get("max_abs_diffs") or {}
+    probe["max_abs_diffs"] = {
+        key: max(float(previous.get(key, 0.0)), value) for key, value in max_diffs.items()
+    }
+    probe["passed"] = not probe["mismatches"]
+    probe.pop("note", None)
+    return probe
+
+
 def determinism_probe_report(
     results: list,
     *,
     seed: int,
     tolerances: dict[str, float] | None = None,
 ) -> dict[str, Any]:
-    """Genuine repeat-same-seed determinism evidence for one rollout config.
+    """In-process repeat comparison over ``RolloutResult`` runs (pure helper).
 
-    ``results`` are >= 2 ``RolloutResult`` runs of the *same* environment
-    reset seed, policy sampling seed, pose, checkpoint, and configuration.
-    Every repeat is compared to the first: tick counts, per-tick
-    requested/adapted command traces, adapter decision statuses, the success
-    crossing tick, termination reason, final state, and force/contact traces,
-    within explicit tolerances. This — not the across-seed ``fixed_reset``
-    spread — is the determinism claim.
+    Used by unit tests to exercise the comparison machinery; production eval
+    evidence uses the fresh-process probe (:data:`DETERMINISM_PROBE_KIND`)
+    because same-seed repeats within one sim process are history-dependent.
     """
     if len(results) < 2:
         raise ValueError("determinism probe needs at least 2 repeat rollouts")
     tolerances = dict(DETERMINISM_TOLERANCES if tolerances is None else tolerances)
-    reference = _rollout_traces(results[0])
+    reference = rollout_traces_payload(results[0])
     mismatches: list[str] = []
     max_diffs = {"requested": 0.0, "applied": 0.0, "final_angle_rad": 0.0, "force_n": 0.0}
-
     for index, result in enumerate(results[1:], start=1):
-        label = f"repeat {index}"
-        traces = _rollout_traces(result)
-        if traces["n_ticks"] != reference["n_ticks"]:
-            mismatches.append(
-                f"{label}: n_ticks {traces['n_ticks']} != {reference['n_ticks']}"
-            )
-            continue  # trace lengths differ; elementwise comparison is meaningless
-        for key in ("first_success_tick", "termination_reason"):
-            if traces[key] != reference[key]:
-                mismatches.append(f"{label}: {key} {traces[key]!r} != {reference[key]!r}")
-        if traces["statuses"] != reference["statuses"]:
-            mismatches.append(f"{label}: adapter decision statuses differ")
-        if traces["contact"] != reference["contact"]:
-            mismatches.append(f"{label}: contact trace differs")
-        for key, tol_name in (("requested", "command_abs"), ("applied", "command_abs")):
-            diff = (
-                float(np.max(np.abs(traces[key] - reference[key])))
-                if reference[key].size
-                else 0.0
-            )
-            max_diffs[key] = max(max_diffs[key], diff)
-            if diff > tolerances[tol_name]:
-                mismatches.append(
-                    f"{label}: {key} command trace differs by {diff:.3g} "
-                    f"(> {tolerances[tol_name]:.3g})"
-                )
-        angle_diff = abs(traces["final_angle_rad"] - reference["final_angle_rad"])
-        max_diffs["final_angle_rad"] = max(max_diffs["final_angle_rad"], angle_diff)
-        if angle_diff > tolerances["angle_abs_rad"]:
-            mismatches.append(
-                f"{label}: final angle differs by {angle_diff:.3g} rad "
-                f"(> {tolerances['angle_abs_rad']:.3g})"
-            )
-        force_pairs = [
-            (a, b)
-            for a, b in zip(traces["force"], reference["force"], strict=True)
-            if a is not None and b is not None
-        ]
-        force_diff = max((abs(a - b) for a, b in force_pairs), default=0.0)
-        max_diffs["force_n"] = max(max_diffs["force_n"], force_diff)
-        if force_diff > tolerances["force_abs_n"]:
-            mismatches.append(
-                f"{label}: force trace differs by {force_diff:.3g} N "
-                f"(> {tolerances['force_abs_n']:.3g})"
-            )
-
+        repeat_mismatches, repeat_diffs = compare_trace_payloads(
+            reference, rollout_traces_payload(result), tolerances, label=f"repeat {index}"
+        )
+        mismatches.extend(repeat_mismatches)
+        for key, value in repeat_diffs.items():
+            max_diffs[key] = max(max_diffs[key], value)
     return {
         "kind": "repeat_same_seed",
         "seed": seed,
@@ -329,12 +401,17 @@ def scripted_reference_payload(
 
 
 __all__ = [
+    "DETERMINISM_PROBE_KIND",
     "DETERMINISM_TOLERANCES",
     "aggregate_rollout_rows",
+    "compare_trace_payloads",
     "contact_report",
+    "determinism_probe_reference",
     "determinism_probe_report",
+    "determinism_probe_update",
     "rollout_failure_label",
     "rollout_trace_hash",
+    "rollout_traces_payload",
     "scripted_reference_payload",
     "seed_protocol",
     "summarize_decision_warnings",

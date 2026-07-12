@@ -61,6 +61,15 @@ parser.add_argument(
     help="Evaluate the scripted controller on the same rollout seed plan.",
 )
 parser.add_argument(
+    "--determinism-replay",
+    type=str,
+    default=None,
+    help=(
+        "Path to an existing eval JSON: rerun its first fixed-seed rollout as this "
+        "fresh process's first episode and complete the repeat-same-seed probe."
+    ),
+)
+parser.add_argument(
     "--clean-shutdown",
     action="store_true",
     help="Call SimulationApp.close() before exiting; useful for debugging Kit shutdown hangs.",
@@ -134,7 +143,8 @@ from alexdoor_xas.policies.common.eval_metadata import (  # noqa: E402
 from alexdoor_xas.policies.common.rollout_eval import (  # noqa: E402
     aggregate_rollout_rows,
     contact_report,
-    determinism_probe_report,
+    determinism_probe_reference,
+    determinism_probe_update,
     rollout_failure_label,
     scripted_reference_payload,
     seed_protocol,
@@ -358,41 +368,42 @@ def main() -> int:
         provenance.update(
             verify_checkpoint_dataset_binding(policy.stats, provenance, paths.DATASETS_DIR)
         )
+        if args.determinism_replay:
+            return _run_determinism_replay(env, policy, checkpoint_path, success_angle_rad)
+
         plan = _episode_plan(env)
         protocol = _seed_protocol(env)
         rows: list[dict] = []
+        first_fixed_result = None
         fixed_i = 0
         random_i = 0
         for item in plan:
-            row, _ = _run_rollout(env, policy, item.seed, item.variation, success_angle_rad)
+            row, result = _run_rollout(env, policy, item.seed, item.variation, success_angle_rad)
             rows.append(row)
             if item.variation is None:
+                if first_fixed_result is None:
+                    first_fixed_result = result  # this process's first episode
                 print(f"[fixed {fixed_i}] {_row_line(row)}", flush=True)
                 fixed_i += 1
             else:
                 print(f"[rand {random_i}] {_row_line(row)}", flush=True)
                 random_i += 1
 
-        # Repeat-same-seed determinism probe: rerun the first fixed seed with
-        # the identical reset seed AND policy sampling seed; compare traces.
+        # Repeat-same-seed determinism evidence: same-seed repeats *within* one
+        # sim process are history-dependent (PhysX internal state evolves per
+        # episode), so the probe records this process's first fixed rollout
+        # (identical reset AND sampling seed) and is completed by a fresh
+        # --determinism-replay process that reruns it as *its* first episode.
         determinism_probe = None
-        if dp_cfg.rollout.episodes_fixed > 0:
-            probe_seed = dp_cfg.rollout.base_seed
-            probe_results = [
-                _run_rollout(env, policy, probe_seed, None, success_angle_rad)[1]
-                for _ in range(dp_cfg.rollout.determinism_repeats)
-            ]
-            determinism_probe = determinism_probe_report(probe_results, seed=probe_seed)
+        if first_fixed_result is not None:
+            determinism_probe = determinism_probe_reference(
+                first_fixed_result, seed=dp_cfg.rollout.base_seed
+            )
             print(
-                f"[determinism] repeat-same-seed x{determinism_probe['repeats']} "
-                f"seed={probe_seed} passed={determinism_probe['passed']}",
+                f"[determinism] reference recorded (seed={dp_cfg.rollout.base_seed}); "
+                "fresh-process replay pending",
                 flush=True,
             )
-            if not determinism_probe["passed"]:
-                raise RuntimeError(
-                    "repeat-same-seed determinism probe failed: "
-                    + "; ".join(determinism_probe["mismatches"])
-                )
 
         aggregate = aggregate_rollout_rows(rows)
         matched_scripted_reference = None
@@ -491,6 +502,53 @@ def main() -> int:
                 traceback.print_exc()
                 rc = 1 if rc == 0 else rc
     return rc
+
+
+def _run_determinism_replay(env, policy, checkpoint_path, success_angle_rad: float) -> int:
+    """Fresh-process leg of the repeat-same-seed probe: rerun + compare + record."""
+    path = paths.REPO_ROOT / args.determinism_replay
+    payload = json.loads(path.read_text())
+    probe = payload.get("determinism_probe")
+    if not probe:
+        raise RuntimeError(f"{path} carries no determinism probe block to complete")
+    # The replay is only valid evidence if this process is configured exactly
+    # like the reference eval; any drift is a hard error, not a comparison.
+    expected = {
+        "checkpoint_sha256": file_sha256(checkpoint_path),
+        "action_space": policy.action_space,
+        "obs_preset": policy.obs_preset,
+        "max_ticks": dp_cfg.rollout.max_ticks,
+        "success_angle_deg": dp_cfg.rollout.success_angle_deg,
+        "base_seed": dp_cfg.rollout.base_seed,
+        "horizon": policy.chunk_size,
+        "n_action_steps": dp_cfg.rollout.n_action_steps,
+        "sampler": dp_cfg.rollout.sampler,
+        "num_inference_steps": dp_cfg.rollout.num_inference_steps,
+    }
+    for key, value in expected.items():
+        if payload.get(key) != value:
+            raise RuntimeError(
+                f"replay configuration mismatch on {key}: eval has "
+                f"{payload.get(key)!r}, replay resolved {value!r}"
+            )
+    if payload.get("door_pose") != _door_pose_payload():
+        raise RuntimeError(
+            f"replay door pose {_door_pose_payload()} != eval {payload.get('door_pose')}"
+        )
+    _, result = _run_rollout(env, policy, dp_cfg.rollout.base_seed, None, success_angle_rad)
+    updated = determinism_probe_update(probe, result)
+    payload["determinism_probe"] = updated
+    path.write_text(json.dumps(payload, indent=2) + "\n")
+    print(
+        f"[determinism-replay] seed={dp_cfg.rollout.base_seed} "
+        f"repeats={updated['repeats']} passed={updated['passed']} -> {path}",
+        flush=True,
+    )
+    if not updated["passed"]:
+        for mismatch in updated["mismatches"]:
+            print(f"[determinism-mismatch] {mismatch}", flush=True)
+        return 1
+    return 0
 
 
 def _row_line(row: dict) -> str:

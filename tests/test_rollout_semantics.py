@@ -19,7 +19,10 @@ from alexdoor_xas.adapters import (
     rollout_chunks,
 )
 from alexdoor_xas.policies.common.rollout_eval import (
+    DETERMINISM_PROBE_KIND,
+    determinism_probe_reference,
     determinism_probe_report,
+    determinism_probe_update,
     rollout_failure_label,
     rollout_trace_hash,
 )
@@ -311,6 +314,32 @@ def test_trace_hash_is_stable_and_content_sensitive() -> None:
         force_n_per_tick=[None],
     )
     assert rollout_trace_hash(synthetic) != rollout_trace_hash(a)
+
+
+def test_fresh_process_probe_reference_and_replay_cycle() -> None:
+    # JSON round-trip mirrors what the eval artifact stores between the
+    # primary eval process and the fresh replay process.
+    import json
+
+    reference_result, replay_result = _result_pair(perturb=False)
+    probe = determinism_probe_reference(reference_result, seed=0)
+    assert probe["kind"] == DETERMINISM_PROBE_KIND
+    assert probe["repeats"] == 1 and probe["passed"] is None
+    probe = json.loads(json.dumps(probe))
+    updated = determinism_probe_update(probe, replay_result)
+    assert updated["repeats"] == 2
+    assert updated["passed"] is True
+    assert len(set(updated["trace_sha256"])) == 1
+    assert "note" not in updated
+
+
+def test_fresh_process_probe_replay_detects_divergence() -> None:
+    reference_result, replay_result = _result_pair(perturb=True)
+    probe = determinism_probe_reference(reference_result, seed=0)
+    updated = determinism_probe_update(probe, replay_result)
+    assert updated["passed"] is False
+    assert any("force trace" in m for m in updated["mismatches"])
+    assert len(set(updated["trace_sha256"])) == 2
 
 
 def test_determinism_probe_requires_two_repeats() -> None:
