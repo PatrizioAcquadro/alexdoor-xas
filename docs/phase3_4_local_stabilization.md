@@ -123,11 +123,20 @@ any cell. The two formerly blocking seed-112 Diffusion entries now peak at
 to the calibrated 5 mm approach step. The bound remains unchanged. The pre-fix
 local artifact set contained peaks of 230.7 N, 201.9 N, and an older observed
 maximum of approximately 272.2 N; those artifacts are superseded, not hidden.
-All warnings are
-warn-level arm joint-velocity flags (0.4–2.3 rad/s over task-level caps on
-wrist/elbow joints, same class the scripted baseline shows); reported verbatim
-in every eval JSON, none suppressed. Across-seed fixed-reset output spread is
-reported separately (maximum 0.01014 rad); it is not determinism evidence.
+All 640 warnings are warn-level lower-body joint-velocity flags from the
+welded-pelvis passive-body reset transient: 160 in each ACT/Diffusion × A2/A3
+cell, at ticks 0–14, with maximum exceedance 2.328 rad/s, maximum ratio 0.2395,
+and at most two consecutive control ticks. The structured adjudication envelope
+accepts only the existing five lower-body joints, tick index ≤20, exceedance
+≤2.5 rad/s and ≤0.25 of the configured limit, streak/duration ≤2 ticks, and
+≤7 records per rollout. Expected knee/ankle limits remain exactly 9.3/9.72
+rad/s and are compared with relative tolerance 1e-6 for float32 serialization.
+Phase remains recorded evidence but is not an acceptance criterion: 167 records
+are labeled `contact` because sensed contact can latch inside the settle window;
+any warning after tick 20 requires review regardless of phase. Warnings remain
+reported verbatim in every eval JSON, none suppressed. Across-seed fixed-reset
+output spread is reported separately (maximum 0.01014 rad); it is not
+determinism evidence.
 
 Genuine same-seed evidence is a fresh-process replay of the first fixed rollout
 for each policy/pose file with identical reset seed, policy sampling seed,

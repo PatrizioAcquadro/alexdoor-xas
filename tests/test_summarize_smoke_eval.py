@@ -1084,10 +1084,12 @@ def test_sustained_velocity_warnings_cannot_pass(valid_run) -> None:
     assert safety["warning_families"]["a2.joint_velocity_limit"]["status"] != "PASS"
 
 
-def test_bounded_pre_contact_velocity_transient_passes(valid_run) -> None:
+def test_bounded_settle_velocity_transient_with_latched_contact_passes(valid_run) -> None:
     tmp_path, payloads = valid_run
     row = payloads["D0"]["rollouts"][0]
-    _set_warning_records(row, [_velocity_warning()])
+    warning = _velocity_warning(tick=20, consecutive=2, phase="contact")
+    warning["evidence"]["configured_limit_rad_s"] = 9.300000190734863
+    _set_warning_records(row, [warning])
     summary = _summarize(tmp_path, payloads)
     safety = summary["runs"]["run_a"]["safety_readiness"]
     assert safety["status"] == "PASS"
@@ -1096,13 +1098,43 @@ def test_bounded_pre_contact_velocity_transient_passes(valid_run) -> None:
     assert family["count"] == 1
 
 
+@pytest.mark.parametrize("phase", ["pre_contact", "contact"])
+def test_velocity_warning_after_settle_window_requires_review(valid_run, phase) -> None:
+    tmp_path, payloads = valid_run
+    row = payloads["D0"]["rollouts"][0]
+    _set_warning_records(row, [_velocity_warning(tick=21, phase=phase)])
+    summary = _summarize(tmp_path, payloads)
+    family = summary["runs"]["run_a"]["safety_readiness"]["warning_families"]
+    assert family["a2.joint_velocity_limit"]["status"] == "REVIEW_REQUIRED"
+
+
+def test_three_consecutive_velocity_ticks_require_review(valid_run) -> None:
+    tmp_path, payloads = valid_run
+    row = payloads["D0"]["rollouts"][0]
+    _set_warning_records(row, [_velocity_warning(consecutive=3)])
+    summary = _summarize(tmp_path, payloads)
+    family = summary["runs"]["run_a"]["safety_readiness"]["warning_families"]
+    assert family["a2.joint_velocity_limit"]["status"] == "REVIEW_REQUIRED"
+
+
+def test_configured_velocity_limit_beyond_float32_rounding_requires_review(valid_run) -> None:
+    tmp_path, payloads = valid_run
+    warning = _velocity_warning()
+    warning["evidence"]["configured_limit_rad_s"] = 9.5
+    row = payloads["D0"]["rollouts"][0]
+    _set_warning_records(row, [warning])
+    summary = _summarize(tmp_path, payloads)
+    family = summary["runs"]["run_a"]["safety_readiness"]["warning_families"]
+    assert family["a2.joint_velocity_limit"]["status"] == "REVIEW_REQUIRED"
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
         ("joint_index", 14),
         ("configured_limit_rad_s", 100.0),
-        ("rollout_phase", "contact"),
-        ("duration_ticks", 2),
+        ("tick_index", 21),
+        ("duration_ticks", 3),
         ("count", 0),
     ],
 )

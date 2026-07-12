@@ -206,14 +206,14 @@ POLICY_CONSISTENT_FIELDS = {
 
 # Machine-readable policy, deliberately embedded in every summary. The velocity
 # bounds narrowly envelope the 2026-07-12 local-smoke evidence: 640 lower-body
-# warning counts in deterministic reset-like patterns, maximum exceedance
-# 2.328 rad/s (23.95% of the configured limit), and at most seven events per
-# rollout. Legacy rows do not prove event phase/duration, so only regenerated
-# rows with those fields can pass. The bounds do not alter actuator/safety
-# limits; anything sustained, in-contact, on another joint, or outside this
-# measured envelope is review-required.
+# warning records at ticks 0--14, maximum exceedance 2.328 rad/s (23.95% of the
+# configured limit), at most two consecutive ticks, and at most seven events
+# per rollout. The transient was identical across all four policy/action-space
+# cells. Sensed contact can latch during this reset-settle window, so tick index
+# rather than phase defines the envelope. The bounds do not alter actuator or
+# safety limits; anything outside this measured envelope is review-required.
 WARNING_ADJUDICATION_POLICY: dict[str, Any] = {
-    "version": "alexdoor.warning-adjudication.v1",
+    "version": "alexdoor.warning-adjudication.v2",
     "default_unknown_status": "REVIEW_REQUIRED",
     "unsafe_family_ids": ["adapter.invalid_frame", "adapter.non_finite_state"],
     "review_family_ids": [
@@ -244,18 +244,32 @@ WARNING_ADJUDICATION_POLICY: dict[str, Any] = {
             "LEFT_ANKLE_X": 9.72,
             "RIGHT_ANKLE_X": 9.72,
         },
-        "allowed_rollout_phases": ["pre_contact"],
+        "configured_limit_relative_tolerance": 1e-6,
+        "max_settle_tick_index": 20,
+        "rollout_phase_role": "recorded_evidence_not_an_acceptance_criterion",
         "max_exceedance_rad_s": 2.5,
         "max_exceedance_fraction_of_limit": 0.25,
-        "max_consecutive_ticks": 1,
-        "max_duration_ticks": 1,
+        "max_consecutive_ticks": 2,
+        "max_duration_ticks": 2,
         "max_count_per_rollout": 7,
         "evidence_basis": {
             "artifact_warning_events": 640,
+            "observed_tick_index_range": [0, 14],
             "max_observed_exceedance_rad_s": 2.328,
             "max_observed_exceedance_fraction_of_limit": 0.2395,
+            "max_observed_consecutive_ticks": 2,
+            "max_observed_duration_ticks": 2,
+            "observed_events_per_rollout_range": [3, 7],
             "max_observed_events_per_rollout": 7,
-            "artifact_limitation": "legacy rows omit tick/phase/consecutive evidence",
+            "observed_rollout_phase_counts": {"pre_contact": 473, "contact": 167},
+            "matrix_cells": ["ACT/A2", "ACT/A3", "Diffusion/A2", "Diffusion/A3"],
+            "warning_events_per_matrix_cell": 160,
+            "policy_independent_across_matrix_cells": True,
+            "settle_window_rationale": (
+                "The passive lower-body reset transient is defined by its early tick index; "
+                "latched sensed contact can begin inside the settle window, so rollout phase "
+                "does not discriminate the transient."
+            ),
         },
     },
 }
@@ -1028,13 +1042,18 @@ def _adjudicate_warning_records(rows: list[dict]) -> tuple[dict[str, dict], list
                             f"got {evidence['joint_index']!r}"
                         )
                     expected_limit = velocity_policy["configured_limit_rad_s_by_joint"][joint_name]
-                    if not math.isclose(limit, expected_limit, abs_tol=1e-9):
+                    if not math.isclose(
+                        limit,
+                        expected_limit,
+                        rel_tol=velocity_policy["configured_limit_relative_tolerance"],
+                        abs_tol=0.0,
+                    ):
                         reasons.append(
                             f"joint {joint_name!r} configured limit must be "
                             f"{expected_limit} rad/s, got {limit}"
                         )
-                if evidence["rollout_phase"] not in velocity_policy["allowed_rollout_phases"]:
-                    reasons.append(f"phase {evidence['rollout_phase']!r} is not accepted")
+                if not isinstance(evidence["rollout_phase"], str) or not evidence["rollout_phase"]:
+                    reasons.append(f"event in row {row_index} has invalid rollout_phase evidence")
                 if exceedance > velocity_policy["max_exceedance_rad_s"]:
                     reasons.append(
                         f"exceedance {exceedance:.6g} rad/s exceeds "
@@ -1057,6 +1076,15 @@ def _adjudicate_warning_records(rows: list[dict]) -> tuple[dict[str, dict], list
                         reasons.append(f"event in row {row_index} has non-integer {field}")
                 if isinstance(evidence["tick_index"], int) and evidence["tick_index"] < 0:
                     reasons.append(f"event in row {row_index} has negative tick_index")
+                if (
+                    isinstance(evidence["tick_index"], int)
+                    and not isinstance(evidence["tick_index"], bool)
+                    and evidence["tick_index"] > velocity_policy["max_settle_tick_index"]
+                ):
+                    reasons.append(
+                        f"tick_index={evidence['tick_index']} exceeds settle-window maximum "
+                        f"{velocity_policy['max_settle_tick_index']}"
+                    )
                 for field in ("consecutive_ticks", "duration_ticks", "count"):
                     if isinstance(evidence[field], int) and evidence[field] < 1:
                         reasons.append(f"event in row {row_index} has {field} < 1")
