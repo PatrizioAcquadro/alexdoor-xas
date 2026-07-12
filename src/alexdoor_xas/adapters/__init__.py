@@ -13,7 +13,7 @@ surface, so the layer is unit-testable and reusable by ACT / Diffusion Policy
 from .a2 import A2Adapter
 from .a3 import A3Adapter, validate_object_frame
 from .a4 import A4Adapter, A4AdapterCfg, A4ExecutionResult, StageResult
-from .base import AdapterDecision, AdapterLog, AdapterStatus, StepContext
+from .base import AdapterDecision, AdapterLog, AdapterStatus, AdapterWarning, StepContext
 from .limits import (
     ALEX_V2_ROBOT_TAG,
     MAX_HINGE_ANGLE_RAD,
@@ -52,6 +52,7 @@ __all__ = [
     "AdapterDecision",
     "AdapterLog",
     "AdapterStatus",
+    "AdapterWarning",
     "ChunkSource",
     "InvalidSimulatorStateError",
     "DoorPanelGeometry",

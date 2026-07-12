@@ -81,8 +81,10 @@ def _row(seed: int, randomized: bool, pose: dict) -> dict:
         "n_accepted": 300,
         "n_corrected": 0,
         "n_rejected": 0,
-        "n_warnings": 2,
-        "warning_counts": {"arm joint JOINT_3 reached 4.4 rad/s after settle": 2},
+        "n_warnings": 0,
+        "warning_counts": {},
+        "warning_family_counts": {},
+        "warning_records": [],
         "notes": "",
     }
 
@@ -609,14 +611,173 @@ def test_non_finite_all_sample_force_evidence_fails_readiness(valid_run) -> None
     )
 
 
-def test_unsafe_warning_fails_safety(valid_run) -> None:
+def _warning_record(family_id: str, **evidence) -> dict:
+    return {
+        "id": family_id,
+        "message": "machine-readable warning fixture",
+        "evidence": evidence,
+    }
+
+
+def _set_warning_records(row: dict, records: list[dict]) -> None:
+    row["n_warnings"] = len(records)
+    row["warning_counts"] = {"machine-readable warning fixture": len(records)}
+    family_counts: dict[str, int] = {}
+    for record in records:
+        family_id = record["id"]
+        family_counts[family_id] = family_counts.get(family_id, 0) + 1
+    row["warning_family_counts"] = family_counts
+    row["warning_records"] = records
+
+
+def _velocity_warning(
+    *,
+    tick: int = 0,
+    exceedance: float = 0.5,
+    consecutive: int = 1,
+    count: int = 1,
+    phase: str = "pre_contact",
+) -> dict:
+    return _warning_record(
+        "a2.joint_velocity_limit",
+        joint_index=13,
+        joint_name="LEFT_KNEE_Y",
+        tick_index=tick,
+        rollout_phase=phase,
+        measured_velocity_rad_s=9.8,
+        configured_limit_rad_s=9.3,
+        exceedance_rad_s=exceedance,
+        consecutive_ticks=consecutive,
+        duration_ticks=consecutive,
+        count=count,
+    )
+
+
+def test_unknown_warning_family_requires_review(valid_run) -> None:
     tmp_path, payloads = valid_run
-    payloads["D1"]["rollouts"][0]["warning_counts"] = {"non-finite command rejected": 1}
-    payloads["D1"]["rollouts"][0]["n_warnings"] = 1
+    row = payloads["D1"]["rollouts"][0]
+    _set_warning_records(row, [_warning_record("a9.future_warning", detail="new")])
+    summary = _summarize(tmp_path, payloads)
+    safety = summary["runs"]["run_a"]["safety_readiness"]
+    assert safety["status"] == "REVIEW_REQUIRED"
+    assert safety["warning_families"]["a9.future_warning"]["status"] == "REVIEW_REQUIRED"
+
+
+def test_legacy_warning_without_structured_evidence_requires_review(valid_run) -> None:
+    tmp_path, payloads = valid_run
+    row = payloads["D1"]["rollouts"][0]
+    row["n_warnings"] = 1
+    row["warning_counts"] = {"legacy free-text warning": 1}
+    row["warning_family_counts"] = {}
+    row["warning_records"] = []
+    summary = _summarize(tmp_path, payloads)
+    safety = summary["runs"]["run_a"]["safety_readiness"]
+    assert safety["status"] == "REVIEW_REQUIRED"
+    assert any("warning_records has 0 event" in reason for reason in safety["review_reasons"])
+
+
+def test_extreme_velocity_warning_cannot_pass(valid_run) -> None:
+    tmp_path, payloads = valid_run
+    row = payloads["D1"]["rollouts"][0]
+    _set_warning_records(row, [_velocity_warning(exceedance=8.0)])
+    summary = _summarize(tmp_path, payloads)
+    safety = summary["runs"]["run_a"]["safety_readiness"]
+    assert safety["status"] in {"FAIL", "REVIEW_REQUIRED"}
+    assert safety["warning_families"]["a2.joint_velocity_limit"]["status"] != "PASS"
+
+
+def test_sustained_velocity_warnings_cannot_pass(valid_run) -> None:
+    tmp_path, payloads = valid_run
+    records = [
+        _velocity_warning(tick=tick, consecutive=tick + 1, count=tick + 1)
+        for tick in range(8)
+    ]
+    for pose_id in ("D0", "D1"):
+        for row in payloads[pose_id]["rollouts"]:
+            _set_warning_records(row, copy.deepcopy(records))
+    summary = _summarize(tmp_path, payloads)
+    safety = summary["runs"]["run_a"]["safety_readiness"]
+    assert safety["status"] in {"FAIL", "REVIEW_REQUIRED"}
+    assert safety["warning_families"]["a2.joint_velocity_limit"]["status"] != "PASS"
+
+
+def test_bounded_pre_contact_velocity_transient_passes(valid_run) -> None:
+    tmp_path, payloads = valid_run
+    row = payloads["D0"]["rollouts"][0]
+    _set_warning_records(row, [_velocity_warning()])
+    summary = _summarize(tmp_path, payloads)
+    safety = summary["runs"]["run_a"]["safety_readiness"]
+    assert safety["status"] == "PASS"
+    family = safety["warning_families"]["a2.joint_velocity_limit"]
+    assert family["status"] == "PASS"
+    assert family["count"] == 1
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("joint_index", 14),
+        ("configured_limit_rad_s", 100.0),
+        ("rollout_phase", "contact"),
+        ("duration_ticks", 2),
+        ("count", 0),
+    ],
+)
+def test_velocity_evidence_outside_each_bound_requires_review(valid_run, field, value) -> None:
+    tmp_path, payloads = valid_run
+    warning = _velocity_warning()
+    warning["evidence"][field] = value
+    row = payloads["D0"]["rollouts"][0]
+    _set_warning_records(row, [warning])
+    summary = _summarize(tmp_path, payloads)
+    family = summary["runs"]["run_a"]["safety_readiness"]["warning_families"]
+    assert family["a2.joint_velocity_limit"]["status"] == "REVIEW_REQUIRED"
+
+
+def test_warning_message_counts_must_match_structured_records(valid_run) -> None:
+    tmp_path, payloads = valid_run
+    row = payloads["D0"]["rollouts"][0]
+    _set_warning_records(row, [_velocity_warning()])
+    row["warning_counts"] = {"different human message": 1}
+    summary = _summarize(tmp_path, payloads)
+    safety = summary["runs"]["run_a"]["safety_readiness"]
+    assert safety["status"] == "REVIEW_REQUIRED"
+    assert any("warning_counts do not match" in reason for reason in safety["review_reasons"])
+
+
+@pytest.mark.parametrize("family_id", ["adapter.non_finite_state", "adapter.invalid_frame"])
+def test_unsafe_warning_family_fails_safety(valid_run, family_id) -> None:
+    tmp_path, payloads = valid_run
+    row = payloads["D1"]["rollouts"][0]
+    _set_warning_records(row, [_warning_record(family_id, tick_index=4)])
     summary = _summarize(tmp_path, payloads)
     assert summary["safety_readiness"] == "FAIL"
     safety = summary["runs"]["run_a"]["safety_readiness"]
-    assert any("unsafe/invalid" in reason for reason in safety["fail_reasons"])
+    assert safety["warning_families"][family_id]["status"] == "FAIL"
+
+
+def test_mixed_warning_families_take_worst_outcome(valid_run) -> None:
+    tmp_path, payloads = valid_run
+    row = payloads["D1"]["rollouts"][0]
+    _set_warning_records(
+        row,
+        [
+            _velocity_warning(),
+            _warning_record("a9.future_warning", detail="new"),
+            _warning_record("adapter.invalid_frame", tick_index=4),
+        ],
+    )
+    summary = _summarize(tmp_path, payloads)
+    safety = summary["runs"]["run_a"]["safety_readiness"]
+    assert safety["status"] == "FAIL"
+    assert {
+        family_id: result["status"]
+        for family_id, result in safety["warning_families"].items()
+    } == {
+        "a2.joint_velocity_limit": "PASS",
+        "a9.future_warning": "REVIEW_REQUIRED",
+        "adapter.invalid_frame": "FAIL",
+    }
 
 
 def test_systematic_rejections_fail_safety(valid_run) -> None:
@@ -659,9 +820,9 @@ def test_env_truncation_is_at_least_review(valid_run) -> None:
     assert any("truncation" in reason for reason in safety["review_reasons"])
 
 
-def test_benign_velocity_warnings_do_not_fail_safety(valid_run) -> None:
+def test_zero_warnings_pass_safety(valid_run) -> None:
     tmp_path, payloads = valid_run
     summary = _summarize(tmp_path, payloads)
     safety = summary["runs"]["run_a"]["safety_readiness"]
     assert safety["status"] == "PASS"
-    assert safety["counts"]["n_warnings"] == 8  # reported, never suppressed
+    assert safety["counts"]["n_warnings"] == 0

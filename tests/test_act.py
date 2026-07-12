@@ -588,6 +588,14 @@ def test_rollout_eval_warning_summary_and_aggregate() -> None:
     assert warnings["n_warnings"] == 2
     assert any("position limit" in message for message in warnings["warning_counts"])
     assert any("velocity exceeds" in message for message in warnings["warning_counts"])
+    assert warnings["warning_family_counts"] == {
+        "a2.joint_position_limit": 1,
+        "a2.joint_velocity_limit": 1,
+    }
+    assert {record["id"] for record in warnings["warning_records"]} == {
+        "a2.joint_position_limit",
+        "a2.joint_velocity_limit",
+    }
 
     rows = [
         {
@@ -610,6 +618,10 @@ def test_rollout_eval_warning_summary_and_aggregate() -> None:
             "n_rejected": 1,
             "n_warnings": 1,
             "warning_counts": {"synthetic warning": 1},
+            "warning_family_counts": {"test.synthetic": 1},
+            "warning_records": [
+                {"id": "test.synthetic", "message": "synthetic warning", "evidence": {}}
+            ],
         },
     ]
     aggregate = aggregate_rollout_rows(rows)
@@ -621,6 +633,11 @@ def test_rollout_eval_warning_summary_and_aggregate() -> None:
     assert aggregate["adapter"]["n_rejected"] == 1
     assert aggregate["adapter"]["n_warnings"] == 3
     assert aggregate["adapter"]["warning_counts"]["synthetic warning"] == 1
+    assert aggregate["adapter"]["warning_family_counts"] == {
+        "a2.joint_position_limit": 1,
+        "a2.joint_velocity_limit": 1,
+        "test.synthetic": 1,
+    }
 
 
 def test_seed_protocol_records_fixed_randomized_seeds_and_variation_bounds() -> None:

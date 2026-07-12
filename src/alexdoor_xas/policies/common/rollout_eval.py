@@ -212,14 +212,22 @@ def rollout_failure_label(
 
 
 def summarize_decision_warnings(decisions) -> dict[str, Any]:
-    """Count adapter warnings in an ordered decision sequence."""
+    """Count warning messages and preserve structured per-event evidence."""
     counts: Counter[str] = Counter()
+    family_counts: Counter[str] = Counter()
+    records: list[dict[str, Any]] = []
     for decision in decisions:
         for warning in getattr(decision, "warnings", ()) or ():
             counts[str(warning)] += 1
+        for warning in getattr(decision, "warning_records", ()) or ():
+            record = warning.to_dict()
+            records.append(record)
+            family_counts[record["id"]] += 1
     return {
         "n_warnings": sum(counts.values()),
         "warning_counts": dict(sorted(counts.items())),
+        "warning_family_counts": dict(sorted(family_counts.items())),
+        "warning_records": records,
     }
 
 
@@ -231,8 +239,10 @@ def aggregate_rollout_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     finals = [float(row["final_angle_rad"]) for row in rows]
     fixed_finals = [float(row["final_angle_rad"]) for row in rows if not row["randomized"]]
     warning_counts: Counter[str] = Counter()
+    warning_family_counts: Counter[str] = Counter()
     for row in rows:
         warning_counts.update(row.get("warning_counts", {}))
+        warning_family_counts.update(row.get("warning_family_counts", {}))
 
     return {
         "n_rollouts": len(rows),
@@ -252,6 +262,7 @@ def aggregate_rollout_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "n_rejected": sum(int(row["n_rejected"]) for row in rows),
             "n_warnings": sum(int(row.get("n_warnings", 0)) for row in rows),
             "warning_counts": dict(sorted(warning_counts.items())),
+            "warning_family_counts": dict(sorted(warning_family_counts.items())),
         },
         # Across-seed spread of the fixed-reset block (randomization disabled,
         # *different* reset/sampling seeds). This is output variability across

@@ -259,6 +259,8 @@ def _run_rollout(
         "n_rejected": result.log.n_rejected,
         "n_warnings": warning_summary["n_warnings"],
         "warning_counts": warning_summary["warning_counts"],
+        "warning_family_counts": warning_summary["warning_family_counts"],
+        "warning_records": warning_summary["warning_records"],
         "notes": result.notes,
     }
     return row, result

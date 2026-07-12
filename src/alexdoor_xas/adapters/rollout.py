@@ -17,7 +17,7 @@ unchanged. No Isaac imports; torch only at the ``env.step`` boundary.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import numpy as np
@@ -191,6 +191,7 @@ def read_step_context(
                 "invalid simulator state: contact force magnitude is non-finite"
             )
     joint_state: dict[str, np.ndarray] | None = None
+    joint_names: tuple[str, ...] | None = None
     if hasattr(env, "robot_joint_state"):
         raw_joint_state = env.robot_joint_state()
         if not isinstance(raw_joint_state, dict):
@@ -213,6 +214,16 @@ def read_step_context(
                 "invalid simulator state: joint positions, velocities, and targets "
                 "must have matching shapes"
             )
+        if hasattr(env, "robot_joint_names"):
+            joint_names = tuple(str(name) for name in env.robot_joint_names())
+            if len(joint_names) != joint_state["joint_pos"].size:
+                raise InvalidSimulatorStateError(
+                    "invalid simulator state: joint names and state sizes do not match"
+                )
+            if len(set(joint_names)) != len(joint_names):
+                raise InvalidSimulatorStateError(
+                    "invalid simulator state: robot joint names must be unique"
+                )
     if joint_limits is not None:
         required_limits = ("joint_pos_limits", "joint_vel_limits")
         missing_limits = [name for name in required_limits if name not in joint_limits]
@@ -244,6 +255,7 @@ def read_step_context(
         contact_force_n=contact_force_n,
         joint_state=joint_state,
         joint_limits=joint_limits,
+        joint_names=joint_names,
     )
 
 
@@ -400,6 +412,7 @@ def rollout_chunks(
     reason: str | None = None
     first_success_tick: int | None = None
     env_truncated = False
+    contact_ever_sensed = ctx.contact_sensed is True
 
     def crossed() -> bool:
         return success_angle_rad is not None and ctx.hinge_angle_rad >= success_angle_rad
@@ -422,6 +435,12 @@ def rollout_chunks(
                 f"chunk source must emit (H, {EE_DELTA_DIM}) chunks, got {chunk.shape}"
             )
         for delta in chunk:
+            phase = (
+                "post_success"
+                if first_success_tick is not None
+                else ("contact" if contact_ever_sensed else "pre_contact")
+            )
+            ctx = replace(ctx, tick_index=ticks, rollout_phase=phase)
             applied, decision = adapter.process(delta, ctx)
             decisions.append(decision)
             if decision.status is AdapterStatus.REJECTED and stop_on_reject:
@@ -449,6 +468,7 @@ def rollout_chunks(
                 break
             contact_per_tick.append(ctx.contact_sensed)
             force_n_per_tick.append(ctx.contact_force_n)
+            contact_ever_sensed = contact_ever_sensed or ctx.contact_sensed is True
             if first_success_tick is None and crossed():
                 first_success_tick = ticks
                 if not post_success_diagnostic:

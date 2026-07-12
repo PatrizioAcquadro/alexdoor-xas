@@ -74,6 +74,8 @@ REQUIRED_ROW_FIELDS = (
     "n_rejected",
     "n_warnings",
     "warning_counts",
+    "warning_family_counts",
+    "warning_records",
     "notes",
 )
 REQUIRED_TOP_FIELDS = (
@@ -154,9 +156,61 @@ MATRIX_CONSISTENT_FIELDS = (
 # Row-level fields that must equal the file's top-level policy metadata.
 ROW_TOP_AGREEMENT = ("sampler", "num_inference_steps")
 
-# Adapter warnings whose presence means invalid/unsafe execution, not a
-# benign watch item (warn-level joint-velocity flags stay review-only).
-UNSAFE_WARNING_MARKERS = ("non-finite", "invalid", "unsafe", "nan")
+# Machine-readable policy, deliberately embedded in every summary. The velocity
+# bounds narrowly envelope the 2026-07-12 local-smoke evidence: 640 lower-body
+# warning counts in deterministic reset-like patterns, maximum exceedance
+# 2.328 rad/s (23.95% of the configured limit), and at most seven events per
+# rollout. Legacy rows do not prove event phase/duration, so only regenerated
+# rows with those fields can pass. The bounds do not alter actuator/safety
+# limits; anything sustained, in-contact, on another joint, or outside this
+# measured envelope is review-required.
+WARNING_ADJUDICATION_POLICY: dict[str, Any] = {
+    "version": "alexdoor.warning-adjudication.v1",
+    "default_unknown_status": "REVIEW_REQUIRED",
+    "unsafe_family_ids": ["adapter.invalid_frame", "adapter.non_finite_state"],
+    "review_family_ids": [
+        "a2.joint_position_limit",
+        "a2.workspace_min_reach",
+        "a4.target_face_deviation",
+    ],
+    "a2.joint_velocity_limit": {
+        "status_within_bounds": "PASS",
+        "allowed_joint_names": [
+            "LEFT_KNEE_Y",
+            "RIGHT_KNEE_Y",
+            "LEFT_ANKLE_Y",
+            "LEFT_ANKLE_X",
+            "RIGHT_ANKLE_X",
+        ],
+        "runtime_joint_index_by_name": {
+            "LEFT_KNEE_Y": 13,
+            "RIGHT_KNEE_Y": 14,
+            "LEFT_ANKLE_Y": 17,
+            "LEFT_ANKLE_X": 21,
+            "RIGHT_ANKLE_X": 22,
+        },
+        "configured_limit_rad_s_by_joint": {
+            "LEFT_KNEE_Y": 9.3,
+            "RIGHT_KNEE_Y": 9.3,
+            "LEFT_ANKLE_Y": 9.72,
+            "LEFT_ANKLE_X": 9.72,
+            "RIGHT_ANKLE_X": 9.72,
+        },
+        "allowed_rollout_phases": ["pre_contact"],
+        "max_exceedance_rad_s": 2.5,
+        "max_exceedance_fraction_of_limit": 0.25,
+        "max_consecutive_ticks": 1,
+        "max_duration_ticks": 1,
+        "max_count_per_rollout": 7,
+        "evidence_basis": {
+            "artifact_warning_events": 640,
+            "max_observed_exceedance_rad_s": 2.328,
+            "max_observed_exceedance_fraction_of_limit": 0.2395,
+            "max_observed_events_per_rollout": 7,
+            "artifact_limitation": "legacy rows omit tick/phase/consecutive evidence",
+        },
+    },
+}
 # A rejection storm is an adapter/frame problem; a stray rejection is a watch
 # item. Threshold on the run's total rejected fraction of all commands.
 SYSTEMATIC_REJECTION_FRACTION = 0.02
@@ -526,6 +580,207 @@ def check_run_consistency(
             )
 
 
+def _adjudicate_warning_records(rows: list[dict]) -> tuple[dict[str, dict], list[str], list[str]]:
+    """Adjudicate every family by identifier; malformed/legacy evidence fails closed."""
+    grouped: dict[str, list[tuple[int, dict]]] = {}
+    schema_review_reasons: list[str] = []
+    for row_index, row in enumerate(rows):
+        n_warnings = int(row.get("n_warnings", 0))
+        records = row.get("warning_records")
+        if not isinstance(records, list):
+            records = []
+        if len(records) != n_warnings:
+            schema_review_reasons.append(
+                f"seed {row.get('seed')}: n_warnings={n_warnings} but "
+                f"warning_records has {len(records)} event(s)"
+            )
+        observed_counts: dict[str, int] = {}
+        observed_message_counts: dict[str, int] = {}
+        for record in records:
+            if not isinstance(record, dict) or not isinstance(record.get("id"), str):
+                family_id = "<malformed_warning_record>"
+                record = {"id": family_id, "message": "", "evidence": {}}
+            else:
+                family_id = record["id"]
+            observed_counts[family_id] = observed_counts.get(family_id, 0) + 1
+            message = record.get("message")
+            if isinstance(message, str):
+                observed_message_counts[message] = observed_message_counts.get(message, 0) + 1
+            grouped.setdefault(family_id, []).append((row_index, record))
+        declared_counts = row.get("warning_family_counts")
+        if not isinstance(declared_counts, dict) or declared_counts != observed_counts:
+            schema_review_reasons.append(
+                f"seed {row.get('seed')}: warning_family_counts do not match records "
+                f"(declared={declared_counts!r}, observed={observed_counts!r})"
+            )
+        declared_message_counts = row.get("warning_counts")
+        if (
+            not isinstance(declared_message_counts, dict)
+            or declared_message_counts != observed_message_counts
+        ):
+            schema_review_reasons.append(
+                f"seed {row.get('seed')}: warning_counts do not match record messages "
+                f"(declared={declared_message_counts!r}, observed={observed_message_counts!r})"
+            )
+
+    outcomes: dict[str, dict] = {}
+    fail_reasons: list[str] = []
+    review_reasons = list(schema_review_reasons)
+    unsafe_ids = set(WARNING_ADJUDICATION_POLICY["unsafe_family_ids"])
+    review_ids = set(WARNING_ADJUDICATION_POLICY["review_family_ids"])
+    velocity_policy = WARNING_ADJUDICATION_POLICY["a2.joint_velocity_limit"]
+    required_velocity_fields = {
+        "joint_index",
+        "joint_name",
+        "tick_index",
+        "rollout_phase",
+        "measured_velocity_rad_s",
+        "configured_limit_rad_s",
+        "exceedance_rad_s",
+        "consecutive_ticks",
+        "duration_ticks",
+        "count",
+    }
+
+    for family_id, events in sorted(grouped.items()):
+        reasons: list[str] = []
+        status = "REVIEW_REQUIRED"
+        if family_id in unsafe_ids:
+            status = "FAIL"
+            reasons.append("family is classified unsafe/invalid")
+        elif family_id == "a2.joint_velocity_limit":
+            status = "PASS"
+            per_rollout_counts: dict[int, int] = {}
+            for row_index, record in events:
+                per_rollout_counts[row_index] = per_rollout_counts.get(row_index, 0) + 1
+                evidence = record.get("evidence")
+                if not isinstance(evidence, dict):
+                    reasons.append(f"event in row {row_index} has no evidence object")
+                    continue
+                missing = sorted(required_velocity_fields - evidence.keys())
+                if missing:
+                    reasons.append(f"event in row {row_index} is missing evidence {missing}")
+                    continue
+                numeric_fields = (
+                    "measured_velocity_rad_s",
+                    "configured_limit_rad_s",
+                    "exceedance_rad_s",
+                )
+                if any(
+                    not isinstance(evidence[field], (int, float))
+                    or isinstance(evidence[field], bool)
+                    or not math.isfinite(evidence[field])
+                    for field in numeric_fields
+                ):
+                    reasons.append(f"event in row {row_index} has non-finite numeric evidence")
+                    continue
+                limit = float(evidence["configured_limit_rad_s"])
+                measured = abs(float(evidence["measured_velocity_rad_s"]))
+                exceedance = float(evidence["exceedance_rad_s"])
+                if limit <= 0.0 or exceedance <= 0.0:
+                    reasons.append(f"event in row {row_index} has non-positive limit/exceedance")
+                    continue
+                if not math.isclose(measured - limit, exceedance, abs_tol=1e-6):
+                    reasons.append(f"event in row {row_index} has inconsistent velocity evidence")
+                if evidence["joint_name"] not in velocity_policy["allowed_joint_names"]:
+                    reasons.append(
+                        f"joint {evidence['joint_name']!r} is outside the accepted "
+                        "reset-transient set"
+                    )
+                else:
+                    joint_name = evidence["joint_name"]
+                    expected_index = velocity_policy["runtime_joint_index_by_name"][joint_name]
+                    if evidence["joint_index"] != expected_index:
+                        reasons.append(
+                            f"joint {joint_name!r} must have runtime index {expected_index}, "
+                            f"got {evidence['joint_index']!r}"
+                        )
+                    expected_limit = velocity_policy["configured_limit_rad_s_by_joint"][joint_name]
+                    if not math.isclose(limit, expected_limit, abs_tol=1e-9):
+                        reasons.append(
+                            f"joint {joint_name!r} configured limit must be "
+                            f"{expected_limit} rad/s, got {limit}"
+                        )
+                if evidence["rollout_phase"] not in velocity_policy["allowed_rollout_phases"]:
+                    reasons.append(f"phase {evidence['rollout_phase']!r} is not accepted")
+                if exceedance > velocity_policy["max_exceedance_rad_s"]:
+                    reasons.append(
+                        f"exceedance {exceedance:.6g} rad/s exceeds "
+                        f"{velocity_policy['max_exceedance_rad_s']} rad/s"
+                    )
+                fraction = exceedance / limit
+                if fraction > velocity_policy["max_exceedance_fraction_of_limit"]:
+                    reasons.append(
+                        f"exceedance fraction {fraction:.6g} exceeds "
+                        f"{velocity_policy['max_exceedance_fraction_of_limit']}"
+                    )
+                for field in (
+                    "joint_index",
+                    "tick_index",
+                    "consecutive_ticks",
+                    "duration_ticks",
+                    "count",
+                ):
+                    if not isinstance(evidence[field], int) or isinstance(evidence[field], bool):
+                        reasons.append(f"event in row {row_index} has non-integer {field}")
+                if isinstance(evidence["tick_index"], int) and evidence["tick_index"] < 0:
+                    reasons.append(f"event in row {row_index} has negative tick_index")
+                for field in ("consecutive_ticks", "duration_ticks", "count"):
+                    if isinstance(evidence[field], int) and evidence[field] < 1:
+                        reasons.append(f"event in row {row_index} has {field} < 1")
+                if (
+                    isinstance(evidence["consecutive_ticks"], int)
+                    and evidence["consecutive_ticks"] > velocity_policy["max_consecutive_ticks"]
+                ):
+                    reasons.append(
+                        f"consecutive_ticks={evidence['consecutive_ticks']} exceeds "
+                        f"{velocity_policy['max_consecutive_ticks']}"
+                    )
+                if (
+                    isinstance(evidence["duration_ticks"], int)
+                    and evidence["duration_ticks"] > velocity_policy["max_duration_ticks"]
+                ):
+                    reasons.append(
+                        f"duration_ticks={evidence['duration_ticks']} exceeds "
+                        f"{velocity_policy['max_duration_ticks']}"
+                    )
+                if (
+                    isinstance(evidence["count"], int)
+                    and evidence["count"] > velocity_policy["max_count_per_rollout"]
+                ):
+                    reasons.append(
+                        f"event count={evidence['count']} exceeds "
+                        f"{velocity_policy['max_count_per_rollout']}"
+                    )
+            for row_index, count in per_rollout_counts.items():
+                if count > velocity_policy["max_count_per_rollout"]:
+                    reasons.append(
+                        f"row {row_index} has {count} velocity events, exceeding "
+                        f"{velocity_policy['max_count_per_rollout']}"
+                    )
+            if reasons:
+                status = "REVIEW_REQUIRED"
+        elif family_id in review_ids:
+            reasons.append("known warning family requires engineering review")
+        else:
+            reasons.append("unknown warning family defaults to REVIEW_REQUIRED")
+
+        result = {
+            "status": status,
+            "count": len(events),
+            "affected_rollouts": len({row_index for row_index, _ in events}),
+            "reasons": sorted(set(reasons)),
+        }
+        outcomes[family_id] = result
+        summary_reason = f"warning family {family_id}: {result}"
+        if status == "FAIL":
+            fail_reasons.append(summary_reason)
+        elif status == "REVIEW_REQUIRED":
+            review_reasons.append(summary_reason)
+
+    return outcomes, fail_reasons, review_reasons
+
+
 def assess_safety(run_name: str, rows: list[dict]) -> dict[str, Any]:
     """Safety/readiness disposition for one run: PASS / REVIEW_REQUIRED / FAIL."""
     fail_reasons: list[str] = []
@@ -577,13 +832,9 @@ def assess_safety(run_name: str, rows: list[dict]) -> dict[str, Any]:
     elif n_rejected:
         review_reasons.append(f"{n_rejected} adapter rejection(s) (below systematic threshold)")
 
-    unsafe_warnings: dict[str, int] = {}
-    for row in rows:
-        for message, count in (row.get("warning_counts") or {}).items():
-            if any(marker in message.lower() for marker in UNSAFE_WARNING_MARKERS):
-                unsafe_warnings[message] = unsafe_warnings.get(message, 0) + int(count)
-    if unsafe_warnings:
-        fail_reasons.append(f"unsafe/invalid adapter warnings: {unsafe_warnings}")
+    warning_families, warning_failures, warning_reviews = _adjudicate_warning_records(rows)
+    fail_reasons.extend(warning_failures)
+    review_reasons.extend(warning_reviews)
 
     force_rows = [row for row in rows if _force_exceedance_ticks(row) > 0]
     n_force_exceedance_ticks = sum(_force_exceedance_ticks(row) for row in rows)
@@ -608,11 +859,17 @@ def assess_safety(run_name: str, rows: list[dict]) -> dict[str, Any]:
         "status": status,
         "fail_reasons": fail_reasons,
         "review_reasons": review_reasons,
+        "warning_adjudication_policy": WARNING_ADJUDICATION_POLICY,
+        "warning_families": warning_families,
         "counts": {
             "n_rollouts": len(rows),
             "n_commands": n_commands,
             "n_rejected": n_rejected,
             "n_warnings": n_warnings,
+            "n_warning_records": sum(len(row.get("warning_records") or []) for row in rows),
+            "warning_family_counts": {
+                family_id: result["count"] for family_id, result in warning_families.items()
+            },
             "n_force_exceeds_admission_bound": len(force_rows),
             "n_force_exceedance_ticks": n_force_exceedance_ticks,
             "n_env_truncated": len(truncated),

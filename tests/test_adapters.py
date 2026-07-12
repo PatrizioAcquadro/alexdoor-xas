@@ -222,11 +222,33 @@ def test_a2_flags_joint_limit_excess_as_warning():
         "joint_vel_limits": np.full(n, 10.0),
     }
     _, decision = adapter.process(
-        np.zeros(6), _ctx(joint_state=joint_state, joint_limits=joint_limits)
+        np.zeros(6),
+        _ctx(
+            joint_state=joint_state,
+            joint_limits=joint_limits,
+            joint_names=("J0", "J1", "J2", "J3"),
+            tick_index=12,
+            rollout_phase="contact",
+        ),
     )
     assert decision.status is AdapterStatus.ACCEPTED
     assert any("position limit" in warning for warning in decision.warnings)
     assert any("velocity exceeds" in warning for warning in decision.warnings)
+    records = {warning.id: warning for warning in decision.warning_records}
+    assert set(records) == {"a2.joint_position_limit", "a2.joint_velocity_limit"}
+    velocity = records["a2.joint_velocity_limit"].evidence
+    assert velocity == {
+        "joint_index": 3,
+        "joint_name": "J3",
+        "tick_index": 12,
+        "rollout_phase": "contact",
+        "measured_velocity_rad_s": 12.0,
+        "configured_limit_rad_s": 10.0,
+        "exceedance_rad_s": 2.0,
+        "consecutive_ticks": 1,
+        "duration_ticks": 1,
+        "count": 1,
+    }
 
 
 def test_a2_chunk_is_cut_at_first_rejection():
