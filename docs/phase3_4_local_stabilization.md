@@ -147,7 +147,7 @@ primary rollouts. Diagnostics remain separate from primary aggregates.
 
 ## 5. Validation battery (all PASS)
 
-Fresh post-review-fix validation: ruff, `git diff --check`, pytest (492),
+Fresh post-review-fix validation: ruff, `git diff --check`, pytest (537),
 `verify_dataset_interface` (`v2_pose`, 50 episodes, 46 groups, D0–D4 in
 validation and test), `verify_a2_a3_distinct`, `verify_act_training`,
 `verify_diffusion_training`, `verify_act_rollout`, `verify_diffusion_rollout`,
