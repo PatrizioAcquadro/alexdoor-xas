@@ -96,6 +96,11 @@ REQUIRED_PROVENANCE_FIELDS = (
     "checkpoint_dataset_fingerprint_sha256",
     "live_dataset_fingerprint_sha256",
     "split_fingerprint_sha256",
+    "checkpoint_split_fingerprint_sha256",
+    "dataset_fingerprint_match",
+    "split_fingerprint_match",
+    "train_split_match",
+    "val_split_match",
 )
 DIFFUSION_TOP_FIELDS = ("horizon", "n_action_steps", "sampler", "num_inference_steps")
 DIFFUSION_ROW_FIELDS = ("sampler", "num_inference_steps")
@@ -241,6 +246,32 @@ def _provenance_identity(payload: dict) -> dict:
     return {key: provenance.get(key) for key in REQUIRED_PROVENANCE_FIELDS}
 
 
+def _check_provenance_binding(payload: dict, path: Path, problems: list[str]) -> None:
+    provenance = payload.get("dataset_provenance") or {}
+    checkpoint_fp = provenance.get("checkpoint_dataset_fingerprint_sha256")
+    live_fp = provenance.get("live_dataset_fingerprint_sha256")
+    if checkpoint_fp != live_fp:
+        problems.append(
+            f"{path}: checkpoint/live dataset fingerprint mismatch — "
+            f"{checkpoint_fp!r} != {live_fp!r}"
+        )
+    checkpoint_split_fp = provenance.get("checkpoint_split_fingerprint_sha256")
+    live_split_fp = provenance.get("split_fingerprint_sha256")
+    if checkpoint_split_fp != live_split_fp:
+        problems.append(
+            f"{path}: checkpoint/live split fingerprint mismatch — "
+            f"{checkpoint_split_fp!r} != {live_split_fp!r}"
+        )
+    for field in (
+        "dataset_fingerprint_match",
+        "split_fingerprint_match",
+        "train_split_match",
+        "val_split_match",
+    ):
+        if provenance.get(field) is not True:
+            problems.append(f"{path}: provenance match flag {field} is not true")
+
+
 def check_file_protocol(
     payload: dict,
     path: Path,
@@ -252,6 +283,7 @@ def check_file_protocol(
     door_pose = payload.get("door_pose") or {}
     pose_id = door_pose.get("door_pose_id")
     rows = payload.get("rollouts", [])
+    _check_provenance_binding(payload, path, problems)
 
     # Rows must agree with the file's top-level door pose and policy metadata.
     for i, row in enumerate(rows):
@@ -383,6 +415,12 @@ def check_file_protocol(
                         f"{path}: determinism probe first trace hash does not match "
                         "reference_traces"
                     )
+                for index, replay_hash in enumerate(hashes[1:], start=1):
+                    if replay_hash != reference_hash:
+                        problems.append(
+                            f"{path}: determinism replay trace hash {index} differs "
+                            "from reference_traces"
+                        )
         tolerances = probe.get("tolerances")
         for key in REQUIRED_TOLERANCES:
             value = tolerances.get(key) if isinstance(tolerances, dict) else None
@@ -397,6 +435,26 @@ def check_file_protocol(
                 problems.append(
                     f"{path}: determinism probe max_abs_diffs {key!r} is invalid"
                 )
+        if isinstance(tolerances, dict) and isinstance(max_diffs, dict):
+            for diff_key, tolerance_key in (
+                ("requested", "command_abs"),
+                ("applied", "command_abs"),
+                ("final_angle_rad", "angle_abs_rad"),
+                ("force_n", "force_abs_n"),
+            ):
+                diff = max_diffs.get(diff_key)
+                tolerance = tolerances.get(tolerance_key)
+                if (
+                    isinstance(diff, (int, float))
+                    and math.isfinite(diff)
+                    and isinstance(tolerance, (int, float))
+                    and math.isfinite(tolerance)
+                    and diff > tolerance
+                ):
+                    problems.append(
+                        f"{path}: determinism {diff_key} max difference {diff} "
+                        f"exceeds stored tolerance {tolerance_key}={tolerance}"
+                    )
         mismatches = probe.get("mismatches")
         if not isinstance(mismatches, list):
             problems.append(f"{path}: determinism probe mismatches is not a list")
@@ -442,6 +500,22 @@ def assess_safety(run_name: str, rows: list[dict]) -> dict[str, Any]:
     """Safety/readiness disposition for one run: PASS / REVIEW_REQUIRED / FAIL."""
     fail_reasons: list[str] = []
     review_reasons: list[str] = []
+
+    non_finite_rows: list[int | None] = []
+    for row in rows:
+        force = row.get("force_n")
+        values = [] if force is None else [force.get(key) for key in ("mean", "max", "p95")]
+        values.append(row.get("impulse_ns"))
+        if any(
+            value is not None
+            and (not isinstance(value, (int, float)) or not math.isfinite(value))
+            for value in values
+        ):
+            non_finite_rows.append(row.get("seed"))
+    if non_finite_rows:
+        fail_reasons.append(
+            f"non-finite rollout force/contact evidence (seeds {non_finite_rows})"
+        )
 
     n_commands = sum(
         int(row.get("n_accepted", 0)) + int(row.get("n_corrected", 0))

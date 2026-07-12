@@ -99,6 +99,11 @@ def _payload(pose_id: str, plan_pose: dict) -> dict:
             "checkpoint_dataset_fingerprint_sha256": "e" * 64,
             "live_dataset_fingerprint_sha256": "e" * 64,
             "split_fingerprint_sha256": "f" * 64,
+            "checkpoint_split_fingerprint_sha256": "f" * 64,
+            "dataset_fingerprint_match": True,
+            "split_fingerprint_match": True,
+            "train_split_match": True,
+            "val_split_match": True,
         },
         "seed_protocol": {
             "base_seed": 100,
@@ -202,6 +207,23 @@ def test_missing_exact_fingerprint_fails_coverage(valid_run) -> None:
     assert any("checkpoint_dataset_fingerprint_sha256" in p for p in summary["coverage_problems"])
 
 
+@pytest.mark.parametrize(
+    "field",
+    [
+        "dataset_fingerprint_match",
+        "split_fingerprint_match",
+        "train_split_match",
+        "val_split_match",
+    ],
+)
+def test_missing_provenance_match_flag_fails_coverage(valid_run, field) -> None:
+    tmp_path, payloads = valid_run
+    del payloads["D0"]["dataset_provenance"][field]
+    summary = _summarize(tmp_path, payloads)
+    assert summary["metadata_coverage"] == "FAIL"
+    assert any(field in problem for problem in summary["coverage_problems"])
+
+
 # ── protocol consistency ─────────────────────────────────────────────────────
 
 
@@ -240,6 +262,31 @@ def test_mixed_split_identity_fails_protocol(valid_run) -> None:
     summary = _summarize(tmp_path, payloads)
     assert summary["protocol_consistency"] == "FAIL"
     assert any("dataset/split identity" in p for p in summary["protocol_problems"])
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "dataset_fingerprint_match",
+        "split_fingerprint_match",
+        "train_split_match",
+        "val_split_match",
+    ],
+)
+def test_false_provenance_match_flag_fails_protocol(valid_run, field) -> None:
+    tmp_path, payloads = valid_run
+    payloads["D0"]["dataset_provenance"][field] = False
+    summary = _summarize(tmp_path, payloads)
+    assert summary["protocol_consistency"] == "FAIL"
+    assert any(field in problem for problem in summary["protocol_problems"])
+
+
+def test_checkpoint_and_live_dataset_fingerprints_must_match(valid_run) -> None:
+    tmp_path, payloads = valid_run
+    payloads["D0"]["dataset_provenance"]["live_dataset_fingerprint_sha256"] = "0" * 64
+    summary = _summarize(tmp_path, payloads)
+    assert summary["protocol_consistency"] == "FAIL"
+    assert any("checkpoint/live dataset fingerprint" in p for p in summary["protocol_problems"])
 
 
 def test_row_disagreeing_with_top_pose_fails_protocol(valid_run) -> None:
@@ -406,6 +453,35 @@ def test_malformed_determinism_evidence_fails_protocol(valid_run, mutation, expe
     assert any(expected in problem for problem in summary["protocol_problems"])
 
 
+def test_every_replay_trace_hash_must_match_reference(valid_run) -> None:
+    tmp_path, payloads = valid_run
+    payloads["D0"]["determinism_probe"]["trace_sha256"][1] = "0" * 64
+    summary = _summarize(tmp_path, payloads)
+    assert summary["protocol_consistency"] == "FAIL"
+    assert any("replay trace hash" in p for p in summary["protocol_problems"])
+
+
+@pytest.mark.parametrize(
+    "diff_key,tolerance_key",
+    [
+        ("requested", "command_abs"),
+        ("applied", "command_abs"),
+        ("final_angle_rad", "angle_abs_rad"),
+        ("force_n", "force_abs_n"),
+    ],
+)
+def test_determinism_max_diff_cannot_exceed_stored_tolerance(
+    valid_run, diff_key, tolerance_key
+) -> None:
+    tmp_path, payloads = valid_run
+    probe = payloads["D0"]["determinism_probe"]
+    probe["tolerances"][tolerance_key] = 0.01
+    probe["max_abs_diffs"][diff_key] = 0.02
+    summary = _summarize(tmp_path, payloads)
+    assert summary["protocol_consistency"] == "FAIL"
+    assert any("exceeds stored tolerance" in p for p in summary["protocol_problems"])
+
+
 # ── diagnostics separation ───────────────────────────────────────────────────
 
 
@@ -440,6 +516,21 @@ def test_force_exceedance_yields_review_required_not_hidden(valid_run) -> None:
     assert safety["status"] == "REVIEW_REQUIRED"
     assert any("272.2" in reason for reason in safety["review_reasons"])
     assert safety["counts"]["n_force_exceeds_admission_bound"] == 1
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["mean", "max", "p95"],
+)
+def test_non_finite_force_evidence_fails_readiness(valid_run, field) -> None:
+    tmp_path, payloads = valid_run
+    payloads["D0"]["rollouts"][0]["force_n"][field] = float("nan")
+    summary = _summarize(tmp_path, payloads)
+    assert summary["safety_readiness"] == "FAIL"
+    assert any(
+        "non-finite rollout force/contact evidence" in reason
+        for reason in summary["runs"]["run_a"]["safety_readiness"]["fail_reasons"]
+    )
 
 
 def test_unsafe_warning_fails_safety(valid_run) -> None:
