@@ -47,5 +47,6 @@ rollout:
   door_offset_x: 0.0             # door-task pose: world-x translation (m)
   door_offset_y: 0.0             # door-task pose: world-y translation (m)
   door_pose_id: null             # pose label recorded per rollout row (e.g. D0)
+  determinism_repeats: 2         # repeat-same-seed probe runs of the first fixed seed
 
 wandb: {}

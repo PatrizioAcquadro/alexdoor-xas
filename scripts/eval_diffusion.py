@@ -126,11 +126,15 @@ from alexdoor_xas.envs.door_task.door_push_alex_v2_env_cfg import (  # noqa: E40
 )
 from alexdoor_xas.eval.metrics import aggregate_metrics, episode_metrics  # noqa: E402
 from alexdoor_xas.eval.sanity import FORCE_DATASET_LIMIT_N  # noqa: E402
-from alexdoor_xas.policies.common.eval_metadata import dataset_provenance  # noqa: E402
-from alexdoor_xas.policies.common.obs import stop_on_hinge_angle  # noqa: E402
+from alexdoor_xas.policies.common.eval_metadata import (  # noqa: E402
+    dataset_provenance,
+    file_sha256,
+    verify_checkpoint_dataset_binding,
+)
 from alexdoor_xas.policies.common.rollout_eval import (  # noqa: E402
     aggregate_rollout_rows,
     contact_report,
+    determinism_probe_report,
     rollout_failure_label,
     scripted_reference_payload,
     seed_protocol,
@@ -179,22 +183,32 @@ def _fresh_adapter(action_space: str, env):
     raise ValueError(f"no adapter path for action space {action_space!r}")
 
 
-def _run_rollout(env, policy, seed: int, variation, success_angle_rad: float) -> dict:
+def _run_rollout(
+    env, policy, seed: int, variation, success_angle_rad: float
+) -> tuple[dict, object]:
     env.reset(seed=seed)
+    settle_report = None
     if variation is not None:
-        apply_start_offset(env, read_door_frame(env), variation)
+        settle_report = apply_start_offset(env, read_door_frame(env), variation)
     adapter = _fresh_adapter(policy.action_space, env)
-    # Per-rollout sampling seed: the physics is deterministic headless, so a
-    # seeded generator keeps the fixed-reset block a determinism probe.
+    # Per-rollout sampling seed: the physics is deterministic headless, so the
+    # same (reset seed, sampling seed) pair replays the same rollout — the
+    # repeat-same-seed probe relies on exactly this.
     policy.seed(seed)
-    # Rollouts end at the first chunk boundary past the success angle: the
-    # demos terminate with the FSM, so post-task extrapolation is unbounded
-    # (a wandering arm can knock the open door shut again).
-    source = stop_on_hinge_angle(
-        diffusion_chunk_source(policy, env, n_action_steps=dp_cfg.rollout.n_action_steps),
-        success_angle_rad,
+    # Per-tick success semantics: the driver checks the hinge threshold after
+    # every executed control tick and stops at the first crossing, so
+    # first_success_tick is Ta-independent (post-task extrapolation is out of
+    # distribution and can knock the open door shut again).
+    source = diffusion_chunk_source(
+        policy, env, n_action_steps=dp_cfg.rollout.n_action_steps
     )
-    result = rollout_chunks(env, source, adapter, max_ticks=dp_cfg.rollout.max_ticks)
+    result = rollout_chunks(
+        env,
+        source,
+        adapter,
+        max_ticks=dp_cfg.rollout.max_ticks,
+        success_angle_rad=success_angle_rad,
+    )
     warning_summary = summarize_decision_warnings(result.decisions_per_tick)
     control_dt = float(env.cfg.sim.dt) * int(env.cfg.decimation)
     contact = contact_report(
@@ -203,8 +217,8 @@ def _run_rollout(env, policy, seed: int, variation, success_angle_rad: float) ->
         control_dt,
         admission_bound_n=FORCE_DATASET_LIMIT_N,
     )
-    success = bool(result.final_angle_rad >= success_angle_rad)
-    return {
+    success = bool(result.success)
+    row = {
         "seed": seed,
         "randomized": variation is not None,
         **_door_pose_payload(),
@@ -218,7 +232,17 @@ def _run_rollout(env, policy, seed: int, variation, success_angle_rad: float) ->
             contact_ticks=contact["contact_ticks"],
             n_rejected=result.log.n_rejected,
             notes=result.notes,
+            termination_reason=result.termination_reason,
         ),
+        "termination_reason": result.termination_reason,
+        "first_success_tick": result.first_success_tick,
+        "time_to_success_s": (
+            result.first_success_tick * control_dt
+            if result.first_success_tick is not None
+            else None
+        ),
+        "env_truncated": result.env_truncated,
+        "start_pose_settle": settle_report,
         "initial_angle_rad": result.initial_angle_rad,
         "final_angle_rad": result.final_angle_rad,
         "door_angle_change_rad": result.door_angle_change_rad,
@@ -236,6 +260,7 @@ def _run_rollout(env, policy, seed: int, variation, success_angle_rad: float) ->
         "warning_counts": warning_summary["warning_counts"],
         "notes": result.notes,
     }
+    return row, result
 
 
 def _reference_aggregate() -> dict | None:
@@ -327,13 +352,19 @@ def main() -> int:
             f"{dp_cfg.rollout.num_inference_steps} device={dp_cfg.rollout.policy_device}",
             flush=True,
         )
+        # Bind the eval to the exact trained dataset before any rollout: a
+        # checkpoint/live fingerprint or split mismatch fails the evaluation.
+        provenance = dataset_provenance(policy.checkpoint_config, run_dir, paths.DATASETS_DIR)
+        provenance.update(
+            verify_checkpoint_dataset_binding(policy.stats, provenance, paths.DATASETS_DIR)
+        )
         plan = _episode_plan(env)
         protocol = _seed_protocol(env)
         rows: list[dict] = []
         fixed_i = 0
         random_i = 0
         for item in plan:
-            row = _run_rollout(env, policy, item.seed, item.variation, success_angle_rad)
+            row, _ = _run_rollout(env, policy, item.seed, item.variation, success_angle_rad)
             rows.append(row)
             if item.variation is None:
                 print(f"[fixed {fixed_i}] {_row_line(row)}", flush=True)
@@ -341,6 +372,27 @@ def main() -> int:
             else:
                 print(f"[rand {random_i}] {_row_line(row)}", flush=True)
                 random_i += 1
+
+        # Repeat-same-seed determinism probe: rerun the first fixed seed with
+        # the identical reset seed AND policy sampling seed; compare traces.
+        determinism_probe = None
+        if dp_cfg.rollout.episodes_fixed > 0:
+            probe_seed = dp_cfg.rollout.base_seed
+            probe_results = [
+                _run_rollout(env, policy, probe_seed, None, success_angle_rad)[1]
+                for _ in range(dp_cfg.rollout.determinism_repeats)
+            ]
+            determinism_probe = determinism_probe_report(probe_results, seed=probe_seed)
+            print(
+                f"[determinism] repeat-same-seed x{determinism_probe['repeats']} "
+                f"seed={probe_seed} passed={determinism_probe['passed']}",
+                flush=True,
+            )
+            if not determinism_probe["passed"]:
+                raise RuntimeError(
+                    "repeat-same-seed determinism probe failed: "
+                    + "; ".join(determinism_probe["mismatches"])
+                )
 
         aggregate = aggregate_rollout_rows(rows)
         matched_scripted_reference = None
@@ -358,6 +410,7 @@ def main() -> int:
             )
         payload = {
             "checkpoint": str(checkpoint_path),
+            "checkpoint_sha256": file_sha256(checkpoint_path),
             "robot_compatibility_label": policy.robot_compatibility_label,
             "action_space": policy.action_space,
             "obs_preset": policy.obs_preset,
@@ -368,14 +421,14 @@ def main() -> int:
             "policy_device": dp_cfg.rollout.policy_device,
             "max_ticks": dp_cfg.rollout.max_ticks,
             "success_angle_deg": dp_cfg.rollout.success_angle_deg,
+            "success_semantics": "per_tick_first_crossing_stop",
             "base_seed": dp_cfg.rollout.base_seed,
             "config_horizon": dp_cfg.model.horizon,
             "door_pose": _door_pose_payload(),
             "control_dt": float(env.cfg.sim.dt) * int(env.cfg.decimation),
-            "dataset_provenance": dataset_provenance(
-                policy.checkpoint_config, run_dir, paths.DATASETS_DIR
-            ),
+            "dataset_provenance": provenance,
             "seed_protocol": protocol,
+            "determinism_probe": determinism_probe,
             "rollouts": rows,
             "aggregate": aggregate,
             "reference": _reference_aggregate(),

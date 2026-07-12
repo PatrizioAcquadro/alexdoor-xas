@@ -77,7 +77,6 @@ from alexdoor_xas.envs.door_task.door_push_alex_v2_env_cfg import (  # noqa: E40
     ALEX_V2_ROBOT_TAG,
     DoorPushAlexV2EnvCfg,
 )
-from alexdoor_xas.policies.common.obs import stop_on_hinge_angle  # noqa: E402
 from alexdoor_xas.policies.diffusion.policy import (  # noqa: E402
     DiffusionPolicy,
     diffusion_chunk_source,
@@ -112,14 +111,18 @@ def _rollout(env, policy, seed: int, variation) -> dict:
         apply_start_offset(env, read_door_frame(env), variation)
     adapter = _adapter_for(policy.action_space, env)
     policy.seed(seed)  # deterministic sampling per rollout
-    # Rollouts end at the first chunk boundary past the success angle: the
-    # demos terminate with the FSM, so post-task extrapolation is unbounded
-    # (a wandering arm can knock the open door shut again).
-    source = stop_on_hinge_angle(
+    # Per-tick success semantics (shared with the eval scripts): the driver
+    # checks the hinge threshold after every executed control tick and stops
+    # at the first crossing — post-task extrapolation is out of distribution.
+    result = rollout_chunks(
+        env,
         diffusion_chunk_source(policy, env, n_action_steps=args.n_action_steps),
-        DataEngineCfg().success_angle_rad,
+        adapter,
+        max_ticks=args.max_ticks,
+        success_angle_rad=DataEngineCfg().success_angle_rad,
     )
-    result = rollout_chunks(env, source, adapter, max_ticks=args.max_ticks)
+    if result.env_truncated:
+        raise RuntimeError(f"rollout hit env truncation at tick {result.n_ticks}")
 
     if result.n_ticks == 0 or result.n_ticks > args.max_ticks:
         raise RuntimeError(f"rollout ran {result.n_ticks} ticks (budget {args.max_ticks})")
