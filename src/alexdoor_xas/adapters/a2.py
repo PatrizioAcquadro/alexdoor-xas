@@ -36,6 +36,7 @@ class A2Adapter:
     def __init__(self, limits: RobotLimitsCfg, log: AdapterLog | None = None):
         self.limits = limits
         self.log = log if log is not None else AdapterLog()
+        self._contact_established = False
 
     def process(self, delta_world, ctx: StepContext) -> tuple[np.ndarray, AdapterDecision]:
         """Adapt one 6-dim world-frame EE delta; returns (applied, decision).
@@ -57,6 +58,9 @@ class A2Adapter:
         checks["finite"] = bool(np.isfinite(requested).all())
         if not checks["finite"]:
             return self._reject(requested, checks, "EE delta contains non-finite values")
+
+        if ctx.contact_sensed is True:
+            self._contact_established = True
 
         applied = requested.copy()
         corrections: list[str] = []
@@ -132,7 +136,9 @@ class A2Adapter:
         Learned A2/A3 policies have no scripted phase label. Geometry and the
         live contact flag provide the minimal phase-independent equivalent of
         Alex's calibrated scripted-controller contact approach bound: free
-        space and established-contact commands are unchanged.
+        space and established-contact commands are unchanged. Contact is
+        latched for the adapter's rollout lifetime so sensor dropout cannot
+        re-enter the first-contact phase and stall post-contact execution.
         """
         limit = self.limits.contact_approach_max_step_m
         clearance = self.limits.contact_approach_start_clearance_m
@@ -142,6 +148,7 @@ class A2Adapter:
             or clearance is None
             or surface_x is None
             or ctx.door_frame is None
+            or self._contact_established
             or ctx.contact_sensed is True
             or not np.isfinite(ctx.hinge_angle_rad)
         ):
