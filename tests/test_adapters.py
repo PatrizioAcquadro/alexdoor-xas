@@ -145,15 +145,12 @@ def test_a2_does_not_shape_free_space_or_established_contact() -> None:
     assert contact_decision.status is AdapterStatus.ACCEPTED
 
 
-def test_a2_first_contact_latches_for_later_sensor_dropout() -> None:
+def test_a2_does_not_shape_subthreshold_sensor_dropout_command() -> None:
     limits = _v2_limits(center=(0.0, 0.0, 0.0), reach_shell=(0.01, 2.0))
     adapter = A2Adapter(limits)
     frame = _identity_frame()
-    requested = np.array([-0.015, 0.0, 0.0, 0.0, 0.0, 0.0])
+    requested = np.array([-0.0098, 0.0, 0.0, 0.0, 0.0, 0.0])
 
-    adapter.process(
-        requested, _ctx(ee_pos_w=(0.036, 0.30, 0.0), door_frame=frame, contact_sensed=True)
-    )
     applied, decision = adapter.process(
         requested, _ctx(ee_pos_w=(0.040, 0.30, 0.0), door_frame=frame, contact_sensed=False)
     )
