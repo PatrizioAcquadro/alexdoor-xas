@@ -73,10 +73,10 @@ def load_policy_data(cfg, datasets_root: str | Path = paths.DATASETS_DIR) -> Pol
     """Load the export named by ``cfg`` with hard staleness checks.
 
     Splits are the shared per-task file (rejects a stale pass via episode-id
-    comparison). Norm stats come from the official ``norm_stats.json`` when its
-    preset matches; for a non-default preset the obs stats are recomputed
-    in-memory over the same train split (the official file only covers the
-    default preset).
+    comparison). The official ``norm_stats.json`` is always validated against
+    its own preset first. When training selects another preset, matching stats
+    and a matching preset-specific fingerprint are then recomputed in memory
+    over the same train split.
     """
     dataset_dir = Path(datasets_root) / cfg.task / cfg.space / cfg.version
     try:
@@ -112,12 +112,15 @@ def load_policy_data(cfg, datasets_root: str | Path = paths.DATASETS_DIR) -> Pol
             "(run scripts/verify_dataset_interface.py --write-artifacts)"
         )
     official = load_norm_stats(stats_file)
+    official_errors = validate_norm_stats(
+        official, dataset, train_ids, obs_preset=official.obs_preset
+    )
+    if official_errors:
+        raise PolicyDataError(
+            f"norm stats {stats_file} do not match the dataset: "
+            + "; ".join(official_errors)
+        )
     if official.obs_preset == cfg.obs_preset:
-        errors = validate_norm_stats(official, dataset, train_ids, obs_preset=cfg.obs_preset)
-        if errors:
-            raise PolicyDataError(
-                f"norm stats {stats_file} do not match the dataset: " + "; ".join(errors)
-            )
         stats, stats_source = official, "official"
     else:
         # Same train split, same code path as the official file — only the obs

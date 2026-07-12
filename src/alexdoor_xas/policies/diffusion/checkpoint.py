@@ -60,6 +60,7 @@ def save_checkpoint(
     split_episode_ids: dict[str, list[str] | tuple[str, ...]] | None = None,
 ) -> Path:
     """Write a self-contained checkpoint; returns the written path."""
+    _validate_dataset_binding(config, stats)
     if _is_v2_config(config) and robot_asset is None:
         raise ValueError("Alex V2 checkpoints require robot asset provenance")
     path = Path(path)
@@ -146,6 +147,16 @@ def _split_from_payload(payload: Any) -> dict[str, tuple[str, ...]]:
 def _is_v2_config(config: dict[str, Any]) -> bool:
     dataset = config.get("dataset")
     return isinstance(dataset, dict) and dataset.get("task") == paths.ALEX_V2_TASK
+
+
+def _validate_dataset_binding(config: dict[str, Any], stats: DatasetNormStats) -> None:
+    dataset = config.get("dataset")
+    if not isinstance(dataset, dict):
+        raise ValueError("checkpoint config requires an embedded dataset mapping")
+    if dataset.get("space") != stats.action_space:
+        raise ValueError("checkpoint dataset action space does not match norm stats")
+    if dataset.get("obs_preset") != stats.obs_preset:
+        raise ValueError("checkpoint dataset observation preset does not match norm stats")
 
 
 def _stats_payload(stats: DatasetNormStats) -> dict[str, Any]:

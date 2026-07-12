@@ -5,6 +5,8 @@ from __future__ import annotations
 import dataclasses
 import importlib.util
 import json
+import shutil
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,11 +16,14 @@ from alexdoor_xas.dataset import (
     EpisodeDataset,
     compute_norm_stats,
     make_grouped_splits,
+    norm_stats_path,
+    save_norm_stats,
     save_splits,
     split_entries,
     split_fingerprint,
     splits_path,
 )
+from alexdoor_xas.policies.common.data import PolicyDataError, load_policy_data
 from alexdoor_xas.policies.common.eval_metadata import (
     EvalProvenanceError,
     dataset_provenance,
@@ -303,6 +308,84 @@ def test_binding_fails_on_dataset_fingerprint_mismatch(binding_fixture) -> None:
         verify_checkpoint_dataset_binding(
             tampered, provenance, binding_fixture["datasets_root"]
         )
+
+
+@requires_h5py
+def test_binding_fails_when_selected_door_pose_observation_changes(
+    binding_fixture, tmp_path
+) -> None:
+    """A core_door_pose-only mutation must invalidate checkpoint provenance."""
+    import h5py
+
+    datasets_root = tmp_path / "datasets"
+    shutil.copytree(binding_fixture["datasets_root"], datasets_root)
+    dataset_dir = datasets_root / "door_push" / A2_EE_DELTA / "v0"
+    dataset = EpisodeDataset(dataset_dir)
+    stats = compute_norm_stats(
+        dataset, binding_fixture["splits"]["train"], obs_preset="core_door_pose"
+    )
+    episode_path = sorted(dataset_dir.glob("episode_*.hdf5"))[0]
+    with h5py.File(episode_path, "r+") as h5:
+        values = h5["steps/object_state/door_rel_pos_x"]
+        values[0] = float(values[0]) + 0.125
+
+    checkpoint_config = {
+        "dataset": {
+            "task": "door_push",
+            "space": A2_EE_DELTA,
+            "version": "v0",
+            "obs_preset": "core_door_pose",
+        }
+    }
+    provenance = dataset_provenance(
+        checkpoint_config, binding_fixture["run_dir"], datasets_root
+    )
+    with pytest.raises(EvalProvenanceError, match="does not match the live"):
+        verify_checkpoint_dataset_binding(
+            stats,
+            provenance,
+            datasets_root,
+            checkpoint_split_episode_ids=binding_fixture["splits"],
+        )
+
+
+@requires_h5py
+def test_binding_fails_when_checkpoint_dataset_episode_ids_are_empty(
+    binding_fixture,
+) -> None:
+    provenance = dataset_provenance(
+        binding_fixture["checkpoint_config"],
+        binding_fixture["run_dir"],
+        binding_fixture["datasets_root"],
+    )
+    stats = dataclasses.replace(binding_fixture["stats"], dataset_episode_ids=())
+    with pytest.raises(EvalProvenanceError, match="dataset episode ids"):
+        verify_checkpoint_dataset_binding(
+            stats,
+            provenance,
+            binding_fixture["datasets_root"],
+            checkpoint_split_episode_ids=binding_fixture["splits"],
+        )
+
+
+@requires_h5py
+def test_nondefault_training_preset_does_not_skip_official_stats_validation(
+    binding_fixture, tmp_path
+) -> None:
+    datasets_root = tmp_path / "datasets"
+    shutil.copytree(binding_fixture["datasets_root"], datasets_root)
+    dataset_dir = datasets_root / "door_push" / A2_EE_DELTA / "v0"
+    stale = dataclasses.replace(binding_fixture["stats"], dataset_fingerprint="stale")
+    save_norm_stats(norm_stats_path(dataset_dir), stale)
+    cfg = SimpleNamespace(
+        task="door_push",
+        space=A2_EE_DELTA,
+        version="v0",
+        obs_preset="core_door_pose",
+    )
+
+    with pytest.raises(PolicyDataError, match="norm stats.*do not match"):
+        load_policy_data(cfg, datasets_root=datasets_root)
 
 
 @requires_h5py

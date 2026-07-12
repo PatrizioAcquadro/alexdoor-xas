@@ -29,6 +29,7 @@ from alexdoor_xas.dataset import (
     ChunkSampler,
     EpisodeDataset,
     compute_norm_stats,
+    dataset_fingerprint,
     episode_chunk_features,
     load_norm_stats,
     load_splits,
@@ -393,10 +394,11 @@ def test_validate_dataset_dir_reports_malformed_meta_and_action_rank(
     assert any("action_space" in error for error in result.errors)
 
     rank_dir = _copy_dataset(proxy_exports[A2_EE_DELTA], tmp_path, "bad_action_rank")
-    n_steps = EpisodeDataset(rank_dir)[0].n_steps
+    dataset = EpisodeDataset(rank_dir)
+    n_steps = dataset[0].n_steps
     import h5py
 
-    h5_path = next(rank_dir.glob("episode_*.hdf5"))
+    h5_path = sorted(rank_dir.glob("episode_*.hdf5"))[0]
     with h5py.File(h5_path, "r+") as h5:
         del h5["steps/action"]
         h5["steps"].create_dataset("action", data=np.zeros(n_steps))
@@ -469,6 +471,12 @@ def test_norm_stats_roundtrip_and_zero_std_guard(proxy_a2, tmp_path) -> None:
     assert loaded.train_episode_ids == tuple(train_ids)
     assert validate_norm_stats(loaded, proxy_a2, train_ids) == []
 
+    pose_stats = compute_norm_stats(proxy_a2, train_ids, obs_preset="core_door_pose")
+    assert pose_stats.dataset_fingerprint == dataset_fingerprint(
+        proxy_a2, "core_door_pose"
+    )
+    assert pose_stats.dataset_fingerprint != stats.dataset_fingerprint
+
 
 def test_norm_stats_validation_rejects_stale_or_wrong_dimension_stats(proxy_a2) -> None:
     train_ids = proxy_a2.episode_ids[:3]
@@ -479,6 +487,12 @@ def test_norm_stats_validation_rejects_stale_or_wrong_dimension_stats(proxy_a2) 
 
     wrong_train = validate_norm_stats(stats, proxy_a2, list(reversed(train_ids)))
     assert any("train_episode_ids" in error for error in wrong_train)
+
+    missing_dataset_ids = dataclasses.replace(stats, dataset_episode_ids=())
+    assert any(
+        "no dataset_episode_ids provenance" in error
+        for error in validate_norm_stats(missing_dataset_ids, proxy_a2, train_ids)
+    )
 
     bad_action = dataclasses.replace(
         stats.action,

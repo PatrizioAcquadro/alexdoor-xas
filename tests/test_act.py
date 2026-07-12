@@ -217,6 +217,12 @@ def test_checkpoint_round_trip_preserves_predictions_and_stats(tmp_path) -> None
     }
 
 
+def test_checkpoint_creation_rejects_config_stats_preset_mismatch(tmp_path) -> None:
+    config = {"dataset": {"space": "A2_ee_delta", "obs_preset": "core_door_pose"}}
+    with pytest.raises(ValueError, match="observation preset"):
+        save_checkpoint(tmp_path / "bad.pt", _tiny_model(), config, _tiny_stats())
+
+
 def test_checkpoint_rejects_unknown_format(tmp_path) -> None:
     path = tmp_path / "bad.pt"
     torch.save({"format": "other"}, path)

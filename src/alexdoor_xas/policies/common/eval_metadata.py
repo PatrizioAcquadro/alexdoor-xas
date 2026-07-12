@@ -155,23 +155,38 @@ def verify_checkpoint_dataset_binding(
             f"live dataset {dataset_dir} is unavailable: {error}"
         ) from error
 
+    checkpoint_preset = str(checkpoint_stats.obs_preset)
+    configured_preset = dataset_cfg.get("obs_preset")
+    if not checkpoint_preset:
+        raise EvalProvenanceError("checkpoint norm stats carry no observation preset")
+    if configured_preset != checkpoint_preset:
+        raise EvalProvenanceError(
+            f"checkpoint norm stats observation preset {checkpoint_preset!r} does not match "
+            f"the embedded dataset config {configured_preset!r}"
+        )
+
+    checkpoint_dataset_ids = tuple(checkpoint_stats.dataset_episode_ids)
+    if not checkpoint_dataset_ids:
+        raise EvalProvenanceError(
+            "checkpoint norm stats carry no dataset episode ids; provenance cannot be "
+            "audited — regenerate norm stats and retrain"
+        )
+    if checkpoint_dataset_ids != tuple(dataset.episode_ids):
+        raise EvalProvenanceError(
+            "checkpoint dataset episode ids do not match the live dataset"
+        )
+
     checkpoint_fp = str(checkpoint_stats.dataset_fingerprint)
-    live_fp = dataset_fingerprint(dataset)
+    live_fp = dataset_fingerprint(dataset, checkpoint_preset)
     if not checkpoint_fp:
         raise EvalProvenanceError("checkpoint norm stats carry no dataset fingerprint")
     if checkpoint_fp != live_fp:
         raise EvalProvenanceError(
             f"checkpoint dataset fingerprint {checkpoint_fp[:16]}… does not match the "
             f"live {space} dataset {live_fp[:16]}… — the dataset was re-exported or "
-            "modified after training; retrain or restore the exact dataset"
+            "modified after training, or the checkpoint uses the retired fingerprint "
+            "contract; regenerate norm stats and retrain, or restore the exact dataset"
         )
-    if tuple(checkpoint_stats.dataset_episode_ids) and tuple(
-        checkpoint_stats.dataset_episode_ids
-    ) != tuple(dataset.episode_ids):
-        raise EvalProvenanceError(
-            "checkpoint dataset episode ids do not match the live dataset"
-        )
-
     split_ids = provenance.get("split_episode_ids")
     if not split_ids:
         raise EvalProvenanceError(

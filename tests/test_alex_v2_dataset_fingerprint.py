@@ -65,9 +65,10 @@ def _phase3_fingerprint_without_asset_provenance(dataset) -> str:
     return digest.hexdigest()
 
 
-def test_provenance_free_fingerprint_preserves_the_exact_phase3_byte_stream() -> None:
+def test_current_fingerprint_rejects_the_retired_phase3_byte_stream() -> None:
     dataset = _dataset_without_asset_provenance()
-    assert dataset_fingerprint(dataset) == _phase3_fingerprint_without_asset_provenance(dataset)
+    assert dataset_fingerprint(dataset) != _phase3_fingerprint_without_asset_provenance(dataset)
+    assert dataset_fingerprint(dataset) == dataset_fingerprint(dataset, "core")
 
 
 def test_v2_provenance_is_domain_separated_from_the_base_fingerprint() -> None:
