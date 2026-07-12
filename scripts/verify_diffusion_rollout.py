@@ -101,7 +101,7 @@ def _adapter_for(action_space: str, env):
         calibration=env.alex_v2_calibration(),
         workspace_center_w=center_w,
     )
-    a2 = A2Adapter(limits)
+    a2 = A2Adapter(limits, contact_entry_shaping=True)
     return a2 if action_space == A2_EE_DELTA else A3Adapter(a2)
 
 

@@ -109,7 +109,7 @@ def test_a2_clamps_and_logs_correction():
 
 def test_a2_shapes_calibrated_alex_first_contact_without_changing_request() -> None:
     limits = _v2_limits(center=(0.0, 0.0, 0.0), reach_shell=(0.01, 2.0))
-    adapter = A2Adapter(limits)
+    adapter = A2Adapter(limits, contact_entry_shaping=True)
     frame = _identity_frame()
     # Alex V2 exposes the collision-derived tool point, so panel contact is at
     # x=panel_thickness (0.036 m). This state is inside the calibrated 60 mm
@@ -127,15 +127,30 @@ def test_a2_shapes_calibrated_alex_first_contact_without_changing_request() -> N
     assert applied[0] < 0.0  # push direction/semantics are preserved
 
 
+def test_a2_contact_entry_shaping_is_opt_in_for_scripted_replay() -> None:
+    limits = _v2_limits(center=(0.0, 0.0, 0.0), reach_shell=(0.01, 2.0))
+    requested = np.array([-0.015, 0.0, 0.0, 0.0, 0.0, 0.0])
+    ctx = _ctx(
+        ee_pos_w=(0.040, 0.30, 0.0),
+        door_frame=_identity_frame(),
+        contact_sensed=False,
+    )
+
+    applied, decision = A2Adapter(limits).process(requested, ctx)
+
+    np.testing.assert_allclose(applied, requested)
+    assert decision.status is AdapterStatus.ACCEPTED
+
+
 def test_a2_does_not_shape_free_space_or_established_contact() -> None:
     limits = _v2_limits(center=(0.0, 0.0, 0.0), reach_shell=(0.01, 2.0))
     frame = _identity_frame()
     requested = np.array([-0.015, 0.0, 0.0, 0.0, 0.0, 0.0])
 
-    free, free_decision = A2Adapter(limits).process(
+    free, free_decision = A2Adapter(limits, contact_entry_shaping=True).process(
         requested, _ctx(ee_pos_w=(0.20, 0.30, 0.0), door_frame=frame, contact_sensed=False)
     )
-    contact, contact_decision = A2Adapter(limits).process(
+    contact, contact_decision = A2Adapter(limits, contact_entry_shaping=True).process(
         requested, _ctx(ee_pos_w=(0.036, 0.30, 0.0), door_frame=frame, contact_sensed=True)
     )
 
@@ -147,7 +162,7 @@ def test_a2_does_not_shape_free_space_or_established_contact() -> None:
 
 def test_a2_does_not_shape_subthreshold_sensor_dropout_command() -> None:
     limits = _v2_limits(center=(0.0, 0.0, 0.0), reach_shell=(0.01, 2.0))
-    adapter = A2Adapter(limits)
+    adapter = A2Adapter(limits, contact_entry_shaping=True)
     frame = _identity_frame()
     requested = np.array([-0.0098, 0.0, 0.0, 0.0, 0.0, 0.0])
 

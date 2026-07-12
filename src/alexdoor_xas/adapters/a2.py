@@ -33,9 +33,16 @@ JOINT_LIMIT_WARN_RAD = 0.1
 class A2Adapter:
     """Convert predicted world-frame EE deltas into executable clamped deltas."""
 
-    def __init__(self, limits: RobotLimitsCfg, log: AdapterLog | None = None):
+    def __init__(
+        self,
+        limits: RobotLimitsCfg,
+        log: AdapterLog | None = None,
+        *,
+        contact_entry_shaping: bool = False,
+    ):
         self.limits = limits
         self.log = log if log is not None else AdapterLog()
+        self.contact_entry_shaping = bool(contact_entry_shaping)
 
     def process(self, delta_world, ctx: StepContext) -> tuple[np.ndarray, AdapterDecision]:
         """Adapt one 6-dim world-frame EE delta; returns (applied, decision).
@@ -141,7 +148,8 @@ class A2Adapter:
         clearance = self.limits.contact_approach_start_clearance_m
         surface_x = self.limits.contact_surface_x_m
         if (
-            limit is None
+            not self.contact_entry_shaping
+            or limit is None
             or clearance is None
             or surface_x is None
             or ctx.door_frame is None

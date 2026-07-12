@@ -319,7 +319,7 @@ def test_calibrated_first_contact_correction_is_enforced_in_execution() -> None:
     result = rollout_chunks(
         env,
         lambda ctx: np.array([[-0.015, 0.0, 0.0, 0.0, 0.0, 0.0]]),
-        A2Adapter(limits),
+        A2Adapter(limits, contact_entry_shaping=True),
         max_ticks=1,
     )
 

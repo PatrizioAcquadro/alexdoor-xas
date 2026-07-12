@@ -186,7 +186,7 @@ def _fresh_adapter(action_space: str, env):
         calibration=env.alex_v2_calibration(),
         workspace_center_w=center_w,
     )
-    a2 = A2Adapter(limits)
+    a2 = A2Adapter(limits, contact_entry_shaping=True)
     if action_space == A2_EE_DELTA:
         return a2
     if action_space == A3_OBJ_REL_EE_DELTA:
