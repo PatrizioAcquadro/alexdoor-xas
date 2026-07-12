@@ -64,6 +64,19 @@ def _row(seed: int, randomized: bool, pose: dict) -> dict:
         "impulse_ns": 30.0,
         "contact_unavailable_reason": None,
         "force_exceeds_admission_bound": False,
+        "force_trace_evidence": {
+            "trace_sha256": "a" * 64,
+            "admission_bound_n": 200.0,
+            "peak_tick": 1,
+            "peak_force_n": 90.0,
+            "peak_contact": True,
+            "peak_status": "accepted",
+            "peak_requested": [0.0] * 6,
+            "peak_applied": [0.0] * 6,
+            "n_exceedance_ticks": 0,
+            "exceedance_ticks": [],
+            "window": [],
+        },
         "n_accepted": 300,
         "n_corrected": 0,
         "n_rejected": 0,
@@ -508,6 +521,8 @@ def test_force_exceedance_yields_review_required_not_hidden(valid_run) -> None:
     tmp_path, payloads = valid_run
     payloads["D0"]["rollouts"][1]["force_exceeds_admission_bound"] = True
     payloads["D0"]["rollouts"][1]["force_n"] = {"mean": 90.0, "max": 272.2, "p95": 200.0}
+    evidence = payloads["D0"]["rollouts"][1]["force_trace_evidence"]
+    evidence.update(peak_force_n=272.2, n_exceedance_ticks=1, exceedance_ticks=[17])
     summary = _summarize(tmp_path, payloads)
     assert summary["metadata_coverage"] == "PASS"  # coverage independent
     assert summary["protocol_consistency"] == "PASS"
@@ -516,6 +531,21 @@ def test_force_exceedance_yields_review_required_not_hidden(valid_run) -> None:
     assert safety["status"] == "REVIEW_REQUIRED"
     assert any("272.2" in reason for reason in safety["review_reasons"])
     assert safety["counts"]["n_force_exceeds_admission_bound"] == 1
+
+
+def test_force_exceedance_requires_matching_trace_evidence(valid_run) -> None:
+    tmp_path, payloads = valid_run
+    row = payloads["D0"]["rollouts"][1]
+    row["force_exceeds_admission_bound"] = True
+    row["force_n"]["max"] = 230.0
+    row["force_trace_evidence"].update(
+        peak_force_n=100.0,
+        n_exceedance_ticks=0,
+        exceedance_ticks=[],
+    )
+    summary = _summarize(tmp_path, payloads)
+    assert summary["protocol_consistency"] == "FAIL"
+    assert any("force trace evidence" in p for p in summary["protocol_problems"])
 
 
 @pytest.mark.parametrize(

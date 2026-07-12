@@ -25,7 +25,11 @@ from alexdoor_xas.policies.common.eval_metadata import (
     file_sha256,
     verify_checkpoint_dataset_binding,
 )
-from alexdoor_xas.policies.common.rollout_eval import contact_report, rollout_failure_label
+from alexdoor_xas.policies.common.rollout_eval import (
+    contact_report,
+    force_trace_evidence,
+    rollout_failure_label,
+)
 from conftest import FakeForceDoorPushEnv
 
 CONTROL_DT = 1.0 / 60.0
@@ -46,6 +50,38 @@ def test_contact_report_force_math() -> None:
     assert report["force_n"]["p95"] == pytest.approx(30.0)  # nearest-rank on 3 samples
     assert report["impulse_ns"] == pytest.approx(60.0 * CONTROL_DT)
     assert report["unavailable_reason"] is None
+
+
+def test_force_trace_evidence_binds_peak_to_commands_and_hash() -> None:
+    import numpy as np
+
+    from alexdoor_xas.adapters import AdapterDecision, AdapterLog, AdapterStatus, RolloutResult
+
+    decisions = [
+        AdapterDecision(
+            status=AdapterStatus.ACCEPTED,
+            requested=np.full(6, float(index)),
+            applied=np.full(6, float(index) + 0.5),
+        )
+        for index in range(4)
+    ]
+    result = RolloutResult(
+        n_ticks=4,
+        initial_angle_rad=0.0,
+        final_angle_rad=0.8,
+        log=AdapterLog(),
+        decisions_per_tick=decisions,
+        contact_per_tick=[False, True, True, False],
+        force_n_per_tick=[0.0, 20.0, 230.0, 5.0],
+    )
+    evidence = force_trace_evidence(result, admission_bound_n=200.0, window_radius=1)
+    assert evidence["trace_sha256"]
+    assert evidence["peak_tick"] == 3
+    assert evidence["peak_force_n"] == pytest.approx(230.0)
+    assert evidence["n_exceedance_ticks"] == 1
+    assert evidence["exceedance_ticks"] == [3]
+    assert evidence["peak_applied"] == [2.5] * 6
+    assert [sample["tick"] for sample in evidence["window"]] == [2, 3, 4]
 
 
 def test_contact_report_without_force_sensing_records_reason() -> None:

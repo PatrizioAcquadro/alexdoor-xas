@@ -96,6 +96,70 @@ def contact_report(
     }
 
 
+def force_trace_evidence(
+    result,
+    *,
+    admission_bound_n: float,
+    window_radius: int = 2,
+) -> dict[str, Any] | None:
+    """Bind force peaks to their per-tick contact, command, and adapter trace."""
+    available = [
+        (index, float(force))
+        for index, force in enumerate(result.force_n_per_tick)
+        if force is not None
+    ]
+    if not available:
+        return None
+    if not np.isfinite([force for _, force in available]).all():
+        raise RuntimeError("non-finite rollout force trace cannot become evidence")
+    peak_index, peak_force = max(available, key=lambda item: item[1])
+    exceedance_indices = [index for index, force in available if force > admission_bound_n]
+
+    def sample(index: int) -> dict[str, Any]:
+        decision = result.decisions_per_tick[index]
+        return {
+            "tick": index + 1,
+            "force_n": result.force_n_per_tick[index],
+            "contact": result.contact_per_tick[index],
+            "status": str(decision.status),
+            "requested": (
+                None
+                if decision.requested is None
+                else np.asarray(decision.requested, dtype=np.float64).tolist()
+            ),
+            "applied": (
+                None
+                if decision.applied is None
+                else np.asarray(decision.applied, dtype=np.float64).tolist()
+            ),
+        }
+
+    decision = result.decisions_per_tick[peak_index]
+    start = max(0, peak_index - window_radius)
+    stop = min(len(result.force_n_per_tick), peak_index + window_radius + 1)
+    return {
+        "trace_sha256": rollout_trace_hash(result),
+        "admission_bound_n": float(admission_bound_n),
+        "peak_tick": peak_index + 1,
+        "peak_force_n": peak_force,
+        "peak_contact": result.contact_per_tick[peak_index],
+        "peak_status": str(decision.status),
+        "peak_requested": (
+            None
+            if decision.requested is None
+            else np.asarray(decision.requested, dtype=np.float64).tolist()
+        ),
+        "peak_applied": (
+            None
+            if decision.applied is None
+            else np.asarray(decision.applied, dtype=np.float64).tolist()
+        ),
+        "n_exceedance_ticks": len(exceedance_indices),
+        "exceedance_ticks": [index + 1 for index in exceedance_indices],
+        "window": [sample(index) for index in range(start, stop)],
+    }
+
+
 def rollout_failure_label(
     *,
     success: bool,
@@ -411,6 +475,7 @@ __all__ = [
     "determinism_probe_reference",
     "determinism_probe_report",
     "determinism_probe_update",
+    "force_trace_evidence",
     "rollout_failure_label",
     "rollout_trace_hash",
     "rollout_traces_payload",

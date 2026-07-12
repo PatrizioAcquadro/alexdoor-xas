@@ -133,6 +133,7 @@ from alexdoor_xas.policies.act.rollout_eval import (  # noqa: E402
     contact_report,
     determinism_probe_reference,
     determinism_probe_update,
+    force_trace_evidence,
     rollout_failure_label,
     scripted_reference_payload,
     seed_protocol,
@@ -247,6 +248,9 @@ def _run_rollout(
         "contact_source": contact["contact_source"],
         "force_exceeds_admission_bound": contact["force_exceeds_admission_bound"],
         "force_n": contact["force_n"],
+        "force_trace_evidence": force_trace_evidence(
+            result, admission_bound_n=FORCE_DATASET_LIMIT_N
+        ),
         "impulse_ns": contact["impulse_ns"],
         "contact_unavailable_reason": contact["unavailable_reason"],
         "n_accepted": result.log.n_accepted,

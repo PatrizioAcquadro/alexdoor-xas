@@ -64,6 +64,7 @@ REQUIRED_ROW_FIELDS = (
     "contact_ticks",
     "contact_source",
     "force_n",
+    "force_trace_evidence",
     "impulse_ns",
     "contact_unavailable_reason",
     "force_exceeds_admission_bound",
@@ -308,6 +309,18 @@ def check_file_protocol(
                 f"{path}: rollout {i} success={row.get('success')} inconsistent with "
                 f"failure_label={row.get('failure_label')!r}"
             )
+        if row.get("force_exceeds_admission_bound"):
+            evidence = row.get("force_trace_evidence") or {}
+            force_max = (row.get("force_n") or {}).get("max")
+            if (
+                evidence.get("peak_force_n") != force_max
+                or int(evidence.get("n_exceedance_ticks") or 0) < 1
+                or not evidence.get("exceedance_ticks")
+            ):
+                problems.append(
+                    f"{path}: rollout {i} force trace evidence does not bind the "
+                    "reported admission-bound exceedance"
+                )
 
     # Seed protocol: declared fixed/randomized seeds, exactly once each.
     protocol = payload.get("seed_protocol") or {}
