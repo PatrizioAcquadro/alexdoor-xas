@@ -5,7 +5,8 @@ Lab). Source of truth for scope/phases: `docs/PROJECT_GUIDELINES.md`. Currently
 at **local post-Phase 3.3 stabilization complete** (the historical documentation
 path is `docs/phase3_4_local_stabilization.md`). Local software, protocol, and
 safety readiness pass; the cluster transfer manifest is the final source/hash
-binding for cluster-sweep authorization. The only robot lineage is the static
+binding for cluster-sweep authorization. The cluster dataset-scale sweep has
+not started. The only robot lineage is the static
 `~/Desktop/Alex/urdf/alex_v2.urdf`, calibration-gated through
 `AlexDoor-DoorPush-AlexV2-v0`. The official `door_push_alex_v2/v2_pose`
 dataset contains 50 episodes across five door poses. ACT and Diffusion were
