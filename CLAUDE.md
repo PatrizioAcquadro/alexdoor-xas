@@ -2,10 +2,10 @@
 
 Cross-action-space VLA learning for humanoid door manipulation (IHMC Alex, Isaac
 Lab). Source of truth for scope/phases: `docs/PROJECT_GUIDELINES.md`. Currently
-at **local post-Phase 3.3 stabilization closeout** (the historical documentation
-path is `docs/phase3_4_local_stabilization.md`). The existing local software and
-protocol gates pass, but cluster authorization requires regenerated safety
-evidence with `safety_readiness: PASS`. The only robot lineage is the static
+at **local post-Phase 3.3 stabilization complete** (the historical documentation
+path is `docs/phase3_4_local_stabilization.md`). Local software, protocol, and
+safety readiness pass; the cluster transfer manifest is the final source/hash
+binding for cluster-sweep authorization. The only robot lineage is the static
 `~/Desktop/Alex/urdf/alex_v2.urdf`, calibration-gated through
 `AlexDoor-DoorPush-AlexV2-v0`. The official `door_push_alex_v2/v2_pose`
 dataset contains 50 episodes across five door poses. ACT and Diffusion were
@@ -74,7 +74,8 @@ need `rollout.door_pose_id` (pose-qualified `*_eval_<pose>.json`);
 `scripts/summarize_smoke_eval.py` merges them and gates metadata coverage.
 Smoke matrix `local_smoke_{act,diffusion}_{a2,a3}_n50_seed0` (obs preset
 `core_door_pose`, W&B offline group `local_smoke_n50_gpu`): 36/36 per cell,
-0 rejections; DDPM-100 seed-105 diagnostic passed (diagnostic only). Runner
+0 rejections and 0 force-bound exceedances; metadata, protocol, and safety
+readiness all pass. DDPM-100 seed-105 diagnostic passed (diagnostic only). Runner
 refuses direct export from posed runs and detects env mid-episode auto-reset.
 
 ## Frozen contracts

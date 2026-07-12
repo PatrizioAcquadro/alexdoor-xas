@@ -4,11 +4,10 @@
 > local references. “Phase 3.4” is not a milestone name here. The later report
 > is the **Unified Phase 3 scientific evaluation**.
 
-**Status: CLOSEOUT IN PROGRESS; REGENERATED SAFETY EVIDENCE REQUIRED.** Phase
-3.3 software and local protocol validation pass. The prior primary matrix passes
-schema and protocol gates but contains the two Diffusion force-bound exceedances
-described below; the calibrated execution correction must be followed by a fresh
-primary matrix before safety or cluster authorization can pass. All results are **pipeline
+**Status: COMPLETE; SAFETY READINESS PASS.** Phase 3.3 software and local
+protocol validation pass. The primary matrix was regenerated after the
+calibrated learned-policy contact-entry correction; schema, protocol, and safety
+readiness now all pass. All results are **pipeline
 validation on a 50-episode smoke dataset — not performance evidence**. No ACT-vs-Diffusion or
 A2-vs-A3 claims are made or implied; `v2_pose` is the definitive local
 stabilization contract (schema + generation protocol) that cluster/VLA/WAM
@@ -110,19 +109,20 @@ The per-pose seeds and fixed/randomized counts are bound to the tracked
 `configs/local_smoke_eval_plan_n50.json`; eval files cannot self-declare a
 different or easier protocol.
 
-| run | success | corrected/rejected | warnings | peak force | readiness |
+| run | success | corrected commands/rejected | warnings | peak force | readiness |
 |---|---|---|---|---|---|
-| ACT-A2 | 36/36 | 0/0 | 160 | 185.0 N | PASS |
-| ACT-A3 | 36/36 | 0/0 | 160 | 129.4 N | PASS |
-| DP-A2 (DDIM-10) | 36/36 | 7/0 | 160 | 230.7 N | REVIEW_REQUIRED |
-| DP-A3 (DDIM-10) | 36/36 | 7/0 | 160 | 201.9 N | REVIEW_REQUIRED |
+| ACT-A2 | 36/36 | 296/0 | 160 | 135.8 N | PASS |
+| ACT-A3 | 36/36 | 233/0 | 160 | 129.4 N | PASS |
+| DP-A2 (DDIM-10) | 36/36 | 195/0 | 160 | 145.5 N | PASS |
+| DP-A3 (DDIM-10) | 36/36 | 210/0 | 160 | 143.7 N | PASS |
 
-The fresh corrected matrix has one 200 N dataset-admission-bound exceedance in
-each Diffusion cell (seed 112) and none in ACT. These are explicit
-`REVIEW_REQUIRED` reasons; they are not hidden by metadata success, and the
-200 N dataset-admission bound was not weakened. The pre-fix local artifact set
-also contained an observed peak of approximately **272.2 N**; the earlier
-202–251 N report range was incomplete. The fresh matrix maximum is 230.7 N.
+The final corrected matrix has no 200 N dataset-admission-bound exceedance in
+any cell. The two formerly blocking seed-112 Diffusion entries now peak at
+116.4 N (A2) and 119.2 N (A3); their force-producing commands are recorded as
+`corrected`, with requested commands preserved and applied translation bounded
+to the calibrated 5 mm approach step. The bound remains unchanged. The pre-fix
+local artifact set contained peaks of 230.7 N, 201.9 N, and an older observed
+maximum of approximately 272.2 N; those artifacts are superseded, not hidden.
 All warnings are
 warn-level arm joint-velocity flags (0.4–2.3 rad/s over task-level caps on
 wrist/elbow joints, same class the scripted baseline shows); reported verbatim
@@ -142,8 +142,8 @@ remains the deployment default. This is a sampler-diagnostic data point, not a
 comparison result.
 
 Summary: `outputs/local_smoke_n50/summary.json` — **metadata coverage PASS**,
-**protocol consistency PASS**, and **safety readiness REVIEW_REQUIRED** across
-all 144 primary rollouts. Diagnostics remain separate from primary aggregates.
+**protocol consistency PASS**, and **safety readiness PASS** across all 144
+primary rollouts. Diagnostics remain separate from primary aggregates.
 
 ## 5. Validation battery (all PASS)
 
@@ -187,6 +187,5 @@ the task instruction.
   would be a recalibration-level change (cluster-scope decision).
 - Force sensing at eval is the door-panel-filtered EE force; impulse integrates
   |F|·control_dt over the whole rollout.
-- Diffusion force exceedances remain a machine-readable review item; they do
-  not alter the 200 N dataset-admission contract and are not hardware-readiness
-  evidence.
+- Local smoke safety readiness is not hardware-readiness evidence; the unchanged
+  200 N bound and calibrated contact-entry correction remain simulation-local.
