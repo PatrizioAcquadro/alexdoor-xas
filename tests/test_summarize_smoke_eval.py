@@ -96,6 +96,7 @@ def _payload(pose_id: str, plan_pose: dict) -> dict:
         "door_offset_xy": [plan_pose["door_offset_x_m"], plan_pose["door_offset_y_m"]],
     }
     payload = {
+        "policy": "act",
         "checkpoint": "outputs/act/best.pt",
         "checkpoint_sha256": "c" * 64,
         "robot_compatibility_label": "same_asset",
@@ -111,11 +112,22 @@ def _payload(pose_id: str, plan_pose: dict) -> dict:
         "door_pose": pose,
         "control_dt": 1.0 / 60.0,
         "dataset_provenance": {
+            "dataset": {
+                "task": "door_push_alex_v2",
+                "space": "A2_ee_delta",
+                "version": "v2_pose",
+                "obs_preset": "core_door_pose",
+            },
             "source_fingerprint_sha256": "s" * 64,
             "checkpoint_dataset_fingerprint_sha256": "e" * 64,
             "live_dataset_fingerprint_sha256": "e" * 64,
             "split_fingerprint_sha256": "f" * 64,
             "checkpoint_split_fingerprint_sha256": "f" * 64,
+            "split_episode_ids": {
+                "train": ["ep000", "ep001"],
+                "val": ["ep002"],
+                "test": ["ep003"],
+            },
             "dataset_fingerprint_match": True,
             "split_fingerprint_match": True,
             "train_split_match": True,
@@ -186,8 +198,88 @@ def valid_run(tmp_path):
 
 
 def _summarize(tmp_path, payloads, name="run_a"):
-    run_dir = _write_run(tmp_path, name, payloads)
-    return _module().summarize([run_dir], EXPECTED_POSES, POSE_PLAN, SEED_PLAN)
+    cells = _matrix_payloads()
+    cells.pop("act_a2")
+    cells[name] = payloads
+    reference = payloads[sorted(payloads)[0]]
+    reference_provenance = reference.get("dataset_provenance") or {}
+    reference_dataset = reference_provenance.get("dataset") or {}
+    reference_exact = reference_provenance.get("checkpoint_dataset_fingerprint_sha256")
+    for cell_name, cell_payloads in cells.items():
+        if cell_name == name:
+            continue
+        for payload in cell_payloads.values():
+            provenance = payload["dataset_provenance"]
+            payload["obs_preset"] = reference.get("obs_preset")
+            for field in ("task", "version", "obs_preset"):
+                provenance["dataset"][field] = reference_dataset.get(field)
+            for field in (
+                "source_fingerprint_sha256",
+                "split_fingerprint_sha256",
+                "checkpoint_split_fingerprint_sha256",
+                "split_episode_ids",
+            ):
+                provenance[field] = copy.deepcopy(reference_provenance.get(field))
+            if payload["action_space"] == "A2_ee_delta":
+                provenance["checkpoint_dataset_fingerprint_sha256"] = reference_exact
+                provenance["live_dataset_fingerprint_sha256"] = reference_exact
+    run_dirs = _write_matrix(tmp_path, cells)
+    return _module().summarize(run_dirs, EXPECTED_POSES, POSE_PLAN, SEED_PLAN)
+
+
+def _matrix_payloads() -> dict[str, dict[str, dict]]:
+    cells: dict[str, dict[str, dict]] = {}
+    for policy, space_tag, action_space, exact_fingerprint in (
+        ("act", "a2", "A2_ee_delta", "2" * 64),
+        ("act", "a3", "A3_obj_rel_ee_delta", "3" * 64),
+        ("diffusion", "a2", "A2_ee_delta", "2" * 64),
+        ("diffusion", "a3", "A3_obj_rel_ee_delta", "3" * 64),
+    ):
+        cell_name = f"{policy}_{space_tag}"
+        payloads = {
+            pose["pose_id"]: _payload(pose["pose_id"], pose) for pose in POSE_PLAN["poses"]
+        }
+        for payload in payloads.values():
+            payload["checkpoint"] = f"outputs/{cell_name}/best.pt"
+            payload["checkpoint_sha256"] = cell_name[0] * 64
+            payload["action_space"] = action_space
+            provenance = payload["dataset_provenance"]
+            provenance["dataset"]["space"] = action_space
+            provenance["checkpoint_dataset_fingerprint_sha256"] = exact_fingerprint
+            provenance["live_dataset_fingerprint_sha256"] = exact_fingerprint
+            if policy == "diffusion":
+                payload["policy"] = "diffusion"
+                del payload["chunk_size"]
+                del payload["temporal_ensemble"]
+                payload.update(
+                    horizon=16,
+                    n_action_steps=8,
+                    sampler="ddim",
+                    num_inference_steps=10,
+                )
+                for row in payload["rollouts"]:
+                    row.update(sampler="ddim", num_inference_steps=10)
+        cells[cell_name] = payloads
+    return cells
+
+
+def _write_matrix(tmp_path: Path, cells: dict[str, dict[str, dict]]) -> list[Path]:
+    run_dirs: list[Path] = []
+    for cell_name, payloads in cells.items():
+        run_dir = tmp_path / cell_name
+        (run_dir / "metrics").mkdir(parents=True)
+        policy = "diffusion" if cell_name.startswith("diffusion") else "act"
+        for pose_id, payload in payloads.items():
+            path = run_dir / "metrics" / f"{policy}_eval_{pose_id}.json"
+            path.write_text(json.dumps(payload))
+        run_dirs.append(run_dir)
+    return run_dirs
+
+
+def _summarize_matrix(tmp_path: Path, cells: dict[str, dict[str, dict]]) -> dict:
+    return _module().summarize(
+        _write_matrix(tmp_path, cells), EXPECTED_POSES, pose_plan=None, seed_plan=None
+    )
 
 
 # ── all-green baseline ───────────────────────────────────────────────────────
@@ -215,6 +307,14 @@ def test_missing_row_field_fails_coverage_only(valid_run) -> None:
     assert any("termination_reason" in p for p in summary["coverage_problems"])
 
 
+def test_missing_policy_fails_coverage(valid_run) -> None:
+    tmp_path, payloads = valid_run
+    del payloads["D0"]["policy"]
+    summary = _summarize(tmp_path, payloads)
+    assert summary["metadata_coverage"] == "FAIL"
+    assert any("'policy'" in problem for problem in summary["coverage_problems"])
+
+
 def test_missing_all_sample_force_summary_fails_coverage(valid_run) -> None:
     tmp_path, payloads = valid_run
     del payloads["D0"]["rollouts"][0]["force_n_all_samples"]
@@ -229,6 +329,26 @@ def test_missing_exact_fingerprint_fails_coverage(valid_run) -> None:
     summary = _summarize(tmp_path, payloads)
     assert summary["metadata_coverage"] == "FAIL"
     assert any("checkpoint_dataset_fingerprint_sha256" in p for p in summary["coverage_problems"])
+
+
+@pytest.mark.parametrize(
+    "field_path",
+    [
+        ("dataset", "task"),
+        ("dataset", "version"),
+        ("dataset", "obs_preset"),
+        ("split_episode_ids",),
+    ],
+)
+def test_missing_cross_cell_identity_field_fails_coverage(valid_run, field_path) -> None:
+    tmp_path, payloads = valid_run
+    target = payloads["D0"]["dataset_provenance"]
+    for key in field_path[:-1]:
+        target = target[key]
+    del target[field_path[-1]]
+    summary = _summarize(tmp_path, payloads)
+    assert summary["metadata_coverage"] == "FAIL"
+    assert any(".".join(field_path) in problem for problem in summary["coverage_problems"])
 
 
 @pytest.mark.parametrize(
@@ -400,7 +520,175 @@ def test_matrix_protocol_mismatch_across_runs_fails(valid_run) -> None:
     run_b = _write_run(tmp_path, "run_b", other)
     summary = _module().summarize([run_a, run_b], EXPECTED_POSES, POSE_PLAN, SEED_PLAN)
     assert summary["protocol_consistency"] == "FAIL"
-    assert any("across runs" in p for p in summary["protocol_problems"])
+    assert any(
+        "success_angle_deg mismatch across cells" in p
+        for p in summary["protocol_problems"]
+    )
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("source_fingerprint_sha256", "0" * 64),
+        ("split_fingerprint_sha256", "1" * 64),
+    ],
+)
+def test_cross_cell_shared_fingerprint_mismatch_fails(tmp_path, field, value) -> None:
+    cells = _matrix_payloads()
+    for payload in cells["diffusion_a3"].values():
+        payload["dataset_provenance"][field] = value
+        if field == "split_fingerprint_sha256":
+            payload["dataset_provenance"]["checkpoint_split_fingerprint_sha256"] = value
+    summary = _summarize_matrix(tmp_path, cells)
+    assert summary["protocol_consistency"] == "FAIL"
+    assert any(
+        "diffusion_a3" in problem
+        and "metrics/diffusion_eval_D0.json" in problem
+        and field in problem
+        for problem in summary["protocol_problems"]
+    )
+
+
+def test_cross_cell_split_membership_mismatch_fails(tmp_path) -> None:
+    cells = _matrix_payloads()
+    for payload in cells["act_a3"].values():
+        payload["dataset_provenance"]["split_episode_ids"]["train"] = ["ep999"]
+    summary = _summarize_matrix(tmp_path, cells)
+    assert summary["protocol_consistency"] == "FAIL"
+    assert any(
+        "act_a3" in problem and "split_episode_ids" in problem
+        for problem in summary["protocol_problems"]
+    )
+
+
+@pytest.mark.parametrize("field,value", [("task", "other_task"), ("version", "v3")])
+def test_cross_cell_dataset_identity_mismatch_fails(tmp_path, field, value) -> None:
+    cells = _matrix_payloads()
+    for payload in cells["diffusion_a2"].values():
+        payload["dataset_provenance"]["dataset"][field] = value
+    summary = _summarize_matrix(tmp_path, cells)
+    assert summary["protocol_consistency"] == "FAIL"
+    assert any(
+        "diffusion_a2" in problem and f"dataset.{field}" in problem
+        for problem in summary["protocol_problems"]
+    )
+
+
+def test_cross_cell_observation_preset_mismatch_fails(tmp_path) -> None:
+    cells = _matrix_payloads()
+    for payload in cells["act_a3"].values():
+        payload["obs_preset"] = "core"
+        payload["dataset_provenance"]["dataset"]["obs_preset"] = "core"
+    summary = _summarize_matrix(tmp_path, cells)
+    assert summary["protocol_consistency"] == "FAIL"
+    assert any(
+        "act_a3" in problem and "obs_preset" in problem
+        for problem in summary["protocol_problems"]
+    )
+
+
+def test_cross_cell_seed_plan_mismatch_fails(tmp_path) -> None:
+    cells = _matrix_payloads()
+    for payload in cells["diffusion_a2"].values():
+        payload["base_seed"] = 500
+        payload["seed_protocol"].update(
+            base_seed=500,
+            fixed_seeds=[500],
+            randomized_seeds=[501],
+        )
+        payload["determinism_probe"]["seed"] = 500
+        payload["rollouts"][0].update(seed=500)
+        payload["rollouts"][1].update(seed=501)
+    summary = _summarize_matrix(tmp_path, cells)
+    assert summary["protocol_consistency"] == "FAIL"
+    assert any(
+        "diffusion_a2" in problem and "seed_plan" in problem
+        for problem in summary["protocol_problems"]
+    )
+
+
+def test_cross_cell_door_pose_plan_mismatch_fails(tmp_path) -> None:
+    cells = _matrix_payloads()
+    payload = cells["act_a2"]["D1"]
+    payload["door_pose"]["door_yaw_deg"] = 9.99
+    for row in payload["rollouts"]:
+        row["door_yaw_deg"] = 9.99
+    summary = _summarize_matrix(tmp_path, cells)
+    assert summary["protocol_consistency"] == "FAIL"
+    assert any(
+        "act_a2" in problem and "door_pose_plan" in problem
+        for problem in summary["protocol_problems"]
+    )
+
+
+@pytest.mark.parametrize(
+    "cell,new_fingerprint,expected_relationship",
+    [
+        ("diffusion_a2", "4" * 64, "same-space"),
+        ("act_a3", "2" * 64, "cross-space"),
+    ],
+)
+def test_cross_cell_exact_dataset_fingerprint_relationship_fails(
+    tmp_path, cell, new_fingerprint, expected_relationship
+) -> None:
+    cells = _matrix_payloads()
+    for payload in cells[cell].values():
+        provenance = payload["dataset_provenance"]
+        provenance["checkpoint_dataset_fingerprint_sha256"] = new_fingerprint
+        provenance["live_dataset_fingerprint_sha256"] = new_fingerprint
+    summary = _summarize_matrix(tmp_path, cells)
+    assert summary["protocol_consistency"] == "FAIL"
+    assert any(
+        cell in problem and expected_relationship in problem
+        for problem in summary["protocol_problems"]
+    )
+
+
+def test_cross_cell_action_space_pairing_must_be_exact(tmp_path) -> None:
+    cells = _matrix_payloads()
+    for payload in cells["act_a3"].values():
+        payload["action_space"] = "A2_ee_delta"
+        payload["dataset_provenance"]["dataset"]["space"] = "A2_ee_delta"
+        payload["dataset_provenance"]["checkpoint_dataset_fingerprint_sha256"] = "2" * 64
+        payload["dataset_provenance"]["live_dataset_fingerprint_sha256"] = "2" * 64
+    summary = _summarize_matrix(tmp_path, cells)
+    assert summary["protocol_consistency"] == "FAIL"
+    assert any(
+        "act_a3" in problem and "matrix.cells" in problem
+        for problem in summary["protocol_problems"]
+    )
+
+
+def test_partial_matrix_fails_with_cell_and_file_diagnostics(valid_run) -> None:
+    tmp_path, payloads = valid_run
+    run_dir = _write_run(tmp_path, "act_a2_only", payloads)
+    summary = _module().summarize([run_dir], EXPECTED_POSES, POSE_PLAN, SEED_PLAN)
+    assert summary["protocol_consistency"] == "FAIL"
+    assert any(
+        "matrix.cells" in problem
+        and str(run_dir) in problem
+        and "act_eval_D0.json" in problem
+        for problem in summary["protocol_problems"]
+    )
+
+
+@pytest.mark.parametrize(
+    "cell,field,value",
+    [("act_a3", "chunk_size", 20), ("diffusion_a3", "num_inference_steps", 100)],
+)
+def test_cross_cell_policy_configuration_mismatch_fails(tmp_path, cell, field, value) -> None:
+    cells = _matrix_payloads()
+    for payload in cells[cell].values():
+        payload[field] = value
+        if field == "num_inference_steps":
+            for row in payload["rollouts"]:
+                row[field] = value
+    summary = _summarize_matrix(tmp_path, cells)
+    assert summary["protocol_consistency"] == "FAIL"
+    assert any(
+        cell in problem and f"policy_config.{field}" in problem
+        for problem in summary["protocol_problems"]
+    )
 
 
 # ── determinism evidence ─────────────────────────────────────────────────────
@@ -516,12 +804,15 @@ def test_diagnostics_stay_out_of_primary_aggregates(valid_run) -> None:
     for row in diag["rollouts"]:
         row["door_pose_id"] = "D0diag-ddpm100"
         row["force_exceeds_admission_bound"] = True  # must not leak into safety
+    diag["chunk_size"] = 999
+    diag["dataset_provenance"]["source_fingerprint_sha256"] = "0" * 64
     payloads["D0diag-ddpm100"] = diag
     summary = _summarize(tmp_path, payloads)
     run = summary["runs"]["run_a"]
     assert "D0diag-ddpm100" in run["diagnostics"]
     assert "D0diag-ddpm100" not in run["poses"]
     assert run["overall"]["n_rollouts"] == 4  # diag rows not aggregated
+    assert summary["protocol_consistency"] == "PASS"
     assert summary["safety_readiness"] == "PASS"
 
 

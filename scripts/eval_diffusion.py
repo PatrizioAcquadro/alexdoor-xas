@@ -432,6 +432,7 @@ def main() -> int:
                 flush=True,
             )
         payload = {
+            "policy": "diffusion",
             "checkpoint": str(checkpoint_path),
             "checkpoint_sha256": file_sha256(checkpoint_path),
             "robot_compatibility_label": policy.robot_compatibility_label,
@@ -526,6 +527,7 @@ def _run_determinism_replay(env, policy, checkpoint_path, success_angle_rad: flo
     # The replay is only valid evidence if this process is configured exactly
     # like the reference eval; any drift is a hard error, not a comparison.
     expected = {
+        "policy": "diffusion",
         "checkpoint_sha256": file_sha256(checkpoint_path),
         "action_space": policy.action_space,
         "obs_preset": policy.obs_preset,

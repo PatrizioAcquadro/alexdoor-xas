@@ -39,6 +39,7 @@ import argparse
 import json
 import math
 import sys
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -79,6 +80,7 @@ REQUIRED_ROW_FIELDS = (
     "notes",
 )
 REQUIRED_TOP_FIELDS = (
+    "policy",
     "checkpoint",
     "checkpoint_sha256",
     "action_space",
@@ -96,11 +98,13 @@ REQUIRED_TOP_FIELDS = (
     "aggregate",
 )
 REQUIRED_PROVENANCE_FIELDS = (
+    "dataset",
     "source_fingerprint_sha256",
     "checkpoint_dataset_fingerprint_sha256",
     "live_dataset_fingerprint_sha256",
     "split_fingerprint_sha256",
     "checkpoint_split_fingerprint_sha256",
+    "split_episode_ids",
     "dataset_fingerprint_match",
     "split_fingerprint_match",
     "train_split_match",
@@ -137,6 +141,7 @@ REQUIRED_MAX_DIFFS = ("requested", "applied", "final_angle_rad", "force_n")
 # Fields that must be identical across every primary pose file of one run
 # (same checkpoint, same dataset binding, same evaluation protocol).
 RUN_CONSISTENT_FIELDS = (
+    "policy",
     "checkpoint",
     "checkpoint_sha256",
     "action_space",
@@ -153,6 +158,16 @@ MATRIX_CONSISTENT_FIELDS = (
     "success_semantics",
     "control_dt",
 )
+EXPECTED_MATRIX_CELLS = {
+    ("act", "A2_ee_delta"),
+    ("act", "A3_obj_rel_ee_delta"),
+    ("diffusion", "A2_ee_delta"),
+    ("diffusion", "A3_obj_rel_ee_delta"),
+}
+POLICY_CONSISTENT_FIELDS = {
+    "act": ("chunk_size", "temporal_ensemble"),
+    "diffusion": ("horizon", "n_action_steps", "sampler", "num_inference_steps"),
+}
 # Row-level fields that must equal the file's top-level policy metadata.
 ROW_TOP_AGREEMENT = ("sampler", "num_inference_steps")
 
@@ -214,6 +229,7 @@ WARNING_ADJUDICATION_POLICY: dict[str, Any] = {
 # A rejection storm is an adapter/frame problem; a stray rejection is a watch
 # item. Threshold on the run's total rejected fraction of all commands.
 SYSTEMATIC_REJECTION_FRACTION = 0.02
+PayloadGetter = Callable[[dict[str, Any]], object]
 
 
 def _force_exceedance_ticks(row: dict) -> int:
@@ -267,6 +283,18 @@ def check_coverage(payload: dict, path: Path, problems: list[str]) -> None:
     for field in REQUIRED_PROVENANCE_FIELDS:
         if not provenance.get(field):
             problems.append(f"{path}: dataset_provenance has no {field}")
+    dataset = provenance.get("dataset")
+    if isinstance(dataset, dict):
+        for field in ("task", "space", "version", "obs_preset"):
+            if not isinstance(dataset.get(field), str) or not dataset[field]:
+                problems.append(f"{path}: dataset_provenance has no dataset.{field}")
+    split_episode_ids = provenance.get("split_episode_ids")
+    if isinstance(split_episode_ids, dict):
+        for split in ("train", "val", "test"):
+            if not isinstance(split_episode_ids.get(split), list):
+                problems.append(
+                    f"{path}: dataset_provenance.split_episode_ids has no list {split!r}"
+                )
     if payload.get("aggregate", {}).get("fixed_reset_spread_rad") is None and (
         payload.get("seed_protocol", {}).get("episodes_fixed", 0) > 0
     ):
@@ -309,6 +337,16 @@ def _provenance_identity(payload: dict) -> dict:
 
 def _check_provenance_binding(payload: dict, path: Path, problems: list[str]) -> None:
     provenance = payload.get("dataset_provenance") or {}
+    dataset = provenance.get("dataset") or {}
+    for top_field, dataset_field in (
+        ("action_space", "space"),
+        ("obs_preset", "obs_preset"),
+    ):
+        if payload.get(top_field) != dataset.get(dataset_field):
+            problems.append(
+                f"{path}: top-level {top_field}={payload.get(top_field)!r} disagrees with "
+                f"dataset_provenance.dataset.{dataset_field}={dataset.get(dataset_field)!r}"
+            )
     checkpoint_fp = provenance.get("checkpoint_dataset_fingerprint_sha256")
     live_fp = provenance.get("live_dataset_fingerprint_sha256")
     if checkpoint_fp != live_fp:
@@ -577,6 +615,154 @@ def check_run_consistency(
                 f"{run_dir}: dataset/split identity mismatch across pose files — "
                 f"{path.name}={_provenance_identity(payload)} vs {ref_path.name}="
                 f"{_provenance_identity(reference)}"
+            )
+
+
+def _cell_label(run_dir: Path, path: Path, payload: dict) -> str:
+    return (
+        f"{run_dir} ({path}; policy={payload.get('policy')!r}, "
+        f"action_space={payload.get('action_space')!r})"
+    )
+
+
+def _check_matrix_field(
+    cells: list[tuple[Path, dict[str, tuple[Path, dict]]]],
+    field: str,
+    getter: PayloadGetter,
+    problems: list[str],
+) -> None:
+    values: list[tuple[Path, Path, dict, object]] = []
+    for run_dir, primary in cells:
+        path, payload = primary[sorted(primary)[0]]
+        values.append((run_dir, path, payload, getter(payload)))
+    if values and any(value != values[0][3] for _, _, _, value in values[1:]):
+        rendered = "; ".join(
+            f"{_cell_label(run_dir, path, payload)}={value!r}"
+            for run_dir, path, payload, value in values
+        )
+        problems.append(f"matrix: {field} mismatch across cells — {rendered}")
+
+
+def check_matrix_consistency(
+    cells: list[tuple[Path, dict[str, tuple[Path, dict]]]], problems: list[str]
+) -> None:
+    """Enforce the four-cell scientific identity contract over primary files only."""
+    observed: dict[tuple[object, object], list[tuple[Path, Path, dict]]] = {}
+    descriptors: list[str] = []
+    for run_dir, primary in cells:
+        path, payload = primary[sorted(primary)[0]]
+        key = (payload.get("policy"), payload.get("action_space"))
+        observed.setdefault(key, []).append((run_dir, path, payload))
+        descriptors.append(_cell_label(run_dir, path, payload))
+    wrong_cells = set(observed) != EXPECTED_MATRIX_CELLS
+    duplicate_cells = any(len(group) != 1 for group in observed.values())
+    if wrong_cells or duplicate_cells:
+        expected = sorted(EXPECTED_MATRIX_CELLS)
+        problems.append(
+            f"matrix.cells must contain exactly ACT-A2, ACT-A3, Diffusion-A2, and "
+            f"Diffusion-A3 — observed {sorted(observed, key=repr)}; expected {expected}; files: "
+            + "; ".join(descriptors)
+        )
+
+    universal_fields = {
+        "dataset.task": lambda payload: (payload.get("dataset_provenance") or {})
+        .get("dataset", {})
+        .get("task"),
+        "dataset.version": lambda payload: (payload.get("dataset_provenance") or {})
+        .get("dataset", {})
+        .get("version"),
+        "obs_preset": lambda payload: payload.get("obs_preset"),
+        "source_fingerprint_sha256": lambda payload: (
+            payload.get("dataset_provenance") or {}
+        ).get("source_fingerprint_sha256"),
+        "split_fingerprint_sha256": lambda payload: (
+            payload.get("dataset_provenance") or {}
+        ).get("split_fingerprint_sha256"),
+        "split_episode_ids": lambda payload: (payload.get("dataset_provenance") or {}).get(
+            "split_episode_ids"
+        ),
+        **{
+            field: (lambda payload, field=field: payload.get(field))
+            for field in MATRIX_CONSISTENT_FIELDS
+        },
+    }
+    for field, getter in universal_fields.items():
+        _check_matrix_field(cells, field, getter, problems)
+
+    for pose_id in sorted({pose_id for _, primary in cells for pose_id in primary}):
+        pose_cells = [
+            (run_dir, {pose_id: primary[pose_id]})
+            for run_dir, primary in cells
+            if pose_id in primary
+        ]
+        if len(pose_cells) != len(cells):
+            continue
+        _check_matrix_field(
+            pose_cells,
+            f"seed_plan.{pose_id}",
+            lambda payload: {
+                "base_seed": payload.get("base_seed"),
+                "seed_protocol": payload.get("seed_protocol"),
+            },
+            problems,
+        )
+        _check_matrix_field(
+            pose_cells,
+            f"door_pose_plan.{pose_id}",
+            lambda payload: payload.get("door_pose"),
+            problems,
+        )
+
+    for action_space in ("A2_ee_delta", "A3_obj_rel_ee_delta"):
+        same_space = [
+            cell
+            for cell in cells
+            if cell[1][sorted(cell[1])[0]][1].get("action_space") == action_space
+        ]
+        _check_matrix_field(
+            same_space,
+            f"same-space exact dataset fingerprint ({action_space})",
+            lambda payload: (payload.get("dataset_provenance") or {}).get(
+                "checkpoint_dataset_fingerprint_sha256"
+            ),
+            problems,
+        )
+
+    fingerprints_by_space: dict[object, list[tuple[Path, Path, dict, object]]] = {}
+    for run_dir, primary in cells:
+        path, payload = primary[sorted(primary)[0]]
+        action_space = payload.get("action_space")
+        fingerprint = (payload.get("dataset_provenance") or {}).get(
+            "checkpoint_dataset_fingerprint_sha256"
+        )
+        fingerprints_by_space.setdefault(action_space, []).append(
+            (run_dir, path, payload, fingerprint)
+        )
+    a2_fingerprints = {item[3] for item in fingerprints_by_space.get("A2_ee_delta", [])}
+    a3_fingerprints = {item[3] for item in fingerprints_by_space.get("A3_obj_rel_ee_delta", [])}
+    if a2_fingerprints & a3_fingerprints:
+        rendered = "; ".join(
+            f"{_cell_label(run_dir, path, payload)}={fingerprint!r}"
+            for group in fingerprints_by_space.values()
+            for run_dir, path, payload, fingerprint in group
+        )
+        problems.append(
+            "matrix: cross-space exact dataset fingerprints must be distinct for A2 vs A3 — "
+            + rendered
+        )
+
+    for policy, fields in POLICY_CONSISTENT_FIELDS.items():
+        policy_cells = [
+            cell
+            for cell in cells
+            if cell[1][sorted(cell[1])[0]][1].get("policy") == policy
+        ]
+        for field in fields:
+            _check_matrix_field(
+                policy_cells,
+                f"policy_config.{field}",
+                lambda payload, field=field: payload.get(field),
+                problems,
             )
 
 
@@ -888,7 +1074,7 @@ def summarize(
     coverage_problems: list[str] = []
     protocol_problems: list[str] = []
     runs: dict[str, dict] = {}
-    matrix_reference: tuple[Path, dict] | None = None
+    matrix_cells: list[tuple[Path, dict[str, tuple[Path, dict]]]] = []
     pose_plan_poses = (
         {pose["pose_id"]: pose for pose in pose_plan["poses"]} if pose_plan else None
     )
@@ -940,22 +1126,8 @@ def summarize(
                 f"expected {sorted(expected_poses)}"
             )
         check_run_consistency(primary, run_dir, protocol_problems)
-
-        # Matched protocol across runs (one evaluation contract per matrix).
         if primary:
-            ref_pose = sorted(primary)[0]
-            path, payload = primary[ref_pose]
-            if matrix_reference is None:
-                matrix_reference = (path, payload)
-            else:
-                ref_path, reference = matrix_reference
-                for field in MATRIX_CONSISTENT_FIELDS:
-                    if payload.get(field) != reference.get(field):
-                        protocol_problems.append(
-                            f"matrix: {field} mismatch across runs — "
-                            f"{path}={payload.get(field)!r} vs {ref_path}="
-                            f"{reference.get(field)!r}"
-                        )
+            matrix_cells.append((run_dir, primary))
 
         n_success = sum(1 for row in rows_all if row.get("success"))
         sample = primary[sorted(primary)[0]][1] if primary else json.loads(
@@ -1011,6 +1183,7 @@ def summarize(
             },
         }
 
+    check_matrix_consistency(matrix_cells, protocol_problems)
     safety_statuses = [run["safety_readiness"]["status"] for run in runs.values()]
     overall_safety = (
         "FAIL"
