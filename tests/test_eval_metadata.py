@@ -84,6 +84,12 @@ def test_force_trace_evidence_binds_peak_to_commands_and_hash() -> None:
     assert [sample["tick"] for sample in evidence["window"]] == [2, 3, 4]
 
 
+def test_act_compatibility_module_reexports_force_trace_evidence() -> None:
+    from alexdoor_xas.policies.act.rollout_eval import force_trace_evidence as act_export
+
+    assert act_export is force_trace_evidence
+
+
 def test_contact_report_without_force_sensing_records_reason() -> None:
     report = contact_report([None, None], [None, None], CONTROL_DT)
     assert report["contact_ticks"] == 0
