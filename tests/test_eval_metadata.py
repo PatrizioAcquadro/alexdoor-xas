@@ -16,6 +16,7 @@ from alexdoor_xas.dataset import (
     make_grouped_splits,
     save_splits,
     split_entries,
+    split_fingerprint,
     splits_path,
 )
 from alexdoor_xas.policies.common.eval_metadata import (
@@ -272,7 +273,52 @@ def test_binding_fails_on_changed_split_membership(binding_fixture) -> None:
         binding_fixture["datasets_root"],
     )
     provenance["split_episode_ids"] = swapped
+    provenance["split_fingerprint_sha256"] = split_fingerprint(swapped)
     with pytest.raises(EvalProvenanceError, match="train split does not match"):
+        verify_checkpoint_dataset_binding(
+            binding_fixture["stats"], provenance, binding_fixture["datasets_root"]
+        )
+
+
+@requires_h5py
+def test_binding_fails_when_validation_provenance_is_missing(binding_fixture) -> None:
+    provenance = dataset_provenance(
+        binding_fixture["checkpoint_config"],
+        binding_fixture["run_dir"],
+        binding_fixture["datasets_root"],
+    )
+    provenance["train_log_split_ids"]["val"] = None
+    with pytest.raises(EvalProvenanceError, match="missing train/validation split ids"):
+        verify_checkpoint_dataset_binding(
+            binding_fixture["stats"], provenance, binding_fixture["datasets_root"]
+        )
+
+
+@requires_h5py
+def test_binding_fails_on_changed_validation_membership(binding_fixture) -> None:
+    provenance = dataset_provenance(
+        binding_fixture["checkpoint_config"],
+        binding_fixture["run_dir"],
+        binding_fixture["datasets_root"],
+    )
+    live = provenance["split_episode_ids"]
+    live["val"][0], live["test"][0] = live["test"][0], live["val"][0]
+    provenance["split_fingerprint_sha256"] = split_fingerprint(live)
+    with pytest.raises(EvalProvenanceError, match="val split does not match"):
+        verify_checkpoint_dataset_binding(
+            binding_fixture["stats"], provenance, binding_fixture["datasets_root"]
+        )
+
+
+@requires_h5py
+def test_binding_fails_on_overlapping_or_stale_split_fingerprint(binding_fixture) -> None:
+    provenance = dataset_provenance(
+        binding_fixture["checkpoint_config"],
+        binding_fixture["run_dir"],
+        binding_fixture["datasets_root"],
+    )
+    provenance["split_episode_ids"]["test"][0] = provenance["split_episode_ids"]["train"][0]
+    with pytest.raises(EvalProvenanceError, match="overlapping memberships"):
         verify_checkpoint_dataset_binding(
             binding_fixture["stats"], provenance, binding_fixture["datasets_root"]
         )

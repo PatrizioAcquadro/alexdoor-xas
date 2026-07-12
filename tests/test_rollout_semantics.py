@@ -342,6 +342,16 @@ def test_fresh_process_probe_replay_detects_divergence() -> None:
     assert len(set(updated["trace_sha256"])) == 2
 
 
+def test_fresh_process_probe_detects_force_availability_divergence() -> None:
+    reference_result, replay_result = _result_pair(perturb=False)
+    replay_result.force_n_per_tick[0] = None
+    updated = determinism_probe_update(
+        determinism_probe_reference(reference_result, seed=0), replay_result
+    )
+    assert updated["passed"] is False
+    assert any("force trace availability" in m for m in updated["mismatches"])
+
+
 def test_determinism_probe_requires_two_repeats() -> None:
     a = _run(FakeDoorPushEnv(), 8, success_angle_rad=SUCCESS_RAD)
     with pytest.raises(ValueError, match="at least 2"):

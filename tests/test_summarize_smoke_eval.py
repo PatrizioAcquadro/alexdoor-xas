@@ -14,12 +14,20 @@ from pathlib import Path
 
 import pytest
 
+from alexdoor_xas.policies.common.rollout_eval import trace_payload_hash
+
 EXPECTED_POSES = {"D0", "D1"}
 POSE_PLAN = {
     "poses": [
         {"pose_id": "D0", "door_yaw_deg": 0.0, "door_offset_x_m": 0.0, "door_offset_y_m": 0.0},
         {"pose_id": "D1", "door_yaw_deg": 2.86, "door_offset_x_m": 0.02, "door_offset_y_m": 0.0},
     ]
+}
+SEED_PLAN = {
+    "poses": {
+        "D0": {"base_seed": 100, "episodes_fixed": 1, "episodes_randomized": 1},
+        "D1": {"base_seed": 100, "episodes_fixed": 1, "episodes_randomized": 1},
+    }
 }
 
 
@@ -71,7 +79,7 @@ def _payload(pose_id: str, plan_pose: dict) -> dict:
         "door_yaw_deg": plan_pose["door_yaw_deg"],
         "door_offset_xy": [plan_pose["door_offset_x_m"], plan_pose["door_offset_y_m"]],
     }
-    return {
+    payload = {
         "checkpoint": "outputs/act/best.pt",
         "checkpoint_sha256": "c" * 64,
         "robot_compatibility_label": "same_asset",
@@ -104,10 +112,25 @@ def _payload(pose_id: str, plan_pose: dict) -> dict:
             "kind": "repeat_same_seed_fresh_process",
             "seed": 100,
             "repeats": 2,
-            "tolerances": {},
-            "trace_sha256": ["a", "a"],
-            "reference_traces": {},
-            "max_abs_diffs": {},
+            "tolerances": {"command_abs": 0.0, "angle_abs_rad": 0.0, "force_abs_n": 0.0},
+            "trace_sha256": [],
+            "reference_traces": {
+                "n_ticks": 300,
+                "requested": [[0.0] * 6] * 300,
+                "applied": [[0.0] * 6] * 300,
+                "statuses": ["accepted"] * 300,
+                "first_success_tick": 300,
+                "termination_reason": "success",
+                "final_angle_rad": 0.8,
+                "contact": [True] * 300,
+                "force": [40.0] * 300,
+            },
+            "max_abs_diffs": {
+                "requested": 0.0,
+                "applied": 0.0,
+                "final_angle_rad": 0.0,
+                "force_n": 0.0,
+            },
             "mismatches": [],
             "passed": True,
         },
@@ -119,6 +142,10 @@ def _payload(pose_id: str, plan_pose: dict) -> dict:
             "fixed_reset_spread_rad": 0.0,
         },
     }
+    payload["determinism_probe"]["trace_sha256"] = [
+        trace_payload_hash(payload["determinism_probe"]["reference_traces"])
+    ] * 2
+    return payload
 
 
 def _write_run(tmp_path: Path, name: str, payloads: dict[str, dict]) -> Path:
@@ -139,7 +166,7 @@ def valid_run(tmp_path):
 
 def _summarize(tmp_path, payloads, name="run_a"):
     run_dir = _write_run(tmp_path, name, payloads)
-    return _module().summarize([run_dir], EXPECTED_POSES, POSE_PLAN)
+    return _module().summarize([run_dir], EXPECTED_POSES, POSE_PLAN, SEED_PLAN)
 
 
 # ── all-green baseline ───────────────────────────────────────────────────────
@@ -250,12 +277,29 @@ def test_seeds_off_protocol_fail(valid_run) -> None:
     assert any("seed protocol" in p for p in summary["protocol_problems"])
 
 
+def test_self_declared_seed_protocol_cannot_drift_from_plan(valid_run) -> None:
+    tmp_path, payloads = valid_run
+    payload = payloads["D0"]
+    payload["base_seed"] = 500
+    payload["seed_protocol"].update(
+        base_seed=500,
+        fixed_seeds=[500],
+        randomized_seeds=[501],
+    )
+    payload["determinism_probe"]["seed"] = 500
+    payload["rollouts"][0]["seed"] = 500
+    payload["rollouts"][1]["seed"] = 501
+    summary = _summarize(tmp_path, payloads)
+    assert summary["protocol_consistency"] == "FAIL"
+    assert any("does not match seed plan" in p for p in summary["protocol_problems"])
+
+
 def test_duplicate_pose_files_fail_protocol(valid_run) -> None:
     tmp_path, payloads = valid_run
     run_dir = _write_run(tmp_path, "run_a", payloads)
     extra = copy.deepcopy(payloads["D0"])
     (run_dir / "metrics" / "act_eval_D0_copy.json").write_text(json.dumps(extra))
-    summary = _module().summarize([run_dir], EXPECTED_POSES, POSE_PLAN)
+    summary = _module().summarize([run_dir], EXPECTED_POSES, POSE_PLAN, SEED_PLAN)
     assert summary["protocol_consistency"] == "FAIL"
     assert any("duplicate eval files" in p for p in summary["protocol_problems"])
 
@@ -283,7 +327,7 @@ def test_matrix_protocol_mismatch_across_runs_fails(valid_run) -> None:
     for payload in other.values():
         payload["success_angle_deg"] = 30.0
     run_b = _write_run(tmp_path, "run_b", other)
-    summary = _module().summarize([run_a, run_b], EXPECTED_POSES, POSE_PLAN)
+    summary = _module().summarize([run_a, run_b], EXPECTED_POSES, POSE_PLAN, SEED_PLAN)
     assert summary["protocol_consistency"] == "FAIL"
     assert any("across runs" in p for p in summary["protocol_problems"])
 
@@ -342,6 +386,24 @@ def test_in_process_repeats_are_not_determinism_evidence(valid_run) -> None:
     payloads["D0"]["determinism_probe"]["kind"] = "repeat_same_seed"
     summary = _summarize(tmp_path, payloads)
     assert summary["protocol_consistency"] == "FAIL"
+
+
+@pytest.mark.parametrize(
+    "mutation,expected",
+    [
+        (lambda probe: probe.update(seed=999), "does not match base_seed"),
+        (lambda probe: probe["trace_sha256"].pop(), "trace_sha256 count"),
+        (lambda probe: probe["trace_sha256"].__setitem__(0, "0" * 64), "first trace hash"),
+        (lambda probe: probe["tolerances"].pop("force_abs_n"), "force_abs_n"),
+        (lambda probe: probe["max_abs_diffs"].update(force_n=float("nan")), "force_n"),
+    ],
+)
+def test_malformed_determinism_evidence_fails_protocol(valid_run, mutation, expected) -> None:
+    tmp_path, payloads = valid_run
+    mutation(payloads["D0"]["determinism_probe"])
+    summary = _summarize(tmp_path, payloads)
+    assert summary["protocol_consistency"] == "FAIL"
+    assert any(expected in problem for problem in summary["protocol_problems"])
 
 
 # ── diagnostics separation ───────────────────────────────────────────────────

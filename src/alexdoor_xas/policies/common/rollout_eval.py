@@ -256,6 +256,8 @@ def compare_trace_payloads(
         mismatches.append(f"{label}: adapter decision statuses differ")
     if list(candidate["contact"]) != list(reference["contact"]):
         mismatches.append(f"{label}: contact trace differs")
+    if [f is None for f in candidate["force"]] != [f is None for f in reference["force"]]:
+        mismatches.append(f"{label}: force trace availability differs")
     for key, tol_name in (("requested", "command_abs"), ("applied", "command_abs")):
         ref = np.asarray(reference[key], dtype=np.float64)
         cand = np.asarray(candidate[key], dtype=np.float64)
@@ -415,4 +417,5 @@ __all__ = [
     "scripted_reference_payload",
     "seed_protocol",
     "summarize_decision_warnings",
+    "trace_payload_hash",
 ]

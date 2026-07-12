@@ -29,6 +29,7 @@ REVIEW_REQUIRED). Run through the official launcher (pure Python, no Kit)::
     PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p \
         scripts/summarize_smoke_eval.py --out outputs/local_smoke_n50/summary.json \
         --pose-plan configs/door_pose_plan_v2_pose.json \
+        --seed-plan configs/local_smoke_eval_plan_n50.json \
         outputs/door_push_alex_v2/act_door_push/local_smoke_act_a2_n50_seed0 [...]
 """
 
@@ -36,10 +37,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from alexdoor_xas.policies.common.rollout_eval import trace_payload_hash
 
 REQUIRED_ROW_FIELDS = (
     "seed",
@@ -96,6 +100,30 @@ REQUIRED_PROVENANCE_FIELDS = (
 DIFFUSION_TOP_FIELDS = ("horizon", "n_action_steps", "sampler", "num_inference_steps")
 DIFFUSION_ROW_FIELDS = ("sampler", "num_inference_steps")
 ACT_TOP_FIELDS = ("chunk_size", "temporal_ensemble")
+REQUIRED_PROBE_FIELDS = (
+    "kind",
+    "seed",
+    "repeats",
+    "tolerances",
+    "trace_sha256",
+    "reference_traces",
+    "max_abs_diffs",
+    "mismatches",
+    "passed",
+)
+REQUIRED_TRACE_FIELDS = (
+    "n_ticks",
+    "requested",
+    "applied",
+    "statuses",
+    "first_success_tick",
+    "termination_reason",
+    "final_angle_rad",
+    "contact",
+    "force",
+)
+REQUIRED_TOLERANCES = ("command_abs", "angle_abs_rad", "force_abs_n")
+REQUIRED_MAX_DIFFS = ("requested", "applied", "final_angle_rad", "force_n")
 
 # Fields that must be identical across every primary pose file of one run
 # (same checkpoint, same dataset binding, same evaluation protocol).
@@ -144,6 +172,12 @@ def parse_args() -> argparse.Namespace:
         help="Pose-plan JSON; door poses in the eval files must match it.",
     )
     parser.add_argument(
+        "--seed-plan",
+        type=Path,
+        default=Path("configs/local_smoke_eval_plan_n50.json"),
+        help="Per-pose base seed and fixed/randomized counts for the primary matrix.",
+    )
+    parser.add_argument(
         "--fail-on-review",
         action="store_true",
         help="Exit non-zero when safety_readiness is REVIEW_REQUIRED (default: FAIL only).",
@@ -171,6 +205,20 @@ def check_coverage(payload: dict, path: Path, problems: list[str]) -> None:
         payload.get("seed_protocol", {}).get("episodes_fixed", 0) > 0
     ):
         problems.append(f"{path}: fixed block present but no fixed_reset spread recorded")
+    probe = payload.get("determinism_probe")
+    if isinstance(probe, dict):
+        for field in REQUIRED_PROBE_FIELDS:
+            if field not in probe:
+                problems.append(f"{path}: determinism_probe missing field {field!r}")
+        reference = probe.get("reference_traces")
+        if isinstance(reference, dict):
+            for field in REQUIRED_TRACE_FIELDS:
+                if field not in reference:
+                    problems.append(
+                        f"{path}: determinism_probe reference_traces missing field {field!r}"
+                    )
+        else:
+            problems.append(f"{path}: determinism_probe reference_traces is not an object")
 
 
 def _policy_metadata(payload: dict) -> dict:
@@ -194,7 +242,11 @@ def _provenance_identity(payload: dict) -> dict:
 
 
 def check_file_protocol(
-    payload: dict, path: Path, pose_plan_poses: dict[str, dict] | None, problems: list[str]
+    payload: dict,
+    path: Path,
+    pose_plan_poses: dict[str, dict] | None,
+    seed_plan_poses: dict[str, dict] | None,
+    problems: list[str],
 ) -> None:
     """Within-file semantic consistency: rows vs top metadata, seeds, poses."""
     door_pose = payload.get("door_pose") or {}
@@ -241,6 +293,18 @@ def check_file_protocol(
             f"do not match the declared seed protocol (fixed {expected_fixed}, "
             f"randomized {expected_randomized})"
         )
+    if seed_plan_poses is not None:
+        expected_protocol = seed_plan_poses.get(pose_id)
+        if expected_protocol is None:
+            problems.append(f"{path}: pose {pose_id!r} is absent from the seed plan")
+        else:
+            for key in ("base_seed", "episodes_fixed", "episodes_randomized"):
+                got = payload.get(key) if key == "base_seed" else protocol.get(key)
+                if got != expected_protocol.get(key):
+                    problems.append(
+                        f"{path}: {key}={got!r} does not match seed plan "
+                        f"{expected_protocol.get(key)!r} for pose {pose_id}"
+                    )
 
     # Door pose must match the configured pose plan.
     if pose_plan_poses is not None and pose_id in pose_plan_poses:
@@ -285,6 +349,61 @@ def check_file_protocol(
         if probe.get("passed") is not True:
             problems.append(
                 f"{path}: determinism probe not passed: {probe.get('mismatches')}"
+            )
+        if probe.get("seed") != payload.get("base_seed"):
+            problems.append(
+                f"{path}: determinism probe seed {probe.get('seed')!r} does not match "
+                f"base_seed {payload.get('base_seed')!r}"
+            )
+        repeats = int(probe.get("repeats") or 0)
+        hashes = probe.get("trace_sha256")
+        if not isinstance(hashes, list) or len(hashes) != repeats:
+            problems.append(
+                f"{path}: determinism probe trace_sha256 count "
+                f"{len(hashes) if isinstance(hashes, list) else None} != repeats {repeats}"
+            )
+        elif any(
+            not isinstance(value, str)
+            or len(value) != 64
+            or any(char not in "0123456789abcdef" for char in value)
+            for value in hashes
+        ):
+            problems.append(f"{path}: determinism probe contains an invalid sha256 trace hash")
+        reference = probe.get("reference_traces")
+        if isinstance(reference, dict) and hashes:
+            try:
+                reference_hash = trace_payload_hash(reference)
+            except (KeyError, TypeError, ValueError) as error:
+                problems.append(
+                    f"{path}: determinism probe reference trace is invalid: {error}"
+                )
+            else:
+                if hashes[0] != reference_hash:
+                    problems.append(
+                        f"{path}: determinism probe first trace hash does not match "
+                        "reference_traces"
+                    )
+        tolerances = probe.get("tolerances")
+        for key in REQUIRED_TOLERANCES:
+            value = tolerances.get(key) if isinstance(tolerances, dict) else None
+            if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+                problems.append(
+                    f"{path}: determinism probe tolerance {key!r} is not finite/non-negative"
+                )
+        max_diffs = probe.get("max_abs_diffs")
+        for key in REQUIRED_MAX_DIFFS:
+            value = max_diffs.get(key) if isinstance(max_diffs, dict) else None
+            if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+                problems.append(
+                    f"{path}: determinism probe max_abs_diffs {key!r} is invalid"
+                )
+        mismatches = probe.get("mismatches")
+        if not isinstance(mismatches, list):
+            problems.append(f"{path}: determinism probe mismatches is not a list")
+        elif probe.get("passed") is not (len(mismatches) == 0):
+            problems.append(
+                f"{path}: determinism probe passed={probe.get('passed')!r} disagrees "
+                f"with {len(mismatches)} mismatch(es)"
             )
 
 
@@ -391,6 +510,7 @@ def summarize(
     run_dirs: list[Path],
     expected_poses: set[str],
     pose_plan: dict | None,
+    seed_plan: dict | None = None,
 ) -> dict[str, Any]:
     """Build the full summary (pure; no exit-code policy)."""
     coverage_problems: list[str] = []
@@ -400,6 +520,7 @@ def summarize(
     pose_plan_poses = (
         {pose["pose_id"]: pose for pose in pose_plan["poses"]} if pose_plan else None
     )
+    seed_plan_poses = seed_plan.get("poses") if seed_plan else None
 
     for run_dir in run_dirs:
         # Pose-qualified files only: a stale legacy <policy>_eval.json (no pose
@@ -435,7 +556,9 @@ def summarize(
                 # separately and never enter the main matrix aggregates.
                 diagnostics[pose_id] = entry
                 continue
-            check_file_protocol(payload, path, pose_plan_poses, protocol_problems)
+            check_file_protocol(
+                payload, path, pose_plan_poses, seed_plan_poses, protocol_problems
+            )
             poses[pose_id] = entry
             primary[pose_id] = (path, payload)
             rows_all.extend(payload.get("rollouts", []))
@@ -533,7 +656,8 @@ def main() -> int:
     args = parse_args()
     expected_poses = {pose.strip() for pose in args.expected_poses.split(",") if pose.strip()}
     pose_plan = json.loads(args.pose_plan.read_text()) if args.pose_plan else None
-    summary = summarize(args.run_dirs, expected_poses, pose_plan)
+    seed_plan = json.loads(args.seed_plan.read_text()) if args.seed_plan else None
+    summary = summarize(args.run_dirs, expected_poses, pose_plan, seed_plan)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(summary, indent=2) + "\n")
 

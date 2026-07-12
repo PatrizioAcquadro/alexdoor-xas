@@ -14,6 +14,7 @@ from alexdoor_xas.policies.common.rollout_eval import (
     scripted_reference_payload,
     seed_protocol,
     summarize_decision_warnings,
+    trace_payload_hash,
 )
 
 __all__ = [
@@ -30,4 +31,5 @@ __all__ = [
     "scripted_reference_payload",
     "seed_protocol",
     "summarize_decision_warnings",
+    "trace_payload_hash",
 ]
