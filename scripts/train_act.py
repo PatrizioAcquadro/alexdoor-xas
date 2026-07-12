@@ -161,6 +161,11 @@ def main() -> int:
                     data.stats,
                     meta=meta,
                     robot_asset=data.robot_asset,
+                    split_episode_ids={
+                        "train": train_ids,
+                        "val": data.val_ids,
+                        "test": data.test_ids,
+                    },
                 )
 
         history = train_act(
@@ -173,6 +178,7 @@ def main() -> int:
             data.stats,
             meta={"epoch": cfg.train.epochs - 1, "run_id": run_id},
             robot_asset=data.robot_asset,
+            split_episode_ids={"train": train_ids, "val": data.val_ids, "test": data.test_ids},
         )
         if not best_path.is_file():  # no val improvement recorded (degenerate run)
             save_checkpoint(
@@ -182,6 +188,11 @@ def main() -> int:
                 data.stats,
                 meta={"run_id": run_id},
                 robot_asset=data.robot_asset,
+                split_episode_ids={
+                    "train": train_ids,
+                    "val": data.val_ids,
+                    "test": data.test_ids,
+                },
             )
 
         policy = ActPolicy.from_checkpoint(

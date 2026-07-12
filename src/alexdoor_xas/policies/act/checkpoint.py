@@ -31,6 +31,7 @@ class LoadedCheckpoint:
     config: dict[str, Any]
     stats: DatasetNormStats
     meta: dict[str, Any]
+    split_episode_ids: dict[str, tuple[str, ...]]
     robot_asset: RobotAssetRef | None = None
 
     @property
@@ -53,6 +54,7 @@ def save_checkpoint(
     stats: DatasetNormStats,
     meta: dict[str, Any] | None = None,
     robot_asset: RobotAssetRef | None = None,
+    split_episode_ids: dict[str, list[str] | tuple[str, ...]] | None = None,
 ) -> Path:
     """Write a self-contained checkpoint; returns the written path."""
     if _is_v2_config(config) and robot_asset is None:
@@ -67,6 +69,7 @@ def save_checkpoint(
         "model_cfg": asdict(model.cfg),
         "config": config,
         "norm_stats": _stats_payload(stats),
+        "split_episode_ids": _split_payload(split_episode_ids),
         "robot_asset": robot_asset.to_dict() if robot_asset is not None else None,
         "meta": {**(meta or {}), "torch_version": str(torch.__version__)},
     }
@@ -97,12 +100,33 @@ def load_checkpoint(path: str | Path, map_location: str = "cpu") -> LoadedCheckp
         config=config,
         stats=_stats_from_payload(payload["norm_stats"]),
         meta=dict(payload["meta"]),
+        split_episode_ids=_split_from_payload(payload.get("split_episode_ids")),
         robot_asset=robot_asset,
     )
 
 
 def _asset_from_payload(payload: Any) -> RobotAssetRef | None:
     return None if payload is None else RobotAssetRef.from_dict(payload)
+
+
+def _split_payload(
+    split_episode_ids: dict[str, list[str] | tuple[str, ...]] | None,
+) -> dict[str, list[str]] | None:
+    if split_episode_ids is None:
+        return None
+    return {
+        name: [str(episode_id) for episode_id in split_episode_ids.get(name, ())]
+        for name in ("train", "val", "test")
+    }
+
+
+def _split_from_payload(payload: Any) -> dict[str, tuple[str, ...]]:
+    if not isinstance(payload, dict):
+        return {}
+    return {
+        name: tuple(str(episode_id) for episode_id in payload.get(name, ()))
+        for name in ("train", "val", "test")
+    }
 
 
 def _is_v2_config(config: dict[str, Any]) -> bool:

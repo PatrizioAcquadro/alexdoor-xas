@@ -57,6 +57,7 @@ class ActPolicy:
         self.obs_clip = obs_clip
         self.checkpoint_config: dict | None = None
         self.checkpoint_meta: dict | None = None
+        self.checkpoint_split_episode_ids: dict[str, tuple[str, ...]] = {}
         self.robot_asset: RobotAssetRef | None = None
         self.robot_compatibility_label: str | None = None
         self.model.to(self.device)
@@ -75,6 +76,7 @@ class ActPolicy:
         policy = cls(loaded.model, loaded.stats, device=device)
         policy.checkpoint_config = loaded.config
         policy.checkpoint_meta = loaded.meta
+        policy.checkpoint_split_episode_ids = loaded.split_episode_ids
         policy.robot_asset = loaded.robot_asset
         dataset = loaded.config.get("dataset", {})
         checkpoint_is_v2 = (

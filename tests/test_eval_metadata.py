@@ -230,11 +230,16 @@ def test_binding_passes_and_reports_exact_fingerprints(binding_fixture) -> None:
         binding_fixture["datasets_root"],
     )
     binding = verify_checkpoint_dataset_binding(
-        binding_fixture["stats"], provenance, binding_fixture["datasets_root"]
+        binding_fixture["stats"],
+        provenance,
+        binding_fixture["datasets_root"],
+        checkpoint_split_episode_ids=binding_fixture["splits"],
     )
     assert binding["dataset_fingerprint_match"] is True
     assert binding["train_split_match"] is True
     assert binding["val_split_checked"] is True
+    assert binding["val_split_match"] is True
+    assert binding["split_fingerprint_match"] is True
     assert (
         binding["checkpoint_dataset_fingerprint_sha256"]
         == binding["live_dataset_fingerprint_sha256"]
@@ -276,7 +281,10 @@ def test_binding_fails_on_changed_split_membership(binding_fixture) -> None:
     provenance["split_fingerprint_sha256"] = split_fingerprint(swapped)
     with pytest.raises(EvalProvenanceError, match="train split does not match"):
         verify_checkpoint_dataset_binding(
-            binding_fixture["stats"], provenance, binding_fixture["datasets_root"]
+            binding_fixture["stats"],
+            provenance,
+            binding_fixture["datasets_root"],
+            checkpoint_split_episode_ids=binding_fixture["splits"],
         )
 
 
@@ -287,10 +295,45 @@ def test_binding_fails_when_validation_provenance_is_missing(binding_fixture) ->
         binding_fixture["run_dir"],
         binding_fixture["datasets_root"],
     )
-    provenance["train_log_split_ids"]["val"] = None
-    with pytest.raises(EvalProvenanceError, match="missing train/validation split ids"):
+    with pytest.raises(EvalProvenanceError, match="checkpoint.*split provenance"):
         verify_checkpoint_dataset_binding(
             binding_fixture["stats"], provenance, binding_fixture["datasets_root"]
+        )
+
+
+@requires_h5py
+def test_binding_uses_checkpoint_split_when_train_log_is_missing(binding_fixture) -> None:
+    provenance = dataset_provenance(
+        binding_fixture["checkpoint_config"],
+        binding_fixture["run_dir"],
+        binding_fixture["datasets_root"],
+    )
+    provenance["train_log_split_ids"] = None
+    binding = verify_checkpoint_dataset_binding(
+        binding_fixture["stats"],
+        provenance,
+        binding_fixture["datasets_root"],
+        checkpoint_split_episode_ids=binding_fixture["splits"],
+    )
+    assert binding["val_split_match"] is True
+    assert any("train_log" in note for note in provenance["notes"])
+
+
+@requires_h5py
+def test_binding_fails_on_checkpoint_validation_mismatch(binding_fixture) -> None:
+    provenance = dataset_provenance(
+        binding_fixture["checkpoint_config"],
+        binding_fixture["run_dir"],
+        binding_fixture["datasets_root"],
+    )
+    checkpoint_splits = {name: list(ids) for name, ids in binding_fixture["splits"].items()}
+    checkpoint_splits["val"] = ["not-a-real-episode"]
+    with pytest.raises(EvalProvenanceError, match="checkpoint val split"):
+        verify_checkpoint_dataset_binding(
+            binding_fixture["stats"],
+            provenance,
+            binding_fixture["datasets_root"],
+            checkpoint_split_episode_ids=checkpoint_splits,
         )
 
 
@@ -306,7 +349,10 @@ def test_binding_fails_on_changed_validation_membership(binding_fixture) -> None
     provenance["split_fingerprint_sha256"] = split_fingerprint(live)
     with pytest.raises(EvalProvenanceError, match="val split does not match"):
         verify_checkpoint_dataset_binding(
-            binding_fixture["stats"], provenance, binding_fixture["datasets_root"]
+            binding_fixture["stats"],
+            provenance,
+            binding_fixture["datasets_root"],
+            checkpoint_split_episode_ids=binding_fixture["splits"],
         )
 
 
@@ -337,7 +383,10 @@ def test_binding_fails_on_val_split_mismatch(binding_fixture) -> None:
     }
     with pytest.raises(EvalProvenanceError, match="val split"):
         verify_checkpoint_dataset_binding(
-            binding_fixture["stats"], provenance, binding_fixture["datasets_root"]
+            binding_fixture["stats"],
+            provenance,
+            binding_fixture["datasets_root"],
+            checkpoint_split_episode_ids=binding_fixture["splits"],
         )
 
 

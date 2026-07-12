@@ -122,6 +122,8 @@ def verify_checkpoint_dataset_binding(
     checkpoint_stats,
     provenance: dict[str, Any],
     datasets_root: Path,
+    *,
+    checkpoint_split_episode_ids: dict[str, list[str] | tuple[str, ...]] | None = None,
 ) -> dict[str, Any]:
     """Bind an eval to the exact dataset the checkpoint was trained on.
 
@@ -199,20 +201,38 @@ def verify_checkpoint_dataset_binding(
             "checkpoint train split does not match the live split contract "
             f"({len(checkpoint_train)} checkpoint train ids vs {len(live_train)} live)"
         )
+    if not checkpoint_split_episode_ids:
+        raise EvalProvenanceError(
+            "checkpoint carries no complete split provenance — retrain it with "
+            "embedded train/validation/test membership"
+        )
+    checkpoint_splits = {
+        name: list(checkpoint_split_episode_ids.get(name) or ())
+        for name in ("train", "val", "test")
+    }
+    checkpoint_split_fp = split_fingerprint(checkpoint_splits)
+    for name in ("train", "val", "test"):
+        if sorted(checkpoint_splits[name]) != sorted(live_splits[name]):
+            raise EvalProvenanceError(
+                f"checkpoint {name} split does not match the live split contract"
+            )
+
+    # The train log is corroborating evidence only. A missing log cannot
+    # weaken the checkpoint-owned split binding; if present, disagreement is
+    # still surfaced because it indicates an inconsistent run directory.
     companion_ids = provenance.get("train_log_split_ids") or {}
     companion_train = companion_ids.get("train")
     companion_val = companion_ids.get("val")
     if companion_train is None or companion_val is None:
-        raise EvalProvenanceError(
-            "run train_log is missing train/validation split ids — cannot validate "
-            "the checkpoint's complete training split provenance"
+        provenance.setdefault("notes", []).append(
+            "train_log split ids unavailable; checkpoint-owned split provenance verified directly"
         )
-    if sorted(companion_train) != sorted(live_train):
+    elif sorted(companion_train) != sorted(live_train):
         raise EvalProvenanceError(
             "run train_log train split does not match the live split contract"
         )
     live_val = tuple(live_splits["val"])
-    if sorted(companion_val) != sorted(live_val):
+    if companion_val is not None and sorted(companion_val) != sorted(live_val):
         raise EvalProvenanceError(
             "run train_log val split does not match the live split contract"
         )
@@ -221,7 +241,10 @@ def verify_checkpoint_dataset_binding(
         "checkpoint_dataset_fingerprint_sha256": checkpoint_fp,
         "live_dataset_fingerprint_sha256": live_fp,
         "dataset_fingerprint_match": True,
+        "checkpoint_split_fingerprint_sha256": checkpoint_split_fp,
+        "split_fingerprint_match": checkpoint_split_fp == computed_split_fp,
         "train_split_match": True,
+        "val_split_match": True,
         "val_split_checked": True,
         "n_live_episodes": len(dataset),
     }

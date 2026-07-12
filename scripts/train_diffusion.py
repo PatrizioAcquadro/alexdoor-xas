@@ -192,6 +192,11 @@ def main() -> int:
                     data.stats,
                     meta=meta,
                     robot_asset=data.robot_asset,
+                    split_episode_ids={
+                        "train": train_ids,
+                        "val": data.val_ids,
+                        "test": data.test_ids,
+                    },
                 )
 
         history = train_diffusion(
@@ -215,6 +220,7 @@ def main() -> int:
                 "device_info": device_info,
             },
             robot_asset=data.robot_asset,
+            split_episode_ids={"train": train_ids, "val": data.val_ids, "test": data.test_ids},
         )
         if not best_path.is_file():  # no val improvement recorded (degenerate run)
             save_checkpoint(
@@ -224,6 +230,11 @@ def main() -> int:
                 data.stats,
                 meta={"run_id": run_id},
                 robot_asset=data.robot_asset,
+                split_episode_ids={
+                    "train": train_ids,
+                    "val": data.val_ids,
+                    "test": data.test_ids,
+                },
             )
 
         # Open-loop inspection with the DDIM validation sampler (fast, seeded)

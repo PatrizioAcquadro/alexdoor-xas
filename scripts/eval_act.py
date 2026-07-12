@@ -334,7 +334,12 @@ def main() -> int:
         # checkpoint/live fingerprint or split mismatch fails the evaluation.
         provenance = dataset_provenance(policy.checkpoint_config, run_dir, paths.DATASETS_DIR)
         provenance.update(
-            verify_checkpoint_dataset_binding(policy.stats, provenance, paths.DATASETS_DIR)
+            verify_checkpoint_dataset_binding(
+                policy.stats,
+                provenance,
+                paths.DATASETS_DIR,
+                checkpoint_split_episode_ids=policy.checkpoint_split_episode_ids,
+            )
         )
         if args.determinism_replay:
             return _run_determinism_replay(env, policy, checkpoint_path, success_angle_rad)

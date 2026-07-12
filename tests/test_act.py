@@ -187,7 +187,12 @@ def test_checkpoint_round_trip_preserves_predictions_and_stats(tmp_path) -> None
     config = {"dataset": {"space": "A2_ee_delta", "obs_preset": "core"}}
 
     path = save_checkpoint(
-        tmp_path / "ckpt" / "best.pt", model, config, stats, meta={"epoch": 3}
+        tmp_path / "ckpt" / "best.pt",
+        model,
+        config,
+        stats,
+        meta={"epoch": 3},
+        split_episode_ids={"train": ["ep0"], "val": ["ep1"], "test": ["ep2"]},
     )
     loaded = load_checkpoint(path)
 
@@ -205,6 +210,11 @@ def test_checkpoint_round_trip_preserves_predictions_and_stats(tmp_path) -> None
         np.testing.assert_array_equal(getattr(loaded.stats.obs, name), getattr(stats.obs, name))
     assert loaded.stats.train_episode_ids == stats.train_episode_ids
     assert loaded.stats.dataset_fingerprint == stats.dataset_fingerprint
+    assert loaded.split_episode_ids == {
+        "train": ("ep0",),
+        "val": ("ep1",),
+        "test": ("ep2",),
+    }
 
 
 def test_checkpoint_rejects_unknown_format(tmp_path) -> None:
@@ -234,7 +244,8 @@ def test_train_act_overfits_a_constant_mapping() -> None:
     model = _tiny_model()
     batch = _constant_mapping_batch()
     cfg = ActTrainCfg(
-        epochs=200, batch_size=8, lr=1e-3, kl_weight=1.0, seed=0, val_every=50
+        epochs=200, batch_size=8, lr=1e-3, kl_weight=1.0, seed=0, val_every=50,
+        device="cpu",
     )
 
     history = train_act(
@@ -255,7 +266,7 @@ def test_train_act_overfits_a_constant_mapping() -> None:
 def test_train_act_callback_and_wandb_noop_logging() -> None:
     model = _tiny_model()
     batch = _constant_mapping_batch()
-    cfg = ActTrainCfg(epochs=3, batch_size=8, lr=1e-3, val_every=1)
+    cfg = ActTrainCfg(epochs=3, batch_size=8, lr=1e-3, val_every=1, device="cpu")
     events: list[tuple[int, bool]] = []
 
     with start_wandb_run(WandbConfig(mode="disabled")) as run:
@@ -279,7 +290,7 @@ def test_train_act_callback_and_wandb_noop_logging() -> None:
 
 def test_train_act_rejects_empty_batch_factory() -> None:
     model = _tiny_model()
-    cfg = ActTrainCfg(epochs=1)
+    cfg = ActTrainCfg(epochs=1, device="cpu")
     with pytest.raises(ValueError, match="no batches"):
         train_act(model, make_train_batches=lambda epoch: [], cfg=cfg)
 

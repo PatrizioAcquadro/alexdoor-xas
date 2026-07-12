@@ -444,7 +444,14 @@ def test_checkpoint_round_trip_preserves_predictions(tmp_path) -> None:
     config = {"dataset": {"space": "A2_ee_delta", "obs_preset": "core"}}
     path = tmp_path / "checkpoints" / "best.pt"
 
-    save_checkpoint(path, model, config, stats, meta={"run_id": "test"})
+    save_checkpoint(
+        path,
+        model,
+        config,
+        stats,
+        meta={"run_id": "test"},
+        split_episode_ids={"train": ["ep0"], "val": ["ep1"], "test": ["ep2"]},
+    )
     loaded = load_checkpoint(path)
 
     assert loaded.action_space == "A2_ee_delta"
@@ -452,6 +459,7 @@ def test_checkpoint_round_trip_preserves_predictions(tmp_path) -> None:
     assert loaded.horizon == TINY_MODEL_CFG.horizon
     assert loaded.meta["run_id"] == "test"
     assert loaded.meta["diffusers_version"]
+    assert loaded.split_episode_ids["val"] == ("ep1",)
     np.testing.assert_allclose(loaded.stats.action.min, stats.action.min)
 
     obs = torch.randn(2, OBS_DIM, generator=torch.Generator().manual_seed(0))
