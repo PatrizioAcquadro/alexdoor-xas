@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections import Counter
 from dataclasses import asdict
 from typing import Any
@@ -13,11 +14,16 @@ DETERMINISM_TOLERANCES = {
     "command_abs": 1e-9,
     "angle_abs_rad": 1e-9,
     "force_abs_n": 1e-6,
+    "ee_position_abs_m": 1e-9,
+    "ee_orientation_abs": 1e-9,
 }
 """Repeat-same-seed comparison tolerances. Headless physics is deterministic
 in this build and the policy sampling generator is reseeded identically, so
 repeats are expected to be bit-identical; the tolerances only absorb
-float32<->float64 round-trips in the readers."""
+float32<->float64 round-trips in the readers. Adapter statuses/reasons,
+warning identities/counts, contact flags, success tick, and termination
+reason are compared exactly; tolerances apply only to numeric command and
+physical-state values."""
 
 
 def seed_protocol(
@@ -274,7 +280,44 @@ def aggregate_rollout_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def rollout_traces_payload(result) -> dict[str, Any]:
+def final_ee_state(env, result) -> dict[str, Any]:
+    """Capture the final valid world-frame EE pose for determinism evidence.
+
+    DirectRLEnv auto-resets inside a truncating step, so reading the env after
+    truncation would silently capture the next episode's pose. Fail closed in
+    that case. The Alex V2 rollout accessor exposes both position and XYZW
+    orientation; an accessor without orientation records ``None`` explicitly.
+    """
+    if result.env_truncated:
+        raise RuntimeError("cannot capture final EE state after env auto-reset/truncation")
+    pose = env.proxy_pose_w()
+    if not isinstance(pose, tuple) or len(pose) != 2:
+        raise RuntimeError("env proxy_pose_w() must return (position, orientation)")
+
+    def vector(value, width: int, label: str) -> list[float] | None:
+        if value is None:
+            return None
+        if hasattr(value, "detach"):
+            value = value.detach()
+        if hasattr(value, "cpu"):
+            value = value.cpu()
+        array = np.asarray(value, dtype=np.float64).reshape(-1, width)[0]
+        if not np.isfinite(array).all():
+            raise RuntimeError(f"non-finite final EE {label} cannot become evidence")
+        return array.tolist()
+
+    position = vector(pose[0], 3, "position")
+    if position is None:
+        raise RuntimeError("final EE position is unavailable")
+    return {
+        "final_ee_position_world_m": position,
+        "final_ee_orientation_world_xyzw": vector(pose[1], 4, "orientation"),
+    }
+
+
+def rollout_traces_payload(
+    result, *, final_ee: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """JSON-able trace record of one ``RolloutResult`` (determinism evidence).
 
     Everything the repeat-same-seed comparison needs: per-tick
@@ -289,17 +332,30 @@ def rollout_traces_payload(result) -> dict[str, Any]:
         [0.0] * 6 if d.applied is None else np.asarray(d.applied, dtype=np.float64).tolist()
         for d in result.decisions_per_tick
     ]
-    return {
+    warning_identities = [
+        [str(warning.id) for warning in (getattr(decision, "warning_records", ()) or ())]
+        for decision in result.decisions_per_tick
+    ]
+    warning_family_counts = Counter(
+        family_id for identities in warning_identities for family_id in identities
+    )
+    payload = {
         "n_ticks": int(result.n_ticks),
         "requested": requested,
         "applied": applied,
         "statuses": [str(d.status) for d in result.decisions_per_tick],
+        "reasons": [str(d.reason) for d in result.decisions_per_tick],
+        "warning_identities": warning_identities,
+        "warning_family_counts": dict(sorted(warning_family_counts.items())),
         "first_success_tick": result.first_success_tick,
         "termination_reason": result.termination_reason,
         "final_angle_rad": float(result.final_angle_rad),
         "contact": [None if c is None else bool(c) for c in result.contact_per_tick],
         "force": [None if f is None else float(f) for f in result.force_n_per_tick],
     }
+    if final_ee is not None:
+        payload.update(final_ee)
+    return payload
 
 
 def trace_payload_hash(traces: dict[str, Any]) -> str:
@@ -309,9 +365,22 @@ def trace_payload_hash(traces: dict[str, Any]) -> str:
     digest.update(np.asarray(traces["requested"], dtype=np.float64).tobytes())
     digest.update(np.asarray(traces["applied"], dtype=np.float64).tobytes())
     digest.update("|".join(traces["statuses"]).encode())
+    digest.update(json.dumps(traces["reasons"], separators=(",", ":")).encode())
+    digest.update(
+        json.dumps(traces["warning_identities"], separators=(",", ":")).encode()
+    )
+    digest.update(
+        json.dumps(traces["warning_family_counts"], sort_keys=True, separators=(",", ":")).encode()
+    )
     digest.update(str(traces["first_success_tick"]).encode())
     digest.update(str(traces["termination_reason"]).encode())
     digest.update(np.float64(traces["final_angle_rad"]).tobytes())
+    if "final_ee_position_world_m" in traces:
+        digest.update(np.asarray(traces["final_ee_position_world_m"], dtype=np.float64).tobytes())
+        orientation = traces.get("final_ee_orientation_world_xyzw")
+        digest.update(b"orientation:none" if orientation is None else b"orientation:available")
+        if orientation is not None:
+            digest.update(np.asarray(orientation, dtype=np.float64).tobytes())
     digest.update("|".join(str(c) for c in traces["contact"]).encode())
     digest.update(
         np.asarray(
@@ -334,7 +403,14 @@ def compare_trace_payloads(
 ) -> tuple[list[str], dict[str, float]]:
     """Trace-by-trace comparison of two rollout trace payloads."""
     mismatches: list[str] = []
-    max_diffs = {"requested": 0.0, "applied": 0.0, "final_angle_rad": 0.0, "force_n": 0.0}
+    max_diffs = {
+        "requested": 0.0,
+        "applied": 0.0,
+        "final_angle_rad": 0.0,
+        "force_n": 0.0,
+        "final_ee_position_world_m": 0.0,
+        "final_ee_orientation_world_xyzw": 0.0,
+    }
     if candidate["n_ticks"] != reference["n_ticks"]:
         mismatches.append(
             f"{label}: n_ticks {candidate['n_ticks']} != {reference['n_ticks']}"
@@ -345,6 +421,12 @@ def compare_trace_payloads(
             mismatches.append(f"{label}: {key} {candidate[key]!r} != {reference[key]!r}")
     if list(candidate["statuses"]) != list(reference["statuses"]):
         mismatches.append(f"{label}: adapter decision statuses differ")
+    if list(candidate["reasons"]) != list(reference["reasons"]):
+        mismatches.append(f"{label}: adapter decision reasons differ")
+    if list(candidate["warning_identities"]) != list(reference["warning_identities"]):
+        mismatches.append(f"{label}: structured warning identities differ")
+    if dict(candidate["warning_family_counts"]) != dict(reference["warning_family_counts"]):
+        mismatches.append(f"{label}: structured warning counts differ")
     if list(candidate["contact"]) != list(reference["contact"]):
         mismatches.append(f"{label}: contact trace differs")
     if [f is None for f in candidate["force"]] != [f is None for f in reference["force"]]:
@@ -366,6 +448,28 @@ def compare_trace_payloads(
             f"{label}: final angle differs by {angle_diff:.3g} rad "
             f"(> {tolerances['angle_abs_rad']:.3g})"
         )
+    for key, tolerance_name, unit in (
+        ("final_ee_position_world_m", "ee_position_abs_m", "m"),
+        ("final_ee_orientation_world_xyzw", "ee_orientation_abs", ""),
+    ):
+        ref_value = reference[key]
+        candidate_value = candidate[key]
+        diff_key = key
+        if (ref_value is None) != (candidate_value is None):
+            mismatches.append(f"{label}: {key} availability differs")
+            continue
+        diff = (
+            float(np.max(np.abs(np.asarray(candidate_value) - np.asarray(ref_value))))
+            if ref_value is not None
+            else 0.0
+        )
+        max_diffs[diff_key] = diff
+        if diff > tolerances[tolerance_name]:
+            suffix = f" {unit}" if unit else ""
+            mismatches.append(
+                f"{label}: {key} differs by {diff:.3g}{suffix} "
+                f"(> {tolerances[tolerance_name]:.3g})"
+            )
     force_pairs = [
         (a, b)
         for a, b in zip(candidate["force"], reference["force"], strict=True)
@@ -392,14 +496,16 @@ against the first rollout of one or more fresh replay processes with identical
 reset seed, policy sampling seed, pose, checkpoint, and configuration."""
 
 
-def determinism_probe_reference(result, *, seed: int) -> dict[str, Any]:
+def determinism_probe_reference(
+    result, *, seed: int, final_ee: dict[str, Any]
+) -> dict[str, Any]:
     """Pending fresh-process probe block for an eval payload (repeats=1).
 
     A replay invocation (``--determinism-replay``) re-runs the same rollout as
     the first episode of a fresh process and completes the block via
     :func:`determinism_probe_update`.
     """
-    traces = rollout_traces_payload(result)
+    traces = rollout_traces_payload(result, final_ee=final_ee)
     return {
         "kind": DETERMINISM_PROBE_KIND,
         "seed": seed,
@@ -407,6 +513,7 @@ def determinism_probe_reference(result, *, seed: int) -> dict[str, Any]:
         "tolerances": dict(DETERMINISM_TOLERANCES),
         "trace_sha256": [trace_payload_hash(traces)],
         "reference_traces": traces,
+        "repeat_traces": [traces],
         "max_abs_diffs": None,
         "mismatches": [],
         "passed": None,
@@ -414,11 +521,13 @@ def determinism_probe_reference(result, *, seed: int) -> dict[str, Any]:
     }
 
 
-def determinism_probe_update(probe: dict[str, Any], result) -> dict[str, Any]:
+def determinism_probe_update(
+    probe: dict[str, Any], result, *, final_ee: dict[str, Any]
+) -> dict[str, Any]:
     """Fold one fresh-process replay rollout into a pending/complete probe block."""
     if probe.get("kind") != DETERMINISM_PROBE_KIND:
         raise ValueError(f"unexpected determinism probe kind {probe.get('kind')!r}")
-    candidate = rollout_traces_payload(result)
+    candidate = rollout_traces_payload(result, final_ee=final_ee)
     label = f"repeat {probe['repeats']}"
     mismatches, max_diffs = compare_trace_payloads(
         probe["reference_traces"], candidate, probe["tolerances"], label=label
@@ -426,6 +535,7 @@ def determinism_probe_update(probe: dict[str, Any], result) -> dict[str, Any]:
     probe = dict(probe)
     probe["repeats"] = int(probe["repeats"]) + 1
     probe["trace_sha256"] = list(probe["trace_sha256"]) + [trace_payload_hash(candidate)]
+    probe["repeat_traces"] = list(probe["repeat_traces"]) + [candidate]
     probe["mismatches"] = list(probe["mismatches"]) + mismatches
     previous = probe.get("max_abs_diffs") or {}
     probe["max_abs_diffs"] = {
@@ -440,6 +550,7 @@ def determinism_probe_report(
     results: list,
     *,
     seed: int,
+    final_ee_states: list[dict[str, Any]],
     tolerances: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """In-process repeat comparison over ``RolloutResult`` runs (pure helper).
@@ -450,13 +561,25 @@ def determinism_probe_report(
     """
     if len(results) < 2:
         raise ValueError("determinism probe needs at least 2 repeat rollouts")
+    if len(final_ee_states) != len(results):
+        raise ValueError("one final EE state is required per determinism repeat")
     tolerances = dict(DETERMINISM_TOLERANCES if tolerances is None else tolerances)
-    reference = rollout_traces_payload(results[0])
+    reference = rollout_traces_payload(results[0], final_ee=final_ee_states[0])
     mismatches: list[str] = []
-    max_diffs = {"requested": 0.0, "applied": 0.0, "final_angle_rad": 0.0, "force_n": 0.0}
+    max_diffs = {
+        "requested": 0.0,
+        "applied": 0.0,
+        "final_angle_rad": 0.0,
+        "force_n": 0.0,
+        "final_ee_position_world_m": 0.0,
+        "final_ee_orientation_world_xyzw": 0.0,
+    }
     for index, result in enumerate(results[1:], start=1):
         repeat_mismatches, repeat_diffs = compare_trace_payloads(
-            reference, rollout_traces_payload(result), tolerances, label=f"repeat {index}"
+            reference,
+            rollout_traces_payload(result, final_ee=final_ee_states[index]),
+            tolerances,
+            label=f"repeat {index}",
         )
         mismatches.extend(repeat_mismatches)
         for key, value in repeat_diffs.items():
@@ -466,7 +589,17 @@ def determinism_probe_report(
         "seed": seed,
         "repeats": len(results),
         "tolerances": tolerances,
-        "trace_sha256": [rollout_trace_hash(result) for result in results],
+        "trace_sha256": [
+            trace_payload_hash(
+                rollout_traces_payload(result, final_ee=final_ee_states[index])
+            )
+            for index, result in enumerate(results)
+        ],
+        "reference_traces": reference,
+        "repeat_traces": [
+            rollout_traces_payload(result, final_ee=final_ee_states[index])
+            for index, result in enumerate(results)
+        ],
         "max_abs_diffs": max_diffs,
         "mismatches": mismatches,
         "passed": not mismatches,
@@ -503,6 +636,7 @@ __all__ = [
     "determinism_probe_report",
     "determinism_probe_update",
     "force_trace_evidence",
+    "final_ee_state",
     "rollout_failure_label",
     "rollout_trace_hash",
     "rollout_traces_payload",

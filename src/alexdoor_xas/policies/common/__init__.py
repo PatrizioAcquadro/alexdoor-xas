@@ -25,6 +25,7 @@ from alexdoor_xas.policies.common.obs import (
 from alexdoor_xas.policies.common.rollout_eval import (
     aggregate_rollout_rows,
     contact_report,
+    final_ee_state,
     rollout_failure_label,
     scripted_reference_payload,
     seed_protocol,
@@ -40,6 +41,7 @@ __all__ = [
     "aggregate_rollout_rows",
     "build_env_obs",
     "contact_report",
+    "final_ee_state",
     "load_policy_data",
     "make_eval_factory",
     "make_train_factory",

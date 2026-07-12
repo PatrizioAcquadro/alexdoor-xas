@@ -145,6 +145,7 @@ from alexdoor_xas.policies.common.rollout_eval import (  # noqa: E402
     contact_report,
     determinism_probe_reference,
     determinism_probe_update,
+    final_ee_state,
     force_trace_evidence,
     rollout_failure_label,
     scripted_reference_payload,
@@ -195,8 +196,14 @@ def _fresh_adapter(action_space: str, env):
 
 
 def _run_rollout(
-    env, policy, seed: int, variation, success_angle_rad: float
-) -> tuple[dict, object]:
+    env,
+    policy,
+    seed: int,
+    variation,
+    success_angle_rad: float,
+    *,
+    capture_final_ee: bool = False,
+) -> tuple[dict, object, dict | None]:
     env.reset(seed=seed)
     settle_report = None
     if variation is not None:
@@ -233,8 +240,6 @@ def _run_rollout(
         "seed": seed,
         "randomized": variation is not None,
         **_door_pose_payload(),
-        "sampler": dp_cfg.rollout.sampler,
-        "num_inference_steps": dp_cfg.rollout.num_inference_steps,
         "success": success,
         "failure_label": rollout_failure_label(
             success=success,
@@ -275,9 +280,24 @@ def _run_rollout(
         "warning_counts": warning_summary["warning_counts"],
         "warning_family_counts": warning_summary["warning_family_counts"],
         "warning_records": warning_summary["warning_records"],
+        "policy_metadata_keys": [
+            "horizon",
+            "checkpoint_horizon",
+            "n_action_steps",
+            "sampler",
+            "num_inference_steps",
+            "execution_mode",
+        ],
+        "horizon": policy.chunk_size,
+        "checkpoint_horizon": policy.chunk_size,
+        "n_action_steps": dp_cfg.rollout.n_action_steps,
+        "sampler": dp_cfg.rollout.sampler,
+        "num_inference_steps": dp_cfg.rollout.num_inference_steps,
+        "execution_mode": "receding_horizon",
         "notes": result.notes,
     }
-    return row, result
+    ee_state = final_ee_state(env, result) if capture_final_ee else None
+    return row, result, ee_state
 
 
 def _reference_aggregate() -> dict | None:
@@ -387,14 +407,23 @@ def main() -> int:
         protocol = _seed_protocol(env)
         rows: list[dict] = []
         first_fixed_result = None
+        first_fixed_ee = None
         fixed_i = 0
         random_i = 0
         for item in plan:
-            row, result = _run_rollout(env, policy, item.seed, item.variation, success_angle_rad)
+            row, result, ee_state = _run_rollout(
+                env,
+                policy,
+                item.seed,
+                item.variation,
+                success_angle_rad,
+                capture_final_ee=item.variation is None and first_fixed_result is None,
+            )
             rows.append(row)
             if item.variation is None:
                 if first_fixed_result is None:
                     first_fixed_result = result  # this process's first episode
+                    first_fixed_ee = ee_state
                 print(f"[fixed {fixed_i}] {_row_line(row)}", flush=True)
                 fixed_i += 1
             else:
@@ -408,8 +437,12 @@ def main() -> int:
         # --determinism-replay process that reruns it as *its* first episode.
         determinism_probe = None
         if first_fixed_result is not None:
+            if first_fixed_ee is None:
+                raise RuntimeError("first fixed rollout has no valid final EE state")
             determinism_probe = determinism_probe_reference(
-                first_fixed_result, seed=dp_cfg.rollout.base_seed
+                first_fixed_result,
+                seed=dp_cfg.rollout.base_seed,
+                final_ee=first_fixed_ee,
             )
             print(
                 f"[determinism] reference recorded (seed={dp_cfg.rollout.base_seed}); "
@@ -439,9 +472,11 @@ def main() -> int:
             "action_space": policy.action_space,
             "obs_preset": policy.obs_preset,
             "horizon": policy.chunk_size,
+            "checkpoint_horizon": policy.chunk_size,
             "n_action_steps": dp_cfg.rollout.n_action_steps,
             "sampler": dp_cfg.rollout.sampler,
             "num_inference_steps": dp_cfg.rollout.num_inference_steps,
+            "execution_mode": "receding_horizon",
             "policy_device": dp_cfg.rollout.policy_device,
             "max_ticks": dp_cfg.rollout.max_ticks,
             "success_angle_deg": dp_cfg.rollout.success_angle_deg,
@@ -535,9 +570,11 @@ def _run_determinism_replay(env, policy, checkpoint_path, success_angle_rad: flo
         "success_angle_deg": dp_cfg.rollout.success_angle_deg,
         "base_seed": dp_cfg.rollout.base_seed,
         "horizon": policy.chunk_size,
+        "checkpoint_horizon": policy.chunk_size,
         "n_action_steps": dp_cfg.rollout.n_action_steps,
         "sampler": dp_cfg.rollout.sampler,
         "num_inference_steps": dp_cfg.rollout.num_inference_steps,
+        "execution_mode": "receding_horizon",
     }
     for key, value in expected.items():
         if payload.get(key) != value:
@@ -549,8 +586,17 @@ def _run_determinism_replay(env, policy, checkpoint_path, success_angle_rad: flo
         raise RuntimeError(
             f"replay door pose {_door_pose_payload()} != eval {payload.get('door_pose')}"
         )
-    _, result = _run_rollout(env, policy, dp_cfg.rollout.base_seed, None, success_angle_rad)
-    updated = determinism_probe_update(probe, result)
+    _, result, ee_state = _run_rollout(
+        env,
+        policy,
+        dp_cfg.rollout.base_seed,
+        None,
+        success_angle_rad,
+        capture_final_ee=True,
+    )
+    if ee_state is None:
+        raise RuntimeError("determinism replay has no valid final EE state")
+    updated = determinism_probe_update(probe, result, final_ee=ee_state)
     payload["determinism_probe"] = updated
     path.write_text(json.dumps(payload, indent=2) + "\n")
     print(

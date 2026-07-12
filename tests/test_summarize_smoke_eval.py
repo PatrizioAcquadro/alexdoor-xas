@@ -85,6 +85,18 @@ def _row(seed: int, randomized: bool, pose: dict) -> dict:
         "warning_counts": {},
         "warning_family_counts": {},
         "warning_records": [],
+        "policy_metadata_keys": [
+            "chunk_size",
+            "checkpoint_horizon",
+            "temporal_ensemble",
+            "ensemble_m",
+            "execution_mode",
+        ],
+        "chunk_size": 40,
+        "checkpoint_horizon": 40,
+        "temporal_ensemble": False,
+        "ensemble_m": 0.01,
+        "execution_mode": "chunk_execution",
         "notes": "",
     }
 
@@ -103,7 +115,10 @@ def _payload(pose_id: str, plan_pose: dict) -> dict:
         "action_space": "A2_ee_delta",
         "obs_preset": "core_door_pose",
         "chunk_size": 40,
+        "checkpoint_horizon": 40,
         "temporal_ensemble": False,
+        "ensemble_m": 0.01,
+        "execution_mode": "chunk_execution",
         "policy_device": "cuda",
         "max_ticks": 600,
         "success_angle_deg": 45.0,
@@ -145,24 +160,38 @@ def _payload(pose_id: str, plan_pose: dict) -> dict:
             "kind": "repeat_same_seed_fresh_process",
             "seed": 100,
             "repeats": 2,
-            "tolerances": {"command_abs": 0.0, "angle_abs_rad": 0.0, "force_abs_n": 0.0},
+            "tolerances": {
+                "command_abs": 0.0,
+                "angle_abs_rad": 0.0,
+                "force_abs_n": 0.0,
+                "ee_position_abs_m": 0.0,
+                "ee_orientation_abs": 0.0,
+            },
             "trace_sha256": [],
             "reference_traces": {
                 "n_ticks": 300,
                 "requested": [[0.0] * 6] * 300,
                 "applied": [[0.0] * 6] * 300,
                 "statuses": ["accepted"] * 300,
+                "reasons": [""] * 300,
+                "warning_identities": [[] for _ in range(300)],
+                "warning_family_counts": {},
                 "first_success_tick": 300,
                 "termination_reason": "success",
                 "final_angle_rad": 0.8,
+                "final_ee_position_world_m": [0.5, 0.0, 1.0],
+                "final_ee_orientation_world_xyzw": [0.0, 0.0, 0.0, 1.0],
                 "contact": [True] * 300,
                 "force": [40.0] * 300,
             },
+            "repeat_traces": [],
             "max_abs_diffs": {
                 "requested": 0.0,
                 "applied": 0.0,
                 "final_angle_rad": 0.0,
                 "force_n": 0.0,
+                "final_ee_position_world_m": 0.0,
+                "final_ee_orientation_world_xyzw": 0.0,
             },
             "mismatches": [],
             "passed": True,
@@ -178,6 +207,10 @@ def _payload(pose_id: str, plan_pose: dict) -> dict:
     payload["determinism_probe"]["trace_sha256"] = [
         trace_payload_hash(payload["determinism_probe"]["reference_traces"])
     ] * 2
+    payload["determinism_probe"]["repeat_traces"] = [
+        copy.deepcopy(payload["determinism_probe"]["reference_traces"]),
+        copy.deepcopy(payload["determinism_probe"]["reference_traces"]),
+    ]
     return payload
 
 
@@ -251,14 +284,35 @@ def _matrix_payloads() -> dict[str, dict[str, dict]]:
                 payload["policy"] = "diffusion"
                 del payload["chunk_size"]
                 del payload["temporal_ensemble"]
+                del payload["ensemble_m"]
+                del payload["execution_mode"]
                 payload.update(
                     horizon=16,
+                    checkpoint_horizon=16,
                     n_action_steps=8,
                     sampler="ddim",
                     num_inference_steps=10,
+                    execution_mode="receding_horizon",
                 )
                 for row in payload["rollouts"]:
-                    row.update(sampler="ddim", num_inference_steps=10)
+                    for key in ("chunk_size", "temporal_ensemble", "ensemble_m"):
+                        del row[key]
+                    row.update(
+                        policy_metadata_keys=[
+                            "horizon",
+                            "checkpoint_horizon",
+                            "n_action_steps",
+                            "sampler",
+                            "num_inference_steps",
+                            "execution_mode",
+                        ],
+                        horizon=16,
+                        checkpoint_horizon=16,
+                        n_action_steps=8,
+                        sampler="ddim",
+                        num_inference_steps=10,
+                        execution_mode="receding_horizon",
+                    )
         cells[cell_name] = payloads
     return cells
 
@@ -305,6 +359,38 @@ def test_missing_row_field_fails_coverage_only(valid_run) -> None:
     summary = _summarize(tmp_path, payloads)
     assert summary["metadata_coverage"] == "FAIL"
     assert any("termination_reason" in p for p in summary["coverage_problems"])
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "final_ee_position_world_m",
+        "reasons",
+        "warning_identities",
+        "warning_family_counts",
+    ],
+)
+def test_incomplete_determinism_trace_fails_coverage(valid_run, field) -> None:
+    tmp_path, payloads = valid_run
+    del payloads["D0"]["determinism_probe"]["reference_traces"][field]
+    summary = _summarize(tmp_path, payloads)
+    assert summary["metadata_coverage"] == "FAIL"
+    assert any(field in problem for problem in summary["coverage_problems"])
+
+
+@pytest.mark.parametrize(
+    "cell,field,value",
+    [
+        ("act_a2", "chunk_size", 20),
+        ("diffusion_a2", "n_action_steps", 4),
+    ],
+)
+def test_row_policy_metadata_mismatch_fails_coverage(tmp_path, cell, field, value) -> None:
+    cells = _matrix_payloads()
+    cells[cell]["D0"]["rollouts"][0][field] = value
+    summary = _summarize_matrix(tmp_path, cells)
+    assert summary["metadata_coverage"] == "FAIL"
+    assert any(field in problem for problem in summary["coverage_problems"])
 
 
 def test_missing_policy_fails_coverage(valid_run) -> None:
@@ -765,12 +851,18 @@ def test_malformed_determinism_evidence_fails_protocol(valid_run, mutation, expe
     assert any(expected in problem for problem in summary["protocol_problems"])
 
 
-def test_every_replay_trace_hash_must_match_reference(valid_run) -> None:
+def test_replay_trace_hash_may_differ_within_physical_tolerances(valid_run) -> None:
     tmp_path, payloads = valid_run
-    payloads["D0"]["determinism_probe"]["trace_sha256"][1] = "0" * 64
+    probe = payloads["D0"]["determinism_probe"]
+    probe["tolerances"]["ee_position_abs_m"] = 1e-9
+    probe["repeat_traces"][1]["final_ee_position_world_m"][0] += 5e-10
+    probe["trace_sha256"][1] = trace_payload_hash(probe["repeat_traces"][1])
+    probe["max_abs_diffs"]["final_ee_position_world_m"] = abs(
+        probe["repeat_traces"][1]["final_ee_position_world_m"][0]
+        - probe["reference_traces"]["final_ee_position_world_m"][0]
+    )
     summary = _summarize(tmp_path, payloads)
-    assert summary["protocol_consistency"] == "FAIL"
-    assert any("replay trace hash" in p for p in summary["protocol_problems"])
+    assert summary["protocol_consistency"] == "PASS"
 
 
 @pytest.mark.parametrize(

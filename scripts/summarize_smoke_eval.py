@@ -44,7 +44,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from alexdoor_xas.policies.common.rollout_eval import trace_payload_hash
+from alexdoor_xas.policies.common.rollout_eval import compare_trace_payloads, trace_payload_hash
 
 REQUIRED_ROW_FIELDS = (
     "seed",
@@ -110,9 +110,25 @@ REQUIRED_PROVENANCE_FIELDS = (
     "train_split_match",
     "val_split_match",
 )
-DIFFUSION_TOP_FIELDS = ("horizon", "n_action_steps", "sampler", "num_inference_steps")
-DIFFUSION_ROW_FIELDS = ("sampler", "num_inference_steps")
-ACT_TOP_FIELDS = ("chunk_size", "temporal_ensemble")
+ACT_POLICY_METADATA_KEYS = (
+    "chunk_size",
+    "checkpoint_horizon",
+    "temporal_ensemble",
+    "ensemble_m",
+    "execution_mode",
+)
+DIFFUSION_POLICY_METADATA_KEYS = (
+    "horizon",
+    "checkpoint_horizon",
+    "n_action_steps",
+    "sampler",
+    "num_inference_steps",
+    "execution_mode",
+)
+POLICY_METADATA_KEYS = {
+    "act": ACT_POLICY_METADATA_KEYS,
+    "diffusion": DIFFUSION_POLICY_METADATA_KEYS,
+}
 REQUIRED_PROBE_FIELDS = (
     "kind",
     "seed",
@@ -120,6 +136,7 @@ REQUIRED_PROBE_FIELDS = (
     "tolerances",
     "trace_sha256",
     "reference_traces",
+    "repeat_traces",
     "max_abs_diffs",
     "mismatches",
     "passed",
@@ -129,14 +146,32 @@ REQUIRED_TRACE_FIELDS = (
     "requested",
     "applied",
     "statuses",
+    "reasons",
+    "warning_identities",
+    "warning_family_counts",
     "first_success_tick",
     "termination_reason",
     "final_angle_rad",
+    "final_ee_position_world_m",
+    "final_ee_orientation_world_xyzw",
     "contact",
     "force",
 )
-REQUIRED_TOLERANCES = ("command_abs", "angle_abs_rad", "force_abs_n")
-REQUIRED_MAX_DIFFS = ("requested", "applied", "final_angle_rad", "force_n")
+REQUIRED_TOLERANCES = (
+    "command_abs",
+    "angle_abs_rad",
+    "force_abs_n",
+    "ee_position_abs_m",
+    "ee_orientation_abs",
+)
+REQUIRED_MAX_DIFFS = (
+    "requested",
+    "applied",
+    "final_angle_rad",
+    "force_n",
+    "final_ee_position_world_m",
+    "final_ee_orientation_world_xyzw",
+)
 
 # Fields that must be identical across every primary pose file of one run
 # (same checkpoint, same dataset binding, same evaluation protocol).
@@ -165,11 +200,9 @@ EXPECTED_MATRIX_CELLS = {
     ("diffusion", "A3_obj_rel_ee_delta"),
 }
 POLICY_CONSISTENT_FIELDS = {
-    "act": ("chunk_size", "temporal_ensemble"),
-    "diffusion": ("horizon", "n_action_steps", "sampler", "num_inference_steps"),
+    "act": ACT_POLICY_METADATA_KEYS,
+    "diffusion": DIFFUSION_POLICY_METADATA_KEYS,
 }
-# Row-level fields that must equal the file's top-level policy metadata.
-ROW_TOP_AGREEMENT = ("sampler", "num_inference_steps")
 
 # Machine-readable policy, deliberately embedded in every summary. The velocity
 # bounds narrowly envelope the 2026-07-12 local-smoke evidence: 640 lower-body
@@ -269,16 +302,31 @@ def parse_args() -> argparse.Namespace:
 
 def check_coverage(payload: dict, path: Path, problems: list[str]) -> None:
     """Schema completeness only: every required field is present."""
-    is_diffusion = "diffusion" in path.name
-    top_fields = REQUIRED_TOP_FIELDS + (DIFFUSION_TOP_FIELDS if is_diffusion else ACT_TOP_FIELDS)
+    policy = payload.get("policy")
+    policy_keys = POLICY_METADATA_KEYS.get(policy, ())
+    if policy not in POLICY_METADATA_KEYS:
+        problems.append(f"{path}: unsupported policy {policy!r} has no metadata contract")
+    top_fields = REQUIRED_TOP_FIELDS + policy_keys
     for field in top_fields:
         if field not in payload:
             problems.append(f"{path}: missing top-level field {field!r}")
-    row_fields = REQUIRED_ROW_FIELDS + (DIFFUSION_ROW_FIELDS if is_diffusion else ())
+    row_fields = REQUIRED_ROW_FIELDS + ("policy_metadata_keys",) + policy_keys
     for i, row in enumerate(payload.get("rollouts", [])):
         missing = [field for field in row_fields if field not in row]
         if missing:
             problems.append(f"{path}: rollout {i} (seed {row.get('seed')}) missing {missing}")
+        declared = row.get("policy_metadata_keys")
+        if not isinstance(declared, list) or declared != list(policy_keys):
+            problems.append(
+                f"{path}: rollout {i} policy_metadata_keys={declared!r} does not declare "
+                f"the required {policy!r} keys {list(policy_keys)!r}"
+            )
+        for key in policy_keys:
+            if key in row and key in payload and row[key] != payload[key]:
+                problems.append(
+                    f"{path}: rollout {i} {key}={row[key]!r} disagrees with "
+                    f"top-level {payload[key]!r}"
+                )
     provenance = payload.get("dataset_provenance") or {}
     for field in REQUIRED_PROVENANCE_FIELDS:
         if not provenance.get(field):
@@ -311,8 +359,60 @@ def check_coverage(payload: dict, path: Path, problems: list[str]) -> None:
                     problems.append(
                         f"{path}: determinism_probe reference_traces missing field {field!r}"
                     )
+            for field, width in (
+                ("final_ee_position_world_m", 3),
+                ("final_ee_orientation_world_xyzw", 4),
+            ):
+                value = reference.get(field)
+                unavailable_position = field == "final_ee_position_world_m" and value is None
+                if unavailable_position or (value is not None and (
+                    not isinstance(value, list)
+                    or len(value) != width
+                    or any(
+                        not isinstance(item, (int, float)) or not math.isfinite(item)
+                        for item in value
+                    )
+                )):
+                    problems.append(
+                        f"{path}: determinism_probe reference_traces {field!r} "
+                        f"is not a finite {width}-vector"
+                    )
+            identities = reference.get("warning_identities")
+            counts = reference.get("warning_family_counts")
+            if isinstance(identities, list) and isinstance(counts, dict):
+                observed: dict[str, int] = {}
+                for per_decision in identities:
+                    if not isinstance(per_decision, list):
+                        problems.append(
+                            f"{path}: determinism_probe warning_identities is not "
+                            "a per-decision list"
+                        )
+                        break
+                    for family_id in per_decision:
+                        observed[str(family_id)] = observed.get(str(family_id), 0) + 1
+                else:
+                    if counts != dict(sorted(observed.items())):
+                        problems.append(
+                            f"{path}: determinism_probe warning_family_counts does not "
+                            "match warning_identities"
+                        )
         else:
             problems.append(f"{path}: determinism_probe reference_traces is not an object")
+        repeats = probe.get("repeat_traces")
+        if not isinstance(repeats, list):
+            problems.append(f"{path}: determinism_probe repeat_traces is not a list")
+        else:
+            for index, trace in enumerate(repeats):
+                if not isinstance(trace, dict):
+                    problems.append(
+                        f"{path}: determinism_probe repeat_traces[{index}] is not an object"
+                    )
+                    continue
+                missing = [field for field in REQUIRED_TRACE_FIELDS if field not in trace]
+                if missing:
+                    problems.append(
+                        f"{path}: determinism_probe repeat_traces[{index}] missing {missing}"
+                    )
 
 
 def _policy_metadata(payload: dict) -> dict:
@@ -325,6 +425,9 @@ def _policy_metadata(payload: dict) -> dict:
             "n_action_steps",
             "sampler",
             "num_inference_steps",
+            "checkpoint_horizon",
+            "ensemble_m",
+            "execution_mode",
         )
         if key in payload
     }
@@ -395,12 +498,6 @@ def check_file_protocol(
                 problems.append(
                     f"{path}: rollout {i} {key}={row.get(key)!r} disagrees with "
                     f"top-level door_pose {top_value!r}"
-                )
-        for key in ROW_TOP_AGREEMENT:
-            if key in payload and key in row and row[key] != payload[key]:
-                problems.append(
-                    f"{path}: rollout {i} {key}={row[key]!r} disagrees with "
-                    f"top-level {payload[key]!r}"
                 )
         if bool(row.get("success")) != (row.get("failure_label") is None):
             problems.append(
@@ -511,6 +608,7 @@ def check_file_protocol(
             )
         repeats = int(probe.get("repeats") or 0)
         hashes = probe.get("trace_sha256")
+        repeat_traces = probe.get("repeat_traces")
         if not isinstance(hashes, list) or len(hashes) != repeats:
             problems.append(
                 f"{path}: determinism probe trace_sha256 count "
@@ -523,8 +621,14 @@ def check_file_protocol(
             for value in hashes
         ):
             problems.append(f"{path}: determinism probe contains an invalid sha256 trace hash")
+        if not isinstance(repeat_traces, list) or len(repeat_traces) != repeats:
+            problems.append(
+                f"{path}: determinism probe repeat_traces count "
+                f"{len(repeat_traces) if isinstance(repeat_traces, list) else None} "
+                f"!= repeats {repeats}"
+            )
         reference = probe.get("reference_traces")
-        if isinstance(reference, dict) and hashes:
+        if isinstance(reference, dict) and hashes and isinstance(repeat_traces, list):
             try:
                 reference_hash = trace_payload_hash(reference)
             except (KeyError, TypeError, ValueError) as error:
@@ -537,12 +641,23 @@ def check_file_protocol(
                         f"{path}: determinism probe first trace hash does not match "
                         "reference_traces"
                     )
-                for index, replay_hash in enumerate(hashes[1:], start=1):
-                    if replay_hash != reference_hash:
+                if repeat_traces and repeat_traces[0] != reference:
+                    problems.append(
+                        f"{path}: determinism probe first repeat trace is not "
+                        "reference_traces"
+                    )
+                for index, trace in enumerate(repeat_traces):
+                    try:
+                        trace_hash = trace_payload_hash(trace)
+                    except (KeyError, TypeError, ValueError) as error:
                         problems.append(
-                            f"{path}: determinism replay trace hash {index} differs "
-                            "from reference_traces"
+                            f"{path}: determinism repeat trace {index} is invalid: {error}"
                         )
+                    else:
+                        if index >= len(hashes) or hashes[index] != trace_hash:
+                            problems.append(
+                                f"{path}: determinism repeat trace {index} hash mismatch"
+                            )
         tolerances = probe.get("tolerances")
         for key in REQUIRED_TOLERANCES:
             value = tolerances.get(key) if isinstance(tolerances, dict) else None
@@ -563,6 +678,8 @@ def check_file_protocol(
                 ("applied", "command_abs"),
                 ("final_angle_rad", "angle_abs_rad"),
                 ("force_n", "force_abs_n"),
+                ("final_ee_position_world_m", "ee_position_abs_m"),
+                ("final_ee_orientation_world_xyzw", "ee_orientation_abs"),
             ):
                 diff = max_diffs.get(diff_key)
                 tolerance = tolerances.get(tolerance_key)
@@ -577,6 +694,35 @@ def check_file_protocol(
                         f"{path}: determinism {diff_key} max difference {diff} "
                         f"exceeds stored tolerance {tolerance_key}={tolerance}"
                     )
+        if (
+            isinstance(reference, dict)
+            and isinstance(repeat_traces, list)
+            and isinstance(tolerances, dict)
+            and repeat_traces
+        ):
+            computed_mismatches: list[str] = []
+            computed_max_diffs = {key: 0.0 for key in REQUIRED_MAX_DIFFS}
+            for index, trace in enumerate(repeat_traces[1:], start=1):
+                try:
+                    trace_mismatches, trace_diffs = compare_trace_payloads(
+                        reference, trace, tolerances, label=f"repeat {index}"
+                    )
+                except (KeyError, TypeError, ValueError) as error:
+                    problems.append(
+                        f"{path}: determinism repeat trace {index} comparison failed: {error}"
+                    )
+                    continue
+                computed_mismatches.extend(trace_mismatches)
+                for key, value in trace_diffs.items():
+                    computed_max_diffs[key] = max(computed_max_diffs[key], value)
+            if probe.get("mismatches") != computed_mismatches:
+                problems.append(
+                    f"{path}: determinism probe mismatches do not match recomputed traces"
+                )
+            if probe.get("max_abs_diffs") != computed_max_diffs:
+                problems.append(
+                    f"{path}: determinism probe max_abs_diffs do not match recomputed traces"
+                )
         mismatches = probe.get("mismatches")
         if not isinstance(mismatches, list):
             problems.append(f"{path}: determinism probe mismatches is not a list")
