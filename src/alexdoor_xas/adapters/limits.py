@@ -59,6 +59,12 @@ class RobotLimitsCfg:
     reach_margin_m: float = 0.02
     """Slack on the max-reach check: commands are judged against the *measured*
     reach, which the physical EE can transiently exceed by PD tracking error."""
+    contact_surface_x_m: float | None = None
+    """Panel-frame X coordinate of Alex's collision-derived tool point at contact."""
+    contact_approach_start_clearance_m: float | None = None
+    """Calibrated align standoff where bounded first-contact approach begins."""
+    contact_approach_max_step_m: float | None = None
+    """Calibrated translation-norm bound for an unsensed inward contact transition."""
 
 
 PROXY_LIMITS = RobotLimitsCfg(robot=PROXY_ROBOT_TAG)
@@ -83,6 +89,16 @@ def alex_v2_limits(
         and 0.0 < min_reach_m < max_reach_m
     ):
         raise ValueError("calibration reach_shell_m must be finite, positive, and increasing")
+    controller = calibration.controller
+    contact_approach_start_clearance_m = float(controller["align_standoff_m"])
+    contact_approach_max_step_m = float(controller["contact_approach_max_step_m"])
+    if not (
+        np.isfinite(contact_approach_start_clearance_m)
+        and np.isfinite(contact_approach_max_step_m)
+        and 0.0 < contact_approach_start_clearance_m
+        and 0.0 < contact_approach_max_step_m <= 0.015
+    ):
+        raise ValueError("calibrated contact-approach limits are invalid")
     return RobotLimitsCfg(
         robot=ALEX_V2_ROBOT_TAG,
         workspace=WorkspaceSphere(
@@ -90,6 +106,11 @@ def alex_v2_limits(
             min_reach_m=float(min_reach_m),
             max_reach_m=float(max_reach_m),
         ),
+        # Alex's env exposes the collision-derived tool point rather than a
+        # proxy sphere center, so contact is at the physical panel thickness.
+        contact_surface_x_m=DoorPanelGeometry().panel_thickness_m,
+        contact_approach_start_clearance_m=contact_approach_start_clearance_m,
+        contact_approach_max_step_m=contact_approach_max_step_m,
     )
 
 

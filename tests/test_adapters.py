@@ -57,7 +57,14 @@ def _identity_frame(origin=(0.0, 0.0, 0.0)) -> ObjectFrame:
 
 
 def _v2_limits(center=(1.0, 2.0, 3.0), reach_shell=(0.2, 0.8)):
-    calibration = SimpleNamespace(reach_shell_m=reach_shell)
+    calibration = SimpleNamespace(
+        reach_shell_m=reach_shell,
+        controller={
+            "align_standoff_m": 0.060,
+            "pre_contact_clearance_m": 0.010,
+            "contact_approach_max_step_m": 0.005,
+        },
+    )
     return alex_v2_limits(calibration, workspace_center_w=center)
 
 
@@ -98,6 +105,44 @@ def test_a2_clamps_and_logs_correction():
     assert applied[5] == pytest.approx(PROXY_LIMITS.max_rot_delta_rad)
     np.testing.assert_allclose(decision.requested, delta)
     np.testing.assert_allclose(decision.applied, applied)
+
+
+def test_a2_shapes_calibrated_alex_first_contact_without_changing_request() -> None:
+    limits = _v2_limits(center=(0.0, 0.0, 0.0), reach_shell=(0.01, 2.0))
+    adapter = A2Adapter(limits)
+    frame = _identity_frame()
+    # Alex V2 exposes the collision-derived tool point, so panel contact is at
+    # x=panel_thickness (0.036 m). This state is inside the calibrated 60 mm
+    # align-to-contact corridor but has not sensed contact yet.
+    ctx = _ctx(ee_pos_w=(0.040, 0.30, 0.0), door_frame=frame, contact_sensed=False)
+    requested = np.array([-0.015, -0.001, 0.002, 0.0, 0.0, 0.0])
+
+    applied, decision = adapter.process(requested, ctx)
+
+    assert decision.status is AdapterStatus.CORRECTED
+    assert decision.checks["contact_approach_bounded"] is False
+    assert "contact approach" in decision.reason
+    np.testing.assert_allclose(decision.requested, requested)
+    assert np.linalg.norm(applied[:3]) == pytest.approx(0.005)
+    assert applied[0] < 0.0  # push direction/semantics are preserved
+
+
+def test_a2_does_not_shape_free_space_or_established_contact() -> None:
+    limits = _v2_limits(center=(0.0, 0.0, 0.0), reach_shell=(0.01, 2.0))
+    frame = _identity_frame()
+    requested = np.array([-0.015, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+    free, free_decision = A2Adapter(limits).process(
+        requested, _ctx(ee_pos_w=(0.20, 0.30, 0.0), door_frame=frame, contact_sensed=False)
+    )
+    contact, contact_decision = A2Adapter(limits).process(
+        requested, _ctx(ee_pos_w=(0.036, 0.30, 0.0), door_frame=frame, contact_sensed=True)
+    )
+
+    np.testing.assert_allclose(free, requested)
+    np.testing.assert_allclose(contact, requested)
+    assert free_decision.status is AdapterStatus.ACCEPTED
+    assert contact_decision.status is AdapterStatus.ACCEPTED
 
 
 @pytest.mark.parametrize(
@@ -178,7 +223,14 @@ def test_limits_for_robot_rejects_unknown_tag():
 
 
 def test_alex_v2_limits_use_calibrated_shell_and_caller_center() -> None:
-    calibration = SimpleNamespace(reach_shell_m=(0.31, 0.77))
+    calibration = SimpleNamespace(
+        reach_shell_m=(0.31, 0.77),
+        controller={
+            "align_standoff_m": 0.060,
+            "pre_contact_clearance_m": 0.010,
+            "contact_approach_max_step_m": 0.005,
+        },
+    )
     center = (4.0, -2.0, 1.25)
 
     limits = limits_for_robot(
@@ -191,6 +243,9 @@ def test_alex_v2_limits_use_calibrated_shell_and_caller_center() -> None:
     assert limits.workspace.center_w == center
     assert limits.workspace.min_reach_m == pytest.approx(0.31)
     assert limits.workspace.max_reach_m == pytest.approx(0.77)
+    assert limits.contact_surface_x_m == pytest.approx(0.036)
+    assert limits.contact_approach_start_clearance_m == pytest.approx(0.060)
+    assert limits.contact_approach_max_step_m == pytest.approx(0.005)
 
 
 @pytest.mark.parametrize("center", [(1.0, 2.0), (1.0, float("nan"), 3.0)])

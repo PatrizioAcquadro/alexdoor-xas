@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from alexdoor_xas.action.frames import panel_frame
 from alexdoor_xas.action.spaces import EE_DELTA_DIM
 
 from .base import AdapterDecision, AdapterLog, AdapterStatus, StepContext
@@ -58,6 +59,7 @@ class A2Adapter:
             return self._reject(requested, checks, "EE delta contains non-finite values")
 
         applied = requested.copy()
+        corrections: list[str] = []
         applied[:3] = np.clip(
             applied[:3], -self.limits.max_pos_delta_m, self.limits.max_pos_delta_m
         )
@@ -66,6 +68,19 @@ class A2Adapter:
         )
         clamped = bool(np.any(np.abs(applied - requested) > 0.0))
         checks["within_per_tick_limits"] = not clamped
+        if clamped:
+            corrections.append(
+                f"per-tick clamp to +/-{self.limits.max_pos_delta_m} m / "
+                f"+/-{self.limits.max_rot_delta_rad} rad"
+            )
+
+        contact_shaped = self._shape_first_contact_approach(applied, ctx)
+        checks["contact_approach_bounded"] = not contact_shaped
+        if contact_shaped:
+            corrections.append(
+                "calibrated first-contact approach bound to "
+                f"{self.limits.contact_approach_max_step_m} m"
+            )
 
         checks["reachable"] = True
         if self.limits.workspace is not None:
@@ -89,13 +104,10 @@ class A2Adapter:
 
         warnings.extend(self._joint_limit_flags(ctx))
 
-        if clamped:
+        if corrections:
             decision = AdapterDecision(
                 status=AdapterStatus.CORRECTED,
-                reason=(
-                    f"per-tick clamp to +/-{self.limits.max_pos_delta_m} m / "
-                    f"+/-{self.limits.max_rot_delta_rad} rad"
-                ),
+                reason="; ".join(corrections),
                 checks=checks,
                 warnings=tuple(warnings),
                 requested=requested,
@@ -111,6 +123,39 @@ class A2Adapter:
             )
         self.log.record(decision)
         return applied, decision
+
+    def _shape_first_contact_approach(
+        self, applied: np.ndarray, ctx: StepContext
+    ) -> bool:
+        """Bound only the unsensed inward transition through the pre-contact corridor.
+
+        Learned A2/A3 policies have no scripted phase label. Geometry and the
+        live contact flag provide the minimal phase-independent equivalent of
+        Alex's calibrated scripted-controller contact approach bound: free
+        space and established-contact commands are unchanged.
+        """
+        limit = self.limits.contact_approach_max_step_m
+        clearance = self.limits.contact_approach_start_clearance_m
+        surface_x = self.limits.contact_surface_x_m
+        if (
+            limit is None
+            or clearance is None
+            or surface_x is None
+            or ctx.door_frame is None
+            or ctx.contact_sensed is True
+            or not np.isfinite(ctx.hinge_angle_rad)
+        ):
+            return False
+        panel = panel_frame(ctx.door_frame, ctx.hinge_angle_rad)
+        ee_panel = panel.point_from_world(ctx.ee_pos_w)
+        delta_panel = panel.vector_from_world(applied[:3])
+        translation_norm = float(np.linalg.norm(applied[:3]))
+        inside_corridor = ee_panel[0] <= surface_x + clearance
+        moving_inward = delta_panel[0] < 0.0
+        if not (inside_corridor and moving_inward and translation_norm > limit):
+            return False
+        applied[:3] *= limit / translation_norm
+        return True
 
     def process_chunk(
         self, deltas_world, ctx: StepContext

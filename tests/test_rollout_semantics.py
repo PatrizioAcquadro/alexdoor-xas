@@ -130,6 +130,27 @@ class NonFiniteContactEnv(FakeForceDoorPushEnv):
         return torch.tensor([float("nan")], dtype=torch.float64)
 
 
+class FirstContactImpactEnv(FakeForceDoorPushEnv):
+    """Force spike model driven by the actually executed first-contact step."""
+
+    def __init__(self):
+        super().__init__(start_door_frame=(0.040, 0.30, 0.0))
+        self.last_dx_m = 0.0
+
+    def step(self, action):
+        self.last_dx_m = float(action.detach().cpu().numpy().reshape(-1)[0])
+        return super().step(action)
+
+    def contact_force_w(self):
+        # An unshaped -15 mm contact step would report 300 N. The execution
+        # correction must constrain the applied step before it reaches here.
+        force_n = 20_000.0 * abs(self.last_dx_m)
+        return torch.tensor([[force_n, 0.0, 0.0]], dtype=torch.float64)
+
+    def contact_sensed(self):
+        return torch.tensor([abs(self.last_dx_m) > 0.0])
+
+
 # ── per-tick success timing ──────────────────────────────────────────────────
 
 
@@ -277,6 +298,36 @@ def test_non_finite_rollout_force_or_contact_fails_loudly(env) -> None:
             A2Adapter(PROXY_LIMITS),
             max_ticks=1,
         )
+
+
+def test_calibrated_first_contact_correction_is_enforced_in_execution() -> None:
+    from types import SimpleNamespace
+
+    from alexdoor_xas.adapters import alex_v2_limits
+
+    env = FirstContactImpactEnv()
+    env.reset(seed=112)
+    calibration = SimpleNamespace(
+        reach_shell_m=(0.01, 2.0),
+        controller={
+            "align_standoff_m": 0.060,
+            "pre_contact_clearance_m": 0.010,
+            "contact_approach_max_step_m": 0.005,
+        },
+    )
+    limits = alex_v2_limits(calibration, workspace_center_w=(0.0, 0.0, 0.0))
+    result = rollout_chunks(
+        env,
+        lambda ctx: np.array([[-0.015, 0.0, 0.0, 0.0, 0.0, 0.0]]),
+        A2Adapter(limits),
+        max_ticks=1,
+    )
+
+    assert result.force_n_per_tick == pytest.approx([100.0])
+    decision = result.decisions_per_tick[0]
+    assert decision.status is AdapterStatus.CORRECTED
+    assert decision.requested[0] == pytest.approx(-0.015)
+    assert decision.applied[0] == pytest.approx(-0.005)
 
 
 # ── repeat-same-seed determinism helpers ─────────────────────────────────────
