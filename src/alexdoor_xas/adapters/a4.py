@@ -35,7 +35,7 @@ from alexdoor_xas.action.frames import rot_z
 from alexdoor_xas.action.spaces import A4_PHASE_VOCAB, EE_DELTA_DIM, ObjectCentricChunk
 
 from .a3 import A3Adapter
-from .base import AdapterDecision, AdapterLog, AdapterStatus
+from .base import AdapterDecision, AdapterLog, AdapterStatus, AdapterWarning
 from .limits import MAX_HINGE_ANGLE_RAD, DoorPanelGeometry, RobotLimitsCfg
 from .rollout import read_door_frame, read_joint_limits, read_step_context, step_env
 
@@ -214,6 +214,7 @@ class A4Adapter:
         geo = self.geometry
         checks: dict[str, bool] = {}
         warnings: list[str] = []
+        warning_records: list[AdapterWarning] = []
         corrections: list[str] = []
 
         try:
@@ -303,6 +304,18 @@ class A4Adapter:
                 f"chunk target x={target[0]:.3f} deviates from the EE-at-face convention "
                 f"x={geo.surface_x_m(0.0):.3f}; planning recomputes x from phase clearances"
             )
+            warning_records.append(
+                AdapterWarning(
+                    id="a4.target_face_deviation",
+                    message=warnings[-1],
+                    evidence={
+                        "target_x_m": float(target[0]),
+                        "configured_face_x_m": geo.surface_x_m(0.0),
+                        "deviation_m": abs(float(target[0] - geo.surface_x_m(0.0))),
+                        "phase": chunk.phase,
+                    },
+                )
+            )
 
         hinge_delta = hinge_delta_requested
         exit_angle = entry_angle_rad + hinge_delta
@@ -321,7 +334,13 @@ class A4Adapter:
             reason = self._reach_reason(target, entry_angle_rad, exit_angle, chunk, door_frame)
             if reason:
                 checks["reachable"] = False
-                return chunk, self._reject_chunk(chunk, checks, reason, warnings=warnings)
+                return chunk, self._reject_chunk(
+                    chunk,
+                    checks,
+                    reason,
+                    warnings=warnings,
+                    warning_records=warning_records,
+                )
 
         corrected_chunk = replace(
             chunk,
@@ -334,6 +353,7 @@ class A4Adapter:
                 reason="; ".join(corrections),
                 checks=checks,
                 warnings=tuple(warnings),
+                warning_records=tuple(warning_records),
                 requested=numeric,
                 applied=np.array(
                     [
@@ -348,6 +368,7 @@ class A4Adapter:
                 status=AdapterStatus.ACCEPTED,
                 checks=checks,
                 warnings=tuple(warnings),
+                warning_records=tuple(warning_records),
                 requested=numeric,
                 applied=numeric,
             )
@@ -395,6 +416,7 @@ class A4Adapter:
         checks: dict[str, bool],
         reason: str,
         warnings: list[str] | None = None,
+        warning_records: list[AdapterWarning] | None = None,
     ) -> AdapterDecision:
         requested = self._chunk_requested_vector(chunk)
         return AdapterDecision(
@@ -402,6 +424,7 @@ class A4Adapter:
             reason=reason,
             checks=checks,
             warnings=tuple(warnings or ()),
+            warning_records=tuple(warning_records or ()),
             requested=requested,
             applied=None,
         )
@@ -501,7 +524,7 @@ class A4Adapter:
 
         door_frame = read_door_frame(env)
         joint_limits = read_joint_limits(env)
-        ctx = read_step_context(env, door_frame, joint_limits)
+        ctx = read_step_context(env, door_frame, joint_limits, self.limits)
         initial_angle = ctx.hinge_angle_rad
 
         validated: list[ObjectCentricChunk] = []
@@ -653,7 +676,7 @@ class A4Adapter:
             step_env(env, applied)
             ticks += 1
             stage_ticks += 1
-            ctx = read_step_context(env, door_frame, joint_limits)
+            ctx = read_step_context(env, door_frame, joint_limits, self.limits)
 
         result = StageResult(
             phase=stage.phase,

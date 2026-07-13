@@ -37,20 +37,26 @@ from alexdoor_xas.dataset import (
     BatchIterator,
     ChunkSampler,
     EpisodeDataset,
+    assert_no_cross_split_duplicates,
     collate_torch,
     compute_norm_stats,
     episode_chunk_features,
     load_norm_stats,
     load_splits,
-    make_splits,
+    make_grouped_splits,
     norm_stats_path,
     save_norm_stats,
     save_splits,
+    split_entries,
     splits_path,
     validate_a4_dataset,
     validate_dataset,
     validate_matched_action_space_datasets,
     validate_norm_stats,
+)
+from alexdoor_xas.dataset.robot_asset import (
+    load_dataset_robot_asset,
+    validate_dataset_episode_robot_asset,
 )
 
 
@@ -59,6 +65,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--datasets_root", type=Path, default=paths.DATASETS_DIR,
         help="datasets root (default: repo datasets/)",
+    )
+    parser.add_argument(
+        "--task",
+        default=None,
+        help="verify only this task (default: discover every task with the requested version)",
     )
     parser.add_argument("--version", default="v0", help="dataset version to verify")
     parser.add_argument("--horizon", type=int, default=20, help="action chunk horizon")
@@ -101,9 +112,21 @@ def verify_task(args: argparse.Namespace, task: str) -> list[str]:
             continue
         try:
             if space == A4_OBJ_CENTRIC_CHUNK:
-                a4_dataset = A4ChunkDataset(dataset_dir)
+                dataset = A4ChunkDataset(dataset_dir)
+                if task == paths.ALEX_V2_TASK:
+                    ref, _ = load_dataset_robot_asset(dataset_dir, require=True)
+                    if ref is None:
+                        raise ValueError("required Alex V2 robot asset is missing")
+                    validate_dataset_episode_robot_asset(dataset, ref)
+                a4_dataset = dataset
             else:
-                hdf5_datasets[space] = EpisodeDataset(dataset_dir)
+                dataset = EpisodeDataset(dataset_dir)
+                if task == paths.ALEX_V2_TASK:
+                    ref, _ = load_dataset_robot_asset(dataset_dir, require=True)
+                    if ref is None:
+                        raise ValueError("required Alex V2 robot asset is missing")
+                    validate_dataset_episode_robot_asset(dataset, ref)
+                hdf5_datasets[space] = dataset
         except Exception as exc:  # noqa: BLE001 - gate reports, never crashes
             failures.append(f"{task}/{space}: failed to load: {exc}")
     if not hdf5_datasets:
@@ -149,13 +172,21 @@ def verify_task(args: argparse.Namespace, task: str) -> list[str]:
     for error in matched.errors:
         failures.append(f"{task}: {error}")
 
-    # -- splits: shared per task, deterministic, reload-verified ------------
+    # -- splits: shared per task, grouped + pose-stratified, deterministic --
     ids = hdf5_datasets[reference_space].episode_ids
-    splits = make_splits(ids, seed=args.seed)
-    if make_splits(ids, seed=args.seed) != splits:
-        failures.append(f"{task}: make_splits is not deterministic")
+    entries = split_entries(hdf5_datasets[reference_space])
+    splits, split_meta = make_grouped_splits(entries, seed=args.seed)
+    if make_grouped_splits(entries, seed=args.seed)[0] != splits:
+        failures.append(f"{task}: make_grouped_splits is not deterministic")
+    # Leakage invariant, checked against every action space's own content keys
+    # (relabelings share episode ids, so one shared split covers all spaces).
+    for space, dataset in hdf5_datasets.items():
+        try:
+            assert_no_cross_split_duplicates(split_entries(dataset), splits)
+        except ValueError as exc:
+            failures.append(f"{task}/{space}: split leakage: {exc}")
     path = splits_path(_artifact_root(args), task, args.version)
-    save_splits(path, splits, seed=args.seed)
+    save_splits(path, splits, seed=args.seed, metadata=split_meta)
     try:
         reloaded = load_splits(path, episode_ids=ids)
     except ValueError as exc:
@@ -164,8 +195,15 @@ def verify_task(args: argparse.Namespace, task: str) -> list[str]:
     if reloaded != splits:
         failures.append(f"{task}: reloaded splits differ")
     artifact_mode = "datasets/" if args.write_artifacts else "temp"
+    pose_note = ", ".join(
+        f"{pose}:{info['episodes_per_split']['train']}/"
+        f"{info['episodes_per_split']['val']}/{info['episodes_per_split']['test']}"
+        for pose, info in split_meta["per_pose"].items()
+    )
     print(f"  [ok ] splits: train={len(splits['train'])} val={len(splits['val'])} "
-          f"test={len(splits['test'])} -> {artifact_mode}:{path.relative_to(_artifact_root(args))}")
+          f"test={len(splits['test'])} ({split_meta['n_groups']} content groups; "
+          f"per-pose train/val/test {pose_note}) "
+          f"-> {artifact_mode}:{path.relative_to(_artifact_root(args))}")
 
     # -- per space: norm stats + batches + model consumption ----------------
     for space, dataset in hdf5_datasets.items():
@@ -269,7 +307,7 @@ def _safe_action_dim(dataset: EpisodeDataset) -> int | str:
 
 def main() -> int:
     args = parse_args()
-    tasks = discover_tasks(args.datasets_root, args.version)
+    tasks = [args.task] if args.task else discover_tasks(args.datasets_root, args.version)
     if not tasks:
         print(f"FAIL: no datasets under {args.datasets_root} (version {args.version})")
         return 1

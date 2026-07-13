@@ -31,6 +31,18 @@ class AdapterStatus(enum.StrEnum):
 
 
 @dataclass(frozen=True)
+class AdapterWarning:
+    """Stable warning family plus JSON-serializable physical evidence."""
+
+    id: str
+    message: str
+    evidence: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"id": self.id, "message": self.message, "evidence": dict(self.evidence)}
+
+
+@dataclass(frozen=True)
 class AdapterDecision:
     """Outcome of adapting one command (a per-tick delta or an A4 chunk).
 
@@ -45,6 +57,7 @@ class AdapterDecision:
     reason: str = ""
     checks: dict[str, bool] = field(default_factory=dict)
     warnings: tuple[str, ...] = ()
+    warning_records: tuple[AdapterWarning, ...] = ()
     requested: np.ndarray | None = None
     applied: np.ndarray | None = None
 
@@ -54,6 +67,7 @@ class AdapterDecision:
             "reason": self.reason,
             "checks": dict(self.checks),
             "warnings": list(self.warnings),
+            "warning_records": [warning.to_dict() for warning in self.warning_records],
             "requested": None if self.requested is None else np.asarray(self.requested).tolist(),
             "applied": None if self.applied is None else np.asarray(self.applied).tolist(),
         }
@@ -106,16 +120,22 @@ class StepContext:
     Mirrors the scripted controller's :class:`DoorPushObservation` but stays
     adapter-owned (adapters never import policies). ``joint_state`` /
     ``joint_limits`` carry the env's optional proprio accessors when available
-    (Alex); ``contact_sensed`` is ``None`` for envs without force sensing.
+    (Alex); EE orientation is captured even though v1 adapters do not command
+    it directly; contact/force fields are ``None`` when sensing is unavailable.
     """
 
     door_frame: ObjectFrame | None
     hinge_angle_rad: float
     hinge_velocity_rad_s: float
     ee_pos_w: np.ndarray  # (3,)
+    ee_quat_w_xyzw: np.ndarray | None = None  # (4,); populated by env snapshots
     contact_sensed: bool | None = None
+    contact_force_n: float | None = None
     joint_state: dict[str, np.ndarray] | None = None
     joint_limits: dict[str, np.ndarray] | None = None
+    joint_names: tuple[str, ...] | None = None
+    tick_index: int | None = None
+    rollout_phase: str = "unknown"
 
 
-__all__ = ["AdapterDecision", "AdapterLog", "AdapterStatus", "StepContext"]
+__all__ = ["AdapterDecision", "AdapterLog", "AdapterStatus", "AdapterWarning", "StepContext"]

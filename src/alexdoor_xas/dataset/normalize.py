@@ -22,6 +22,7 @@ from .loader import DEFAULT_OBS_PRESET, EpisodeDataset, obs_matrix
 
 STD_FLOOR = 1e-8
 NORM_STATS_FILENAME = "norm_stats.json"
+DATASET_FINGERPRINT_CONTRACT = "alexdoor_xas.dataset_fingerprint.v2"
 
 
 @dataclass(frozen=True)
@@ -110,7 +111,7 @@ def compute_norm_stats(
         train_episode_ids=tuple(train_episode_ids),
         dataset_episode_ids=tuple(dataset.episode_ids),
         action_space=dataset.action_space,
-        dataset_fingerprint=dataset_fingerprint(dataset),
+        dataset_fingerprint=dataset_fingerprint(dataset, obs_preset),
     )
 
 
@@ -150,15 +151,35 @@ def load_norm_stats(path: str | Path) -> DatasetNormStats:
 
 
 def dataset_fingerprint(dataset: EpisodeDataset, obs_preset: str = DEFAULT_OBS_PRESET) -> str:
-    """Content fingerprint for stat/split compatibility checks."""
+    """Preset-specific content fingerprint for stat/checkpoint compatibility."""
     digest = hashlib.sha256()
+    digest.update(DATASET_FINGERPRINT_CONTRACT.encode())
+    digest.update(b"\0obs_preset\0")
+    digest.update(obs_preset.encode())
+    digest.update(b"\0")
     digest.update(dataset.action_space.encode())
     digest.update(dataset.task.encode())
+    robot_asset = dataset.meta.get("robot_asset")
+    has_robot_provenance = robot_asset is not None or any(
+        record.meta.get("robot_asset_id") or record.meta.get("robot_asset_sha256")
+        for record in dataset.records
+    )
+    # Preserve the exact Phase 3.0/V1 digest byte stream when provenance is
+    # absent.  V2 adds a domain-separated canonical payload and episode refs.
+    if has_robot_provenance:
+        digest.update(b"\0robot_asset\0")
+        digest.update(
+            json.dumps(robot_asset, sort_keys=True, separators=(",", ":")).encode()
+        )
     for record in sorted(dataset.records, key=lambda r: r.episode_id):
         digest.update(record.episode_id.encode())
         for key in ("seed", "robot", "scene", "policy"):
             digest.update(str(record.meta.get(key, "")).encode())
             digest.update(b"\0")
+        if has_robot_provenance:
+            for key in ("robot_asset_id", "robot_asset_sha256"):
+                digest.update(str(record.meta.get(key, "")).encode())
+                digest.update(b"\0")
         digest.update(str(record.success).encode())
         digest.update(np.asarray([record.final_door_angle], dtype=np.float64).tobytes())
         digest.update(str(record.failure_label).encode())
@@ -183,7 +204,12 @@ def validate_norm_stats(
         errors.append(
             f"norm stats action_space {stats.action_space!r} != dataset {dataset.action_space!r}"
         )
-    if stats.dataset_episode_ids != expected_ids:
+    if not stats.dataset_episode_ids:
+        errors.append(
+            "norm stats carry no dataset_episode_ids provenance; regenerate them "
+            "with the current fingerprint contract"
+        )
+    elif stats.dataset_episode_ids != expected_ids:
         errors.append("norm stats dataset_episode_ids do not match the dataset")
     if stats.train_episode_ids != expected_train:
         errors.append("norm stats train_episode_ids do not match the requested train split")
@@ -218,6 +244,7 @@ def validate_norm_stats(
 
 
 __all__ = [
+    "DATASET_FINGERPRINT_CONTRACT",
     "NORM_STATS_FILENAME",
     "STD_FLOOR",
     "DatasetNormStats",

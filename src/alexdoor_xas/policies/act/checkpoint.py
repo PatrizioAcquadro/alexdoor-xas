@@ -14,6 +14,8 @@ from typing import Any
 
 import torch
 
+from alexdoor_xas import paths
+from alexdoor_xas.assets.alex_v2_contract import RobotAssetRef
 from alexdoor_xas.dataset import DatasetNormStats, NormStats
 from alexdoor_xas.policies.act.config import ActModelCfg
 from alexdoor_xas.policies.act.model import ACTModel
@@ -29,6 +31,8 @@ class LoadedCheckpoint:
     config: dict[str, Any]
     stats: DatasetNormStats
     meta: dict[str, Any]
+    split_episode_ids: dict[str, tuple[str, ...]]
+    robot_asset: RobotAssetRef | None = None
 
     @property
     def action_space(self) -> str:
@@ -49,8 +53,13 @@ def save_checkpoint(
     config: dict[str, Any],
     stats: DatasetNormStats,
     meta: dict[str, Any] | None = None,
+    robot_asset: RobotAssetRef | None = None,
+    split_episode_ids: dict[str, list[str] | tuple[str, ...]] | None = None,
 ) -> Path:
     """Write a self-contained checkpoint; returns the written path."""
+    _validate_dataset_binding(config, stats)
+    if _is_v2_config(config) and robot_asset is None:
+        raise ValueError("Alex V2 checkpoints require robot asset provenance")
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -61,6 +70,8 @@ def save_checkpoint(
         "model_cfg": asdict(model.cfg),
         "config": config,
         "norm_stats": _stats_payload(stats),
+        "split_episode_ids": _split_payload(split_episode_ids),
+        "robot_asset": robot_asset.to_dict() if robot_asset is not None else None,
         "meta": {**(meta or {}), "torch_version": str(torch.__version__)},
     }
     torch.save(payload, path)
@@ -81,12 +92,57 @@ def load_checkpoint(path: str | Path, map_location: str = "cpu") -> LoadedCheckp
     )
     model.load_state_dict(payload["state_dict"])
     model.eval()
+    config = dict(payload["config"])
+    robot_asset = _asset_from_payload(payload.get("robot_asset"))
+    if _is_v2_config(config) and robot_asset is None:
+        raise ValueError("Alex V2 checkpoint is missing robot asset provenance")
     return LoadedCheckpoint(
         model=model,
-        config=dict(payload["config"]),
+        config=config,
         stats=_stats_from_payload(payload["norm_stats"]),
         meta=dict(payload["meta"]),
+        split_episode_ids=_split_from_payload(payload.get("split_episode_ids")),
+        robot_asset=robot_asset,
     )
+
+
+def _asset_from_payload(payload: Any) -> RobotAssetRef | None:
+    return None if payload is None else RobotAssetRef.from_dict(payload)
+
+
+def _split_payload(
+    split_episode_ids: dict[str, list[str] | tuple[str, ...]] | None,
+) -> dict[str, list[str]] | None:
+    if split_episode_ids is None:
+        return None
+    return {
+        name: [str(episode_id) for episode_id in split_episode_ids.get(name, ())]
+        for name in ("train", "val", "test")
+    }
+
+
+def _split_from_payload(payload: Any) -> dict[str, tuple[str, ...]]:
+    if not isinstance(payload, dict):
+        return {}
+    return {
+        name: tuple(str(episode_id) for episode_id in payload.get(name, ()))
+        for name in ("train", "val", "test")
+    }
+
+
+def _is_v2_config(config: dict[str, Any]) -> bool:
+    dataset = config.get("dataset")
+    return isinstance(dataset, dict) and dataset.get("task") == paths.ALEX_V2_TASK
+
+
+def _validate_dataset_binding(config: dict[str, Any], stats: DatasetNormStats) -> None:
+    dataset = config.get("dataset")
+    if not isinstance(dataset, dict):
+        raise ValueError("checkpoint config requires an embedded dataset mapping")
+    if dataset.get("space") != stats.action_space:
+        raise ValueError("checkpoint dataset action space does not match norm stats")
+    if dataset.get("obs_preset") != stats.obs_preset:
+        raise ValueError("checkpoint dataset observation preset does not match norm stats")
 
 
 def _stats_payload(stats: DatasetNormStats) -> dict[str, Any]:

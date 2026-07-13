@@ -68,7 +68,14 @@ def test_run_episode_succeeds_and_matches_schema() -> None:
     step = episode.steps[0]
     assert set(step.obs_ref) >= {"door_angle_rad", "ee_pos_x_m"}
     assert set(step.proprio) == {"ee_pos_w", "ee_quat_w_xyzw"}
-    assert set(step.object_state) == {"door_angle_rad", "door_angular_velocity_rad_s"}
+    assert set(step.object_state) == {
+        "door_angle_rad",
+        "door_angular_velocity_rad_s",
+        "door_yaw_rad",
+        "door_rel_pos_x",
+        "door_rel_pos_y",
+        "door_rel_pos_z",
+    }
     assert step.contact["source"] == "inferred_geometric"
     assert step.safety["controller_phase"] == "approach"
 
@@ -295,3 +302,249 @@ def test_reexport_replaces_the_version_dir(tmp_path) -> None:
     assert read_episode(a2_files[0]).meta.seed == 1
     a4_lines = (exported[A4_OBJ_CENTRIC_CHUNK] / "episodes.jsonl").read_text().splitlines()
     assert len(a4_lines) == 1
+
+
+# -- Local post-Phase 3.3 stabilization: door-pose obs, sanity, no-export --
+
+
+def test_door_pose_obs_terms_recorded_and_round_trip(tmp_path) -> None:
+    yaw = 0.7
+    origin = (1.0, -2.0, 0.5)
+    episode = run_episode(
+        FakeDoorPushEnv(yaw_rad=yaw, origin=origin),
+        plan_episodes(1, 0, 0)[0],
+        DataEngineCfg(door_pose_id="D3", door_yaw_rad=yaw),
+    )
+
+    step = episode.steps[0]
+    assert step.object_state["door_yaw_rad"] == pytest.approx(yaw)
+    # No robot_base_pos_w on the proxy fake -> relative to the world origin.
+    assert step.object_state["door_rel_pos_x"] == pytest.approx(origin[0])
+    assert step.object_state["door_rel_pos_y"] == pytest.approx(origin[1])
+    assert step.object_state["door_rel_pos_z"] == pytest.approx(origin[2])
+    assert episode.extras["door_pose_id"] == "D3"
+    assert episode.extras["engine_cfg"]["door_pose_id"] == "D3"
+    assert episode.extras["engine_cfg"]["door_yaw_rad"] == pytest.approx(yaw)
+
+    if importlib.util.find_spec("h5py") is None:
+        pytest.skip("h5py is not installed")
+    from alexdoor_xas.recording import write_episode
+
+    path = write_episode(episode, tmp_path)
+    loaded = read_episode(path)
+    loaded_step = loaded.steps[0]
+    assert loaded_step.object_state["door_yaw_rad"] == pytest.approx(yaw)
+    assert loaded_step.object_state["door_rel_pos_y"] == pytest.approx(origin[1])
+    assert loaded.extras["door_pose_id"] == "D3"
+
+
+@requires_h5py
+def test_a2_a3_exports_differ_under_posed_door_and_match_rotation(tmp_path) -> None:
+    """Problem-2 acceptance at unit level: yaw+translation separates A2 from A3.
+
+    A3 must equal R_z(yaw)^T applied per-vector to A2 (deltas are free
+    vectors: the door translation must not leak into the conversion), and at
+    the default orientation the two exports stay numerically identical even
+    with a translated door.
+    """
+    from alexdoor_xas.action.frames import rot_z
+
+    yaw = 0.7
+    episode = run_episode(
+        FakeDoorPushEnv(yaw_rad=yaw, origin=(1.0, -2.0, 0.5)),
+        plan_episodes(1, 0, 0)[0],
+        DataEngineCfg(),
+    )
+    exported = export_datasets([episode], tmp_path, version="vtest")
+    a2 = np.stack(
+        [s.action for s in read_episode(next(exported[A2_EE_DELTA].glob("*.hdf5"))).steps]
+    )
+    a3 = np.stack(
+        [s.action for s in read_episode(next(exported[A3_OBJ_REL_EE_DELTA].glob("*.hdf5"))).steps]
+    )
+    assert np.abs(a2[:, :3]).max() > 0  # the episode actually moved
+    assert np.abs(a2 - a3).max() > 1e-3  # numerically distinguishable
+    rot = rot_z(yaw)
+    np.testing.assert_allclose(a3[:, :3], a2[:, :3] @ rot, atol=1e-9)
+    np.testing.assert_allclose(a3[:, 3:], a2[:, 3:] @ rot, atol=1e-9)
+
+    # Default orientation + translated door: exports identical (rotation-only).
+    episode0 = run_episode(
+        FakeDoorPushEnv(yaw_rad=0.0, origin=(1.0, -2.0, 0.5)),
+        plan_episodes(1, 0, 0)[0],
+        DataEngineCfg(),
+    )
+    exported0 = export_datasets([episode0], tmp_path / "id", version="vtest")
+    b2 = np.stack(
+        [s.action for s in read_episode(next(exported0[A2_EE_DELTA].glob("*.hdf5"))).steps]
+    )
+    b3 = np.stack(
+        [s.action for s in read_episode(next(exported0[A3_OBJ_REL_EE_DELTA].glob("*.hdf5"))).steps]
+    )
+    np.testing.assert_allclose(b2, b3, atol=1e-12)
+
+
+@requires_h5py
+def test_run_baseline_writes_sanity_summary_and_respects_no_export(tmp_path) -> None:
+    from alexdoor_xas.data_engine import run_baseline
+
+    artifacts = run_baseline(
+        FakeForceDoorPushEnv(),
+        outputs_root=tmp_path / "outputs",
+        datasets_root=tmp_path / "datasets",
+        experiment="sanity",
+        run_id="run",
+        n_fixed=1,
+        n_randomized=0,
+        base_seed=0,
+        export=False,
+    )
+    assert artifacts.exports == {}
+    assert not (tmp_path / "datasets").exists()
+    assert artifacts.sanity is not None
+    assert artifacts.sanity["n_episodes_checked"] == 1
+    assert artifacts.sanity["n_episodes_with_errors"] == 0
+    summary = json.loads((artifacts.run_dir / "metrics" / "sanity.json").read_text())
+    assert summary["episodes"][0]["seed"] == 0
+    assert summary["episodes"][0]["errors"] == []
+
+
+@requires_h5py
+def test_run_baseline_aborts_loudly_before_export_on_sanity_error(tmp_path) -> None:
+    from alexdoor_xas.data_engine import run_baseline
+
+    class WindupEnv(FakeForceDoorPushEnv):
+        """Joint targets march far past tight limits -> hard sanity error."""
+
+        def robot_joint_limits(self):
+            limits = super().robot_joint_limits()
+            limits["joint_pos_limits"] = np.stack(
+                [np.full(self.N_JOINTS, -0.01), np.full(self.N_JOINTS, 0.01)], axis=1
+            )
+            return limits
+
+    with pytest.raises(RuntimeError, match="sanity checks failed"):
+        run_baseline(
+            WindupEnv(),
+            outputs_root=tmp_path / "outputs",
+            datasets_root=tmp_path / "datasets",
+            experiment="sanity",
+            run_id="bad",
+            n_fixed=1,
+            n_randomized=0,
+            base_seed=0,
+        )
+    # The summary is written for debugging, but nothing reached datasets/.
+    summary_path = tmp_path / "outputs" / "sanity" / "bad" / "metrics" / "sanity.json"
+    assert summary_path.exists()
+    assert json.loads(summary_path.read_text())["n_episodes_with_errors"] == 1
+    assert not (tmp_path / "datasets").exists()
+
+
+@requires_h5py
+def test_run_baseline_aborts_before_export_on_force_admission_error(tmp_path) -> None:
+    from alexdoor_xas.data_engine import run_baseline
+
+    class ForceSpikeEnv(FakeForceDoorPushEnv):
+        def _contact_force_n(self) -> float:
+            if self._ticks == 3:
+                return 500.0
+            return super()._contact_force_n()
+
+    with pytest.raises(RuntimeError, match="sanity checks failed"):
+        run_baseline(
+            ForceSpikeEnv(),
+            outputs_root=tmp_path / "outputs",
+            datasets_root=tmp_path / "datasets",
+            experiment="force_gate",
+            run_id="bad",
+            n_fixed=1,
+            n_randomized=0,
+            base_seed=0,
+            export=True,
+        )
+
+    summary_path = tmp_path / "outputs/force_gate/bad/metrics/sanity.json"
+    summary = json.loads(summary_path.read_text())
+    assert any(
+        "force admission limit" in error for error in summary["episodes"][0]["errors"]
+    )
+    assert not (tmp_path / "datasets").exists()
+
+
+@requires_h5py
+def test_run_baseline_aborts_before_export_on_negative_force(tmp_path, monkeypatch) -> None:
+    import dataclasses
+
+    from alexdoor_xas.data_engine import run_baseline
+    from alexdoor_xas.data_engine import runner as runner_module
+
+    original_run_episode = runner_module.run_episode
+
+    def run_episode_with_negative_force(*args, **kwargs):
+        episode = original_run_episode(*args, **kwargs)
+        contact = dict(episode.steps[3].contact)
+        contact["force_n"] = -1.0
+        episode.steps[3] = dataclasses.replace(episode.steps[3], contact=contact)
+        return episode
+
+    monkeypatch.setattr(runner_module, "run_episode", run_episode_with_negative_force)
+
+    with pytest.raises(RuntimeError, match="sanity checks failed"):
+        run_baseline(
+            FakeForceDoorPushEnv(),
+            outputs_root=tmp_path / "outputs",
+            datasets_root=tmp_path / "datasets",
+            experiment="negative_force_gate",
+            run_id="bad",
+            n_fixed=1,
+            n_randomized=0,
+            base_seed=0,
+            export=True,
+        )
+
+    summary_path = tmp_path / "outputs/negative_force_gate/bad/metrics/sanity.json"
+    summary = json.loads(summary_path.read_text())
+    entry = summary["episodes"][0]
+    assert any("force magnitude must be non-negative" in error for error in entry["errors"])
+    assert entry["force_diagnostics"]["min_force_n"] == -1.0
+    assert entry["force_diagnostics"]["negative_force_ticks"] == [3]
+    assert entry["force_diagnostics"]["force_admission_passed"] is False
+    assert not (tmp_path / "datasets").exists()
+
+
+@requires_h5py
+def test_run_baseline_refuses_direct_export_from_posed_runs(tmp_path) -> None:
+    """A posed run with export enabled would replace the official default-pose
+    dataset version; only the merged-export script may write multi-pose data."""
+    from alexdoor_xas.data_engine import run_baseline
+
+    with pytest.raises(RuntimeError, match="non-default door pose"):
+        run_baseline(
+            FakeForceDoorPushEnv(),
+            outputs_root=tmp_path / "outputs",
+            datasets_root=tmp_path / "datasets",
+            experiment="pose_guard",
+            run_id="bad",
+            n_fixed=1,
+            n_randomized=0,
+            base_seed=0,
+            engine_cfg=DataEngineCfg(door_pose_id="D1", door_yaw_rad=0.05),
+        )
+    assert not (tmp_path / "datasets").exists()
+    # export=False stays allowed for posed runs (the multi-pose flow).
+    artifacts = run_baseline(
+        FakeForceDoorPushEnv(),
+        outputs_root=tmp_path / "outputs",
+        datasets_root=tmp_path / "datasets",
+        experiment="pose_guard",
+        run_id="ok",
+        n_fixed=1,
+        n_randomized=0,
+        base_seed=0,
+        engine_cfg=DataEngineCfg(door_pose_id="D1", door_yaw_rad=0.05),
+        export=False,
+    )
+    assert artifacts.exports == {}
+    # Config provenance survives even for runs that would later abort.
+    assert (artifacts.run_dir / "logs" / "run_config.json").exists()

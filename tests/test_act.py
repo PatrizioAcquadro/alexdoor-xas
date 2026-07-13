@@ -28,7 +28,7 @@ from alexdoor_xas.policies.act.rollout_eval import (
     summarize_decision_warnings,
 )
 from alexdoor_xas.policies.act.train import make_seeded_model, train_act
-from alexdoor_xas.policies.scripted import ALEX_VARIATION_BOUNDS
+from alexdoor_xas.policies.scripted import VariationBounds
 from alexdoor_xas.tracking import WandbConfig, start_wandb_run
 from conftest import FakeDoorPushEnv, FakeForceDoorPushEnv
 
@@ -187,7 +187,12 @@ def test_checkpoint_round_trip_preserves_predictions_and_stats(tmp_path) -> None
     config = {"dataset": {"space": "A2_ee_delta", "obs_preset": "core"}}
 
     path = save_checkpoint(
-        tmp_path / "ckpt" / "best.pt", model, config, stats, meta={"epoch": 3}
+        tmp_path / "ckpt" / "best.pt",
+        model,
+        config,
+        stats,
+        meta={"epoch": 3},
+        split_episode_ids={"train": ["ep0"], "val": ["ep1"], "test": ["ep2"]},
     )
     loaded = load_checkpoint(path)
 
@@ -205,6 +210,17 @@ def test_checkpoint_round_trip_preserves_predictions_and_stats(tmp_path) -> None
         np.testing.assert_array_equal(getattr(loaded.stats.obs, name), getattr(stats.obs, name))
     assert loaded.stats.train_episode_ids == stats.train_episode_ids
     assert loaded.stats.dataset_fingerprint == stats.dataset_fingerprint
+    assert loaded.split_episode_ids == {
+        "train": ("ep0",),
+        "val": ("ep1",),
+        "test": ("ep2",),
+    }
+
+
+def test_checkpoint_creation_rejects_config_stats_preset_mismatch(tmp_path) -> None:
+    config = {"dataset": {"space": "A2_ee_delta", "obs_preset": "core_door_pose"}}
+    with pytest.raises(ValueError, match="observation preset"):
+        save_checkpoint(tmp_path / "bad.pt", _tiny_model(), config, _tiny_stats())
 
 
 def test_checkpoint_rejects_unknown_format(tmp_path) -> None:
@@ -234,7 +250,8 @@ def test_train_act_overfits_a_constant_mapping() -> None:
     model = _tiny_model()
     batch = _constant_mapping_batch()
     cfg = ActTrainCfg(
-        epochs=200, batch_size=8, lr=1e-3, kl_weight=1.0, seed=0, val_every=50
+        epochs=200, batch_size=8, lr=1e-3, kl_weight=1.0, seed=0, val_every=50,
+        device="cpu",
     )
 
     history = train_act(
@@ -255,7 +272,7 @@ def test_train_act_overfits_a_constant_mapping() -> None:
 def test_train_act_callback_and_wandb_noop_logging() -> None:
     model = _tiny_model()
     batch = _constant_mapping_batch()
-    cfg = ActTrainCfg(epochs=3, batch_size=8, lr=1e-3, val_every=1)
+    cfg = ActTrainCfg(epochs=3, batch_size=8, lr=1e-3, val_every=1, device="cpu")
     events: list[tuple[int, bool]] = []
 
     with start_wandb_run(WandbConfig(mode="disabled")) as run:
@@ -279,7 +296,7 @@ def test_train_act_callback_and_wandb_noop_logging() -> None:
 
 def test_train_act_rejects_empty_batch_factory() -> None:
     model = _tiny_model()
-    cfg = ActTrainCfg(epochs=1)
+    cfg = ActTrainCfg(epochs=1, device="cpu")
     with pytest.raises(ValueError, match="no batches"):
         train_act(model, make_train_batches=lambda epoch: [], cfg=cfg)
 
@@ -406,6 +423,55 @@ def test_build_env_obs_rejects_presets_without_live_reader() -> None:
         build_env_obs(env, "alex_full")
 
 
+def test_build_env_obs_core_door_pose_matches_dataset_ordering() -> None:
+    """Live core_door_pose reader parity with the recorded dataset preset."""
+    from alexdoor_xas.data_engine import DataEngineCfg, plan_episodes, run_episode
+    from alexdoor_xas.dataset import obs_matrix
+    from alexdoor_xas.dataset.loader import EpisodeRecord
+
+    yaw = 0.45
+    origin = (0.8, -1.5, 0.4)
+
+    live_env = FakeDoorPushEnv(yaw_rad=yaw, origin=origin)
+    live_env.reset(seed=0)
+    live = build_env_obs(live_env, "core_door_pose")
+    assert live.shape == (14,)
+    np.testing.assert_allclose(live[9:12], origin, atol=1e-12)
+    np.testing.assert_allclose(live[12], np.sin(yaw), atol=1e-12)
+    np.testing.assert_allclose(live[13], np.cos(yaw), atol=1e-12)
+
+    # Same env recorded through the data engine: step-0 obs must match the
+    # live reader on a freshly reset env (both capture the pre-step state).
+    episode = run_episode(
+        FakeDoorPushEnv(yaw_rad=yaw, origin=origin),
+        plan_episodes(1, 0, 0)[0],
+        DataEngineCfg(),
+    )
+    obs = {}
+    for table in ("proprio", "object_state", "contact"):
+        for key, first in getattr(episode.steps[0], table).items():
+            if isinstance(first, str):
+                continue
+            obs[key] = np.asarray(
+                [getattr(step, table)[key] for step in episode.steps], dtype=np.float64
+            )
+    record = EpisodeRecord(
+        episode_id="parity",
+        action_space=episode.meta.action_space,
+        schema_version="phase2.v1",
+        meta=episode.meta.to_dict(),
+        t=np.array([step.t for step in episode.steps]),
+        actions=episode.stacked(lambda s: s.action),
+        obs=obs,
+        success=True,
+        final_door_angle=1.0,
+        failure_label=None,
+        extras=episode.extras,
+        buffer=episode,
+    )
+    np.testing.assert_allclose(obs_matrix(record, "core_door_pose")[0], live, atol=1e-9)
+
+
 # --- chunk source + adapter rollout (closed-loop smoke, no Isaac) -------------
 
 
@@ -522,6 +588,14 @@ def test_rollout_eval_warning_summary_and_aggregate() -> None:
     assert warnings["n_warnings"] == 2
     assert any("position limit" in message for message in warnings["warning_counts"])
     assert any("velocity exceeds" in message for message in warnings["warning_counts"])
+    assert warnings["warning_family_counts"] == {
+        "a2.joint_position_limit": 1,
+        "a2.joint_velocity_limit": 1,
+    }
+    assert {record["id"] for record in warnings["warning_records"]} == {
+        "a2.joint_position_limit",
+        "a2.joint_velocity_limit",
+    }
 
     rows = [
         {
@@ -544,6 +618,10 @@ def test_rollout_eval_warning_summary_and_aggregate() -> None:
             "n_rejected": 1,
             "n_warnings": 1,
             "warning_counts": {"synthetic warning": 1},
+            "warning_family_counts": {"test.synthetic": 1},
+            "warning_records": [
+                {"id": "test.synthetic", "message": "synthetic warning", "evidence": {}}
+            ],
         },
     ]
     aggregate = aggregate_rollout_rows(rows)
@@ -555,20 +633,31 @@ def test_rollout_eval_warning_summary_and_aggregate() -> None:
     assert aggregate["adapter"]["n_rejected"] == 1
     assert aggregate["adapter"]["n_warnings"] == 3
     assert aggregate["adapter"]["warning_counts"]["synthetic warning"] == 1
+    assert aggregate["adapter"]["warning_family_counts"] == {
+        "a2.joint_position_limit": 1,
+        "a2.joint_velocity_limit": 1,
+        "test.synthetic": 1,
+    }
 
 
 def test_seed_protocol_records_fixed_randomized_seeds_and_variation_bounds() -> None:
+    variation_bounds = VariationBounds(
+        start_offset_low=(-0.04, -0.06, -0.05),
+        start_offset_high=(0.06, 0.06, 0.05),
+        push_radius_frac_range=(0.32, 0.40),
+        push_height_m_range=(0.05, 0.18),
+    )
     protocol = seed_protocol(
         base_seed=100,
         episodes_fixed=2,
         episodes_randomized=3,
-        variation_bounds=ALEX_VARIATION_BOUNDS,
+        variation_bounds=variation_bounds,
     )
 
     assert protocol["fixed_seeds"] == [100, 101]
     assert protocol["randomized_seeds"] == [102, 103, 104]
     assert tuple(protocol["variation_bounds"]["push_radius_frac_range"]) == (
-        ALEX_VARIATION_BOUNDS.push_radius_frac_range
+        variation_bounds.push_radius_frac_range
     )
 
 

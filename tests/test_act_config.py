@@ -12,12 +12,12 @@ from alexdoor_xas.policies.act import ActConfigError, load_act_config
 def test_default_config_matches_yaml_defaults() -> None:
     cfg = load_act_config()
 
-    assert cfg.dataset.task == "door_push_alex"
+    assert cfg.dataset.task == "door_push_alex_v2"
     assert cfg.dataset.space == A2_EE_DELTA
-    assert cfg.dataset.version == "v0"
+    assert cfg.dataset.version == "v2_pose"
     assert cfg.dataset.obs_preset == "core"
     assert cfg.dataset.dataset_dir == (
-        paths.DATASETS_DIR / "door_push_alex" / A2_EE_DELTA / "v0"
+        paths.DATASETS_DIR / "door_push_alex_v2" / A2_EE_DELTA / "v2_pose"
     )
 
     assert cfg.model.chunk_size == 40
@@ -37,7 +37,7 @@ def test_default_config_matches_yaml_defaults() -> None:
     assert cfg.train.kl_weight == pytest.approx(10.0)
     assert cfg.train.grad_clip == pytest.approx(1.0)
     assert cfg.train.seed == 0
-    assert cfg.train.device == "cpu"
+    assert cfg.train.device == "cuda"
     assert cfg.train.val_every == 5
     assert cfg.train.overfit_episodes is None
 
@@ -52,6 +52,7 @@ def test_default_config_matches_yaml_defaults() -> None:
     assert cfg.rollout.success_angle_deg == pytest.approx(45.0)
     assert cfg.rollout.temporal_ensemble is False
     assert cfg.rollout.ensemble_m == pytest.approx(0.01)
+    assert cfg.rollout.policy_device == "cuda"
     assert cfg.rollout.reference_metrics is None
     assert cfg.rollout.matched_scripted_reference is False
 

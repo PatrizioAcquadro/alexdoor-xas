@@ -9,12 +9,18 @@ FSM and the data engine loop end-to-end.
 from __future__ import annotations
 
 import math
+import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 
-import numpy as np
+WORKTREE_SRC = Path(__file__).resolve().parents[1] / "src"
+if str(WORKTREE_SRC) not in sys.path:
+    sys.path.insert(0, str(WORKTREE_SRC))
 
-from alexdoor_xas.action.frames import ObjectFrame, rot_z
-from alexdoor_xas.policies.scripted import DoorPushControllerCfg
+import numpy as np  # noqa: E402
+
+from alexdoor_xas.action.frames import ObjectFrame, rot_z  # noqa: E402
+from alexdoor_xas.policies.scripted import DoorPushControllerCfg  # noqa: E402
 
 
 @dataclass

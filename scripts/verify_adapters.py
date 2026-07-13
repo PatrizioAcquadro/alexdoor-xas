@@ -2,7 +2,7 @@
 """Phase 3.1 verification gate: adapter-v1 executes A2/A3/A4 on the Alex env.
 
 Proves the adapter layer (``src/alexdoor_xas/adapters/``, docs/adapters.md) on
-``AlexDoor-DoorPush-Alex-v0``. Fails non-zero unless:
+``AlexDoor-DoorPush-AlexV2-v0``. Fails non-zero unless:
 
 - a fixed-seed scripted reference episode succeeds (door past the success
   threshold),
@@ -76,30 +76,33 @@ from alexdoor_xas.adapters import (  # noqa: E402
     rollout_chunks,
 )
 from alexdoor_xas.data_engine import DataEngineCfg, plan_episodes, run_episode  # noqa: E402
-from alexdoor_xas.data_engine.generate import ALEX_LIMITATIONS  # noqa: E402
-from alexdoor_xas.envs.door_task.door_push_alex_env_cfg import (  # noqa: E402
-    ALEX_ROBOT_TAG,
-    DoorPushAlexEnvCfg,
+from alexdoor_xas.envs.door_task.alex_v2_runtime import ALEX_V2_LIMITATIONS  # noqa: E402
+from alexdoor_xas.envs.door_task.door_push_alex_v2_env_cfg import (  # noqa: E402
+    ALEX_V2_ROBOT_TAG,
+    DoorPushAlexV2EnvCfg,
 )
-from alexdoor_xas.policies.scripted import alex_fixedbase_push_cfg  # noqa: E402
+from alexdoor_xas.policies.scripted import alex_v2_push_cfg  # noqa: E402
 
 EXPERIMENT = "verify_adapters"
 A4_MAX_TICKS = 2400
 
 
 def _make_env():
-    cfg = DoorPushAlexEnvCfg()
+    cfg = DoorPushAlexV2EnvCfg()
     cfg.seed = args.seed
     cfg.sim.device = args.device
-    return gym.make(door_task.DOOR_PUSH_ALEX_ENV_ID, cfg=cfg).unwrapped
+    return gym.make(door_task.DOOR_PUSH_ALEX_V2_ENV_ID, cfg=cfg).unwrapped
 
 
 def _reference_episode(env):
     engine_cfg = DataEngineCfg(
-        task="door_push_alex", robot=ALEX_ROBOT_TAG, limitations=ALEX_LIMITATIONS
+        task=paths.ALEX_V2_TASK,
+        robot=ALEX_V2_ROBOT_TAG,
+        limitations=ALEX_V2_LIMITATIONS,
     )
     item = plan_episodes(1, 0, args.seed)[0]
-    episode = run_episode(env, item, engine_cfg, controller_cfg=alex_fixedbase_push_cfg())
+    controller_cfg = alex_v2_push_cfg(env.alex_v2_calibration())
+    episode = run_episode(env, item, engine_cfg, controller_cfg=controller_cfg)
     if not episode.outcome.success:
         raise RuntimeError(
             f"reference scripted episode must succeed; "
@@ -109,8 +112,14 @@ def _reference_episode(env):
     return episode
 
 
-def _fresh_adapters():
-    a2 = A2Adapter(limits_for_robot(ALEX_ROBOT_TAG))
+def _fresh_adapters(env):
+    center_w = env.shoulder_position_world_m()[0].detach().cpu().numpy()
+    limits = limits_for_robot(
+        ALEX_V2_ROBOT_TAG,
+        calibration=env.alex_v2_calibration(),
+        workspace_center_w=center_w,
+    )
+    a2 = A2Adapter(limits)
     a3 = A3Adapter(a2)
     return a2, a3, A4Adapter(a3)
 
@@ -150,7 +159,7 @@ def _assert_a4_execution(env, episode, success_angle_rad: float, out_dir):
         raise RuntimeError("reference chunk log has no push chunk with positive hinge delta")
 
     env.reset(seed=args.seed)
-    _, _, a4 = _fresh_adapters()
+    _, _, a4 = _fresh_adapters(env)
     result = a4.execute(env, chunks, max_ticks=A4_MAX_TICKS)
     (out_dir / "a4_execution.json").write_text(json.dumps(result.to_dict(), indent=2) + "\n")
 
@@ -207,7 +216,7 @@ def _assert_rejected_a4_case(env, out_dir, artifact_name: str, chunk, reason_sub
     env.reset(seed=args.seed)
     angle_before = _hinge_angle(env)
     ee_before = _ee_pos_w(env)
-    _, _, a4 = _fresh_adapters()
+    _, _, a4 = _fresh_adapters(env)
     result = a4.execute(env, chunk)
     (out_dir / f"{artifact_name}.json").write_text(json.dumps(result.to_dict(), indent=2) + "\n")
 
@@ -307,11 +316,11 @@ def main() -> int:
         )
 
         actions_world = [step.action for step in episode.steps]
-        a2, _, _ = _fresh_adapters()
+        a2, _, _ = _fresh_adapters(env)
         _assert_replay(env, episode, actions_world, a2, "a2_replay", out_dir)
 
         actions_door = list(np.asarray(episode.extras["action_door_frame"]))
-        _, a3, _ = _fresh_adapters()
+        _, a3, _ = _fresh_adapters(env)
         _assert_replay(env, episode, actions_door, a3, "a3_replay", out_dir)
 
         success_angle = DataEngineCfg().success_angle_rad

@@ -27,6 +27,13 @@ FORCE_WARN_N = 200.0
 """Contact-force warning threshold: measured gate pushes peak at tens of newtons
 against the 25 kg damped door; hundreds indicate a jammed or unstable contact."""
 
+FORCE_DATASET_LIMIT_N = FORCE_WARN_N
+"""Hard Stage 3/Stage 4 admission limit, intentionally equal to the warning threshold.
+
+General diagnostic callers still receive a warning by default. Calibration and dataset
+writers opt into a hard error at this same value; they may not raise it to admit a run.
+"""
+
 SETTLE_TICKS = 30
 """Velocity checks skip this initial window (0.5 s at control_dt = 1/60): the
 position-held legs spike for the first ~16 ticks after reset while the PD
@@ -60,11 +67,185 @@ class SanityResult:
         return not self.errors
 
 
+def contact_force_diagnostics(
+    episode: EpisodeBuffer,
+    *,
+    force_limit_n: float = FORCE_DATASET_LIMIT_N,
+    window_radius: int = 3,
+) -> dict:
+    """Return bounded, JSON-able evidence for one episode's force admission.
+
+    Force is sampled before the current step's action is applied, so
+    ``causal_action_phase`` and ``causal_action_world`` intentionally refer to
+    tick ``t-1``. The current tick carries the resulting pose, door state,
+    joint state, contact state, and filtered force.
+    """
+
+    limit = float(force_limit_n)
+    if not np.isfinite(limit) or limit <= 0.0:
+        raise ValueError("force_limit_n must be finite and positive")
+    if isinstance(window_radius, bool) or not isinstance(window_radius, int) or window_radius < 0:
+        raise ValueError("window_radius must be a non-negative integer")
+
+    # Terminal post-action sample (extras["terminal_contact"]): the response
+    # to the final executed action, recorded at loop exit. Episodes written
+    # before this extra existed report None (readable, but the terminal
+    # response is unverifiable for them).
+    terminal_raw = episode.extras.get("terminal_contact")
+    terminal: dict | None = None
+    terminal_admission_ok = True
+    if terminal_raw is not None:
+        terminal_force = float(terminal_raw.get("force_n", float("nan")))
+        terminal_finite = bool(np.isfinite(terminal_force))
+        terminal_within = terminal_finite and 0.0 <= terminal_force <= limit
+        terminal_admission_ok = terminal_within
+        terminal = {
+            "force_n": terminal_force,
+            "sensed": terminal_raw.get("sensed"),
+            "t_s": terminal_raw.get("t"),
+            "finite": terminal_finite,
+            "within_limit": terminal_within,
+            "passed": terminal_within,
+            "alignment": terminal_raw.get("alignment"),
+        }
+
+    forces = np.asarray(
+        [float(step.contact.get("force_n", 0.0)) for step in episode.steps],
+        dtype=np.float64,
+    )
+    if not forces.size:
+        return {
+            "all_forces_finite": True,
+            "min_force_n": None,
+            "min_force_tick": None,
+            "max_force_n": None,
+            "max_force_tick": None,
+            "force_limit_n": limit,
+            "upper_force_gate_passed": False,
+            "non_negative_force_gate_passed": False,
+            "force_admission_passed": False,
+            "non_finite_force_ticks": [],
+            "negative_force_ticks": [],
+            "ticks_over_limit": [],
+            "one_tick_over_limit": False,
+            "sustained_over_limit": False,
+            "peak": None,
+            "window": [],
+            "terminal": terminal,
+            "ik_clamp_telemetry": episode.extras.get("ik_clamp_telemetry"),
+        }
+
+    finite = np.isfinite(forces)
+    has_finite = bool(finite.any())
+    safe_for_argmax = np.where(finite, forces, -np.inf)
+    safe_for_argmin = np.where(finite, forces, np.inf)
+    peak_tick = int(np.argmax(safe_for_argmax)) if has_finite else None
+    minimum_tick = int(np.argmin(safe_for_argmin)) if has_finite else None
+    non_finite_ticks = np.flatnonzero(~finite).astype(int).tolist()
+    negative_ticks = np.flatnonzero(finite & (forces < 0.0)).astype(int).tolist()
+    over_limit = np.flatnonzero(finite & (forces > limit)).astype(int).tolist()
+    sustained = any(
+        current == previous + 1
+        for previous, current in zip(over_limit, over_limit[1:], strict=False)
+    )
+    arm_ids = [int(value) for value in episode.extras.get("arm_joint_ids", [])]
+    joint_names = [str(value) for value in episode.extras.get("joint_names", [])]
+
+    def joint_name(index: int) -> str:
+        return joint_names[index] if index < len(joint_names) else f"joint[{index}]"
+
+    def sample(tick: int) -> dict:
+        step = episode.steps[tick]
+        causal_tick = tick - 1
+        causal_step = episode.steps[causal_tick] if causal_tick >= 0 else None
+        proprio = step.proprio
+
+        def arm_values(key: str) -> dict[str, float] | None:
+            if key not in proprio or not arm_ids:
+                return None
+            values = np.asarray(proprio[key], dtype=np.float64).reshape(-1)
+            return {joint_name(index): float(values[index]) for index in arm_ids}
+
+        return {
+            "tick": tick,
+            "t_s": float(step.t),
+            "force_n": float(forces[tick]),
+            "contact_sensed": step.contact.get("sensed"),
+            "contact_inferred": step.contact.get("inferred"),
+            "recorded_phase": str(step.safety.get("controller_phase", "")),
+            "causal_action_tick": causal_tick if causal_step is not None else None,
+            "causal_action_phase": (
+                str(causal_step.safety.get("controller_phase", ""))
+                if causal_step is not None
+                else None
+            ),
+            "causal_action_world": (
+                np.asarray(causal_step.action, dtype=np.float64).tolist()
+                if causal_step is not None
+                else None
+            ),
+            "tool_position_world_m": (
+                np.asarray(proprio["ee_pos_w"], dtype=np.float64).tolist()
+                if "ee_pos_w" in proprio
+                else None
+            ),
+            "tool_orientation_world_xyzw": (
+                np.asarray(proprio["ee_quat_w_xyzw"], dtype=np.float64).tolist()
+                if "ee_quat_w_xyzw" in proprio
+                else None
+            ),
+            "door_angle_rad": step.object_state.get("door_angle_rad"),
+            "door_angular_velocity_rad_s": step.object_state.get(
+                "door_angular_velocity_rad_s"
+            ),
+            "arm_joint_pos_rad": arm_values("joint_pos"),
+            "arm_joint_vel_rad_s": arm_values("joint_vel"),
+            "arm_joint_target_rad": arm_values("joint_pos_target"),
+        }
+
+    if peak_tick is None:
+        window = []
+        peak = None
+    else:
+        start = max(0, peak_tick - window_radius)
+        stop = min(len(episode.steps), peak_tick + window_radius + 1)
+        window = [sample(tick) for tick in range(start, stop)]
+        peak = window[peak_tick - start]
+    return {
+        "all_forces_finite": bool(finite.all()),
+        "min_force_n": None if minimum_tick is None else float(forces[minimum_tick]),
+        "min_force_tick": minimum_tick,
+        "max_force_n": None if peak_tick is None else float(forces[peak_tick]),
+        "max_force_tick": peak_tick,
+        "force_limit_n": limit,
+        "upper_force_gate_passed": bool(finite.all() and not over_limit),
+        "non_negative_force_gate_passed": bool(finite.all() and not negative_ticks),
+        # Admission covers the response to *every* executed action: all
+        # per-step (pre-action) samples plus the terminal post-action sample.
+        "force_admission_passed": bool(
+            finite.all()
+            and not negative_ticks
+            and not over_limit
+            and terminal_admission_ok
+        ),
+        "non_finite_force_ticks": non_finite_ticks,
+        "negative_force_ticks": negative_ticks,
+        "ticks_over_limit": over_limit,
+        "one_tick_over_limit": len(over_limit) == 1,
+        "sustained_over_limit": sustained,
+        "peak": peak,
+        "window": window,
+        "terminal": terminal,
+        "ik_clamp_telemetry": episode.extras.get("ik_clamp_telemetry"),
+    }
+
+
 def check_alex_episode(
     episode: EpisodeBuffer,
     *,
     max_arm_joint_vel_rad_s: float = MAX_ARM_JOINT_VEL_RAD_S,
     force_warn_n: float = FORCE_WARN_N,
+    force_error_n: float | None = None,
     limit_margin_rad: float = LIMIT_MARGIN_RAD,
     limit_error_rad: float = LIMIT_ERROR_RAD,
     settle_ticks: int = SETTLE_TICKS,
@@ -78,6 +259,8 @@ def check_alex_episode(
     ``limit_error_rad``] band (unclamped diff-IK drift while the drive sits at
     the limit), post-settle arm joint velocity above
     ``max_arm_joint_vel_rad_s``, sensed contact force above ``force_warn_n``.
+    When ``force_error_n`` is provided, exceeding it is a hard admission error;
+    calibration and dataset writers use the unchanged 200 N threshold this way.
     Velocity checks skip the first ``settle_ticks`` ticks (reset transient of
     the position-held joints); finiteness and target-limit checks cover every
     tick.
@@ -162,22 +345,61 @@ def check_alex_episode(
             f"{label}: contact source must be {CONTACT_SOURCE_FORCE!r}, got {source!r}"
         )
 
-    forces = np.array(
-        [float(s.contact.get("force_n", 0.0)) for s in episode.steps], dtype=np.float64
-    )
-    if not np.isfinite(forces).all():
+    force_limit = force_warn_n if force_error_n is None else force_error_n
+    force_evidence = contact_force_diagnostics(episode, force_limit_n=force_limit)
+    if not force_evidence["all_forces_finite"]:
         result.errors.append(f"{label}: non-finite contact force values")
-    elif forces.size and float(forces.max()) > force_warn_n:
-        peak_tick = int(np.argmax(forces))
-        result.warnings.append(
-            f"{label}: contact force spiked to {float(forces.max()):.1f} N at tick "
-            f"{peak_tick} (warn threshold {force_warn_n:.0f} N)"
+    if force_evidence["negative_force_ticks"]:
+        result.errors.append(
+            f"{label}: contact force magnitude must be non-negative: "
+            f"{force_evidence['min_force_n']:.1f} N at tick "
+            f"{force_evidence['min_force_tick']} "
+            f"(negative ticks {force_evidence['negative_force_ticks'][:5]})"
         )
+    if force_error_n is not None and force_evidence["ticks_over_limit"]:
+        result.errors.append(
+            f"{label}: contact force exceeded the {force_error_n:.0f} N force admission "
+            f"limit: {force_evidence['max_force_n']:.1f} N at tick "
+            f"{force_evidence['max_force_tick']}"
+        )
+    elif (
+        force_evidence["max_force_n"] is not None
+        and force_evidence["max_force_n"] > force_warn_n
+    ):
+        result.warnings.append(
+            f"{label}: contact force spiked to {force_evidence['max_force_n']:.1f} N at tick "
+            f"{force_evidence['max_force_tick']} (warn threshold {force_warn_n:.0f} N)"
+        )
+
+    # Terminal post-action sample: the response to the final executed action.
+    # Absent on episodes recorded before the extra existed (still readable);
+    # when present it is held to the same finiteness/bounds as per-step samples.
+    terminal = force_evidence["terminal"]
+    if terminal is not None:
+        if not terminal["finite"]:
+            result.errors.append(f"{label}: terminal contact force is non-finite")
+        elif terminal["force_n"] < 0.0:
+            result.errors.append(
+                f"{label}: terminal contact force magnitude must be non-negative "
+                f"({terminal['force_n']:.1f} N)"
+            )
+        elif force_error_n is not None and terminal["force_n"] > force_error_n:
+            result.errors.append(
+                f"{label}: terminal contact force (response to the final executed "
+                f"action) exceeded the {force_error_n:.0f} N force admission limit: "
+                f"{terminal['force_n']:.1f} N"
+            )
+        elif terminal["force_n"] > force_warn_n:
+            result.warnings.append(
+                f"{label}: terminal contact force spiked to {terminal['force_n']:.1f} N "
+                f"(warn threshold {force_warn_n:.0f} N)"
+            )
 
     return result
 
 
 __all__ = [
+    "FORCE_DATASET_LIMIT_N",
     "FORCE_WARN_N",
     "LIMIT_ERROR_RAD",
     "LIMIT_MARGIN_RAD",
@@ -185,4 +407,5 @@ __all__ = [
     "SETTLE_TICKS",
     "SanityResult",
     "check_alex_episode",
+    "contact_force_diagnostics",
 ]

@@ -3,7 +3,7 @@
 
 Requires trained checkpoints (from ``scripts/train_act.py``) the same way the
 dataset gate requires exported datasets. Per checkpoint (A2 required, A3
-optional) on ``AlexDoor-DoorPush-Alex-v0``: one fixed-seed rollout and one
+optional) on ``AlexDoor-DoorPush-AlexV2-v0``: one fixed-seed rollout and one
 randomized-start rollout through the matching adapter must complete within the
 tick budget with every command logged and no crash, and the fixed-seed rollout
 must open the door past the success threshold — the Phase 3.2 claim that
@@ -61,31 +61,34 @@ from alexdoor_xas.adapters import (  # noqa: E402
     read_door_frame,
     rollout_chunks,
 )
+from alexdoor_xas.assets.alex_v2_contract import RobotAssetRef  # noqa: E402
 from alexdoor_xas.data_engine import DataEngineCfg, apply_start_offset, plan_episodes  # noqa: E402
-from alexdoor_xas.envs.door_task.door_push_alex_env_cfg import (  # noqa: E402
-    ALEX_ROBOT_TAG,
-    DoorPushAlexEnvCfg,
+from alexdoor_xas.envs.door_task.door_push_alex_v2_env_cfg import (  # noqa: E402
+    ALEX_V2_ROBOT_TAG,
+    DoorPushAlexV2EnvCfg,
 )
-from alexdoor_xas.policies.act.policy import (  # noqa: E402
-    ActPolicy,
-    act_chunk_source,
-    stop_on_hinge_angle,
-)
-from alexdoor_xas.policies.scripted import ALEX_VARIATION_BOUNDS  # noqa: E402
+from alexdoor_xas.policies.act.policy import ActPolicy, act_chunk_source  # noqa: E402
+from alexdoor_xas.policies.scripted import alex_v2_variation_bounds  # noqa: E402
 
 EXPERIMENT = "verify_act_rollout"
 EXPECTED_SPACES = {"a2": A2_EE_DELTA, "a3": A3_OBJ_REL_EE_DELTA}
 
 
 def _make_env():
-    cfg = DoorPushAlexEnvCfg()
+    cfg = DoorPushAlexV2EnvCfg()
     cfg.seed = args.seed
     cfg.sim.device = args.device
-    return gym.make(door_task.DOOR_PUSH_ALEX_ENV_ID, cfg=cfg).unwrapped
+    return gym.make(door_task.DOOR_PUSH_ALEX_V2_ENV_ID, cfg=cfg).unwrapped
 
 
-def _adapter_for(action_space: str):
-    a2 = A2Adapter(limits_for_robot(ALEX_ROBOT_TAG))
+def _adapter_for(action_space: str, env):
+    center_w = env.shoulder_position_world_m()[0].detach().cpu().numpy()
+    limits = limits_for_robot(
+        ALEX_V2_ROBOT_TAG,
+        calibration=env.alex_v2_calibration(),
+        workspace_center_w=center_w,
+    )
+    a2 = A2Adapter(limits, contact_entry_shaping=True)
     return a2 if action_space == A2_EE_DELTA else A3Adapter(a2)
 
 
@@ -93,14 +96,19 @@ def _rollout(env, policy, seed: int, variation) -> dict:
     env.reset(seed=seed)
     if variation is not None:
         apply_start_offset(env, read_door_frame(env), variation)
-    adapter = _adapter_for(policy.action_space)
-    # Rollouts end at the first chunk boundary past the success angle: the
-    # demos terminate with the FSM, so post-task extrapolation is unbounded
-    # (a wandering arm can knock the open door shut again).
-    source = stop_on_hinge_angle(
-        act_chunk_source(policy, env), DataEngineCfg().success_angle_rad
+    adapter = _adapter_for(policy.action_space, env)
+    # Per-tick success semantics (shared with the eval scripts): the driver
+    # checks the hinge threshold after every executed control tick and stops
+    # at the first crossing — post-task extrapolation is out of distribution.
+    result = rollout_chunks(
+        env,
+        act_chunk_source(policy, env),
+        adapter,
+        max_ticks=args.max_ticks,
+        success_angle_rad=DataEngineCfg().success_angle_rad,
     )
-    result = rollout_chunks(env, source, adapter, max_ticks=args.max_ticks)
+    if result.env_truncated:
+        raise RuntimeError(f"rollout hit env truncation at tick {result.n_ticks}")
 
     if result.n_ticks == 0 or result.n_ticks > args.max_ticks:
         raise RuntimeError(f"rollout ran {result.n_ticks} ticks (budget {args.max_ticks})")
@@ -113,6 +121,7 @@ def _rollout(env, policy, seed: int, variation) -> dict:
     return {
         "seed": seed,
         "randomized": variation is not None,
+        "robot_compatibility_label": policy.robot_compatibility_label,
         "final_angle_rad": result.final_angle_rad,
         "door_angle_change_rad": result.door_angle_change_rad,
         "n_ticks": result.n_ticks,
@@ -124,7 +133,8 @@ def _rollout(env, policy, seed: int, variation) -> dict:
 
 
 def _check_checkpoint(env, label: str, checkpoint: str, out_dir) -> None:
-    policy = ActPolicy.from_checkpoint(paths.REPO_ROOT / checkpoint)
+    runtime_asset = RobotAssetRef.from_dict(env.robot_asset_provenance())
+    policy = ActPolicy.from_checkpoint(paths.REPO_ROOT / checkpoint, runtime_asset=runtime_asset)
     expected_space = EXPECTED_SPACES[label]
     if policy.action_space != expected_space:
         raise RuntimeError(
@@ -141,7 +151,8 @@ def _check_checkpoint(env, label: str, checkpoint: str, out_dir) -> None:
             f"threshold {math.degrees(success_angle):.1f} deg"
         )
 
-    item = plan_episodes(0, 1, args.seed + 1, ALEX_VARIATION_BOUNDS)[0]
+    bounds = alex_v2_variation_bounds(env.alex_v2_calibration())
+    item = plan_episodes(0, 1, args.seed + 1, bounds)[0]
     randomized = _rollout(env, policy, item.seed, item.variation)
     (out_dir / f"{label}_randomized.json").write_text(json.dumps(randomized, indent=2) + "\n")
 

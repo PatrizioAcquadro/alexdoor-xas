@@ -1,0 +1,90 @@
+{
+  "version": "v2_pose",
+  "description": "Door-task pose plan for the door_push_alex_v2 v2_pose dataset: 5 deterministic poses (yaw about the hinge axis plus world XY offset), probe-gated for Alex V2 reachability before generation. Per pose, one fixed-seed probe episode ran through the full calibrated stack (validated calibration 066e0a2d0157549a331b96702e643fd7626eed58d33bbe701005e111ed358948, IK40 right-arm PD, collision-offset tool point, filtered door-panel force) and had to succeed with zero sanity errors and full force admission. Pose k owns seed block [10k, 10k+9]: 2 fixed plus 8 randomized episodes.",
+  "generated_utc": "2026-07-10T22:30:00Z",
+  "seed_block_size": 10,
+  "episodes_fixed_per_pose": 2,
+  "episodes_randomized_per_pose": 8,
+  "overdraw_policy": "Scripted randomization has a small task-failure rate (controller phase timeouts). Failed draws are never silently included or hidden: they are skipped, reported in the manifest (skipped_episodes), and replaced in deterministic seed order from the pose's disjoint overdraw namespace (overdraw_base_seed + i, randomized draws), generated as a pose<id>_overdraw run. Overdraw seeds (500+) never collide with pose blocks (0-49) or the held-out evaluation seeds (100-119).",
+  "reachability_shell_m": [
+    0.2,
+    0.8
+  ],
+  "force_admission_policy": {
+    "min_contact_force_n": 0.0,
+    "max_contact_force_n": 200.0,
+    "note": "Every recorded control-tick force sample must be finite and within [0, 200] N; enforced as a hard sanity error at generation time and re-checked before merged export."
+  },
+  "poses": [
+    {
+      "pose_id": "D0",
+      "door_yaw_deg": 0.0,
+      "door_yaw_rad": 0.0,
+      "door_offset_x_m": 0.0,
+      "door_offset_y_m": 0.0,
+      "base_seed": 0,
+      "probe": {
+        "result": "PASS",
+        "source": "verify_alex_v2_door_baseline.py fixed + 5 randomized episodes (all success) and alex_v2_smoke 2-fixed-episode run (2/2 success, 60.7 deg mean)",
+        "peak_contact_force_n": 100.29
+      },
+      "overdraw_base_seed": 500
+    },
+    {
+      "pose_id": "D1",
+      "door_yaw_deg": 2.8648,
+      "door_yaw_rad": 0.05,
+      "door_offset_x_m": 0.02,
+      "door_offset_y_m": 0.0,
+      "base_seed": 10,
+      "probe": {
+        "result": "PASS",
+        "source": "alex_v2_pose_probe/probeD1 fixed episode seed 10: success, 0 sanity errors, force admission passed",
+        "peak_contact_force_n": 58.42
+      },
+      "overdraw_base_seed": 510
+    },
+    {
+      "pose_id": "D2",
+      "door_yaw_deg": -2.8648,
+      "door_yaw_rad": -0.05,
+      "door_offset_x_m": 0.0,
+      "door_offset_y_m": -0.02,
+      "base_seed": 20,
+      "probe": {
+        "result": "PASS",
+        "source": "alex_v2_pose_probe/probeD2 fixed episode seed 20: success, 0 sanity errors, force admission passed",
+        "peak_contact_force_n": 64.51
+      },
+      "overdraw_base_seed": 520
+    },
+    {
+      "pose_id": "D3",
+      "door_yaw_deg": 5.7296,
+      "door_yaw_rad": 0.1,
+      "door_offset_x_m": 0.02,
+      "door_offset_y_m": 0.02,
+      "base_seed": 30,
+      "probe": {
+        "result": "PASS",
+        "source": "alex_v2_pose_probe/probeD3 fixed episode seed 30: success, 0 sanity errors, force admission passed",
+        "peak_contact_force_n": 55.91
+      },
+      "overdraw_base_seed": 530
+    },
+    {
+      "pose_id": "D4",
+      "door_yaw_deg": -5.7296,
+      "door_yaw_rad": -0.1,
+      "door_offset_x_m": 0.02,
+      "door_offset_y_m": -0.02,
+      "base_seed": 40,
+      "probe": {
+        "result": "PASS",
+        "source": "alex_v2_pose_probe/probeD4 fixed episode seed 40: success, 0 sanity errors, force admission passed",
+        "peak_contact_force_n": 61.58
+      },
+      "overdraw_base_seed": 540
+    }
+  ]
+}

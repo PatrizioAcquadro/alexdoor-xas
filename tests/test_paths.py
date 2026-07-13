@@ -27,21 +27,24 @@ def test_required_assets_exist() -> None:
     assert not missing, f"missing required assets: {missing}"
 
 
-def test_urdf_for_variants() -> None:
-    assert paths.urdf_for("fullbody") == paths.ALEX_URDF
-    assert paths.urdf_for("fullbody_fullcollisions") == paths.ALEX_URDF_FULLBODY_FULLCOLL
-    assert paths.urdf_for("nub") == paths.ALEX_URDF_NUB
+def test_alex_v2_path_surface_uses_the_static_standard_asset() -> None:
+    assert paths.ALEX_V2_URDF == paths.ALEX_V2_ASSET_ROOT / "urdf" / "alex_v2.urdf"
+    assert paths.iter_alex_v2_assets() == [
+        ("Alex V2 asset root", paths.ALEX_V2_ASSET_ROOT, True),
+        ("Alex V2 URDF", paths.ALEX_V2_URDF, True),
+    ]
+    assert not hasattr(paths, "ALEX_V2_BRIDGE_ROOT")
+    assert not hasattr(paths, "IHMC_ALEX_SDK_ROOT")
 
 
 def test_assets_module_imports_without_isaac() -> None:
-    mod = importlib.import_module("alexdoor_xas.assets.alex")
-    assert hasattr(mod, "resolve_alex_urdf")
-    assert hasattr(mod, "load_alex_articulation_cfg")
+    mod = importlib.import_module("alexdoor_xas.assets")
+    assert hasattr(mod, "build_alex_v2_door_asset")
+    assert hasattr(mod, "load_alex_v2_articulation_cfg")
 
 
-def test_resolve_alex_urdf_flattens_package_paths() -> None:
-    from alexdoor_xas.assets.alex import resolve_alex_urdf
-
-    out = Path(resolve_alex_urdf("fullbody"))
-    assert out.is_file()
-    assert "package://" not in out.read_text()
+def test_alex_v2_urdf_is_the_required_registered_asset() -> None:
+    registered = {path for _name, path, required in paths.iter_assets() if required}
+    assert paths.ALEX_V2_ASSET_ROOT in registered
+    assert paths.ALEX_V2_URDF in registered
+    assert Path(paths.ALEX_V2_URDF).is_file()

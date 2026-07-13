@@ -37,9 +37,9 @@ class ActConfigError(ValueError):
 class ActDatasetCfg:
     """Which frozen dataset export the trainer consumes."""
 
-    task: str = "door_push_alex"
+    task: str = "door_push_alex_v2"
     space: str = A2_EE_DELTA
-    version: str = "v0"
+    version: str = "v2_pose"
     obs_preset: str = "core"
 
     @property
@@ -73,7 +73,7 @@ class ActTrainCfg:
     kl_weight: float = 10.0
     grad_clip: float = 1.0
     seed: int = 0
-    device: str = "cpu"
+    device: str = "cuda"
     val_every: int = 5
     overfit_episodes: int | None = None
 
@@ -98,8 +98,13 @@ class ActRolloutCfg:
     success_angle_deg: float = 45.0
     temporal_ensemble: bool = False
     ensemble_m: float = 0.01
+    policy_device: str = "cuda"
     reference_metrics: str | None = None
     matched_scripted_reference: bool = False
+    door_yaw_deg: float = 0.0
+    door_offset_x: float = 0.0
+    door_offset_y: float = 0.0
+    door_pose_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -194,8 +199,8 @@ def _build_dataset_cfg(node: dict[str, Any]) -> ActDatasetCfg:
             f"dataset.obs_preset must be one of {sorted(OBS_PRESETS)}, got {obs_preset!r}"
         )
 
-    task = _required_str("dataset.task", node.get("task", "door_push_alex"))
-    version = _required_str("dataset.version", node.get("version", "v0"))
+    task = _required_str("dataset.task", node.get("task", "door_push_alex_v2"))
+    version = _required_str("dataset.version", node.get("version", "v2_pose"))
     return ActDatasetCfg(task=task, space=space, version=version, obs_preset=obs_preset)
 
 
@@ -306,11 +311,33 @@ def _build_rollout_cfg(node: dict[str, Any]) -> ActRolloutCfg:
         "success_angle_deg",
         "temporal_ensemble",
         "ensemble_m",
+        "policy_device",
         "reference_metrics",
         "matched_scripted_reference",
+        "door_yaw_deg",
+        "door_offset_x",
+        "door_offset_y",
+        "door_pose_id",
     }
     _reject_unknown("rollout", node, field_names)
     defaults = ActRolloutCfg()
+
+    door_yaw_deg = _coerce_float(
+        "rollout.door_yaw_deg", node.get("door_yaw_deg", defaults.door_yaw_deg)
+    )
+    door_offset_x = _coerce_float(
+        "rollout.door_offset_x", node.get("door_offset_x", defaults.door_offset_x)
+    )
+    door_offset_y = _coerce_float(
+        "rollout.door_offset_y", node.get("door_offset_y", defaults.door_offset_y)
+    )
+    for name, value in (
+        ("rollout.door_yaw_deg", door_yaw_deg),
+        ("rollout.door_offset_x", door_offset_x),
+        ("rollout.door_offset_y", door_offset_y),
+    ):
+        if not math.isfinite(value):
+            raise ActConfigError(f"{name} must be finite")
 
     episodes_fixed = _coerce_int(
         "rollout.episodes_fixed", node.get("episodes_fixed", defaults.episodes_fixed)
@@ -349,6 +376,9 @@ def _build_rollout_cfg(node: dict[str, Any]) -> ActRolloutCfg:
             node.get("temporal_ensemble", defaults.temporal_ensemble),
         ),
         ensemble_m=ensemble_m,
+        policy_device=_required_str(
+            "rollout.policy_device", node.get("policy_device", defaults.policy_device)
+        ),
         reference_metrics=_optional_str(
             "rollout.reference_metrics", node.get("reference_metrics")
         ),
@@ -356,6 +386,10 @@ def _build_rollout_cfg(node: dict[str, Any]) -> ActRolloutCfg:
             "rollout.matched_scripted_reference",
             node.get("matched_scripted_reference", defaults.matched_scripted_reference),
         ),
+        door_yaw_deg=door_yaw_deg,
+        door_offset_x=door_offset_x,
+        door_offset_y=door_offset_y,
+        door_pose_id=_optional_str("rollout.door_pose_id", node.get("door_pose_id")),
     )
 
 

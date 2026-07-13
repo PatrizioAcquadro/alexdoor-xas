@@ -29,6 +29,7 @@ from alexdoor_xas.dataset import (
     ChunkSampler,
     EpisodeDataset,
     compute_norm_stats,
+    dataset_fingerprint,
     episode_chunk_features,
     load_norm_stats,
     load_splits,
@@ -78,8 +79,15 @@ def _load_script(path: str):
 
 
 def _export(tmp_root, env_factory):
+    # Distinct start poses per seed: the fake env is deterministic, so equal
+    # fixed episodes would collapse into one content-equivalence group and the
+    # grouped split contract would (correctly) refuse to split them 3 ways.
     episodes = [
-        run_episode(env_factory(), plan_episodes(1, 0, seed)[0], DataEngineCfg())
+        run_episode(
+            env_factory(start_door_frame=(0.7, 0.2 + 0.005 * seed, 0.0)),
+            plan_episodes(1, 0, seed)[0],
+            DataEngineCfg(),
+        )
         for seed in range(N_EPISODES)
     ]
     return export_datasets(episodes, tmp_root, version="v0")
@@ -166,6 +174,60 @@ def test_alex_full_preset_requires_force_sensing_episodes(proxy_a2, alex_a2) -> 
         proxy_a2.obs(0, "alex_full")
     with pytest.raises(ValueError, match="unknown obs preset"):
         proxy_a2.obs(0, "nope")
+
+
+def test_frozen_presets_stay_bit_compatible() -> None:
+    """The Phase 3.0 preset freeze: key tuples must never change (additive-only)."""
+    from alexdoor_xas.dataset import OBS_PRESETS
+
+    assert OBS_PRESETS["core"] == (
+        "ee_pos_w",
+        "ee_quat_w_xyzw",
+        "door_angle_rad",
+        "door_angular_velocity_rad_s",
+    )
+    assert OBS_PRESETS["core_contact"] == OBS_PRESETS["core"] + ("contact_flag",)
+    assert OBS_PRESETS["alex_full"] == OBS_PRESETS["core"] + (
+        "joint_pos",
+        "joint_vel",
+        "force_n",
+        "sensed",
+    )
+
+
+def test_core_door_pose_preset_is_14dim_and_encodes_yaw(tmp_path) -> None:
+    yaw = 0.6
+    origin = (1.0, -2.0, 0.5)
+    episode = run_episode(
+        FakeDoorPushEnv(yaw_rad=yaw, origin=origin),
+        plan_episodes(1, 0, 0)[0],
+        DataEngineCfg(),
+    )
+    exported = export_datasets([episode], tmp_path, version="v0")
+    dataset = EpisodeDataset(exported[A2_EE_DELTA])
+    obs = dataset.obs(0, "core_door_pose")
+    assert obs.shape == (dataset[0].n_steps, 14)
+    assert np.isfinite(obs).all()
+    # First 9 dims identical to core; door-pose block is constant per episode.
+    np.testing.assert_array_equal(obs[:, :9], dataset.obs(0, "core"))
+    np.testing.assert_allclose(obs[:, 9:12], np.tile(origin, (obs.shape[0], 1)), atol=1e-12)
+    np.testing.assert_allclose(obs[:, 12], np.sin(yaw), atol=1e-12)
+    np.testing.assert_allclose(obs[:, 13], np.cos(yaw), atol=1e-12)
+
+
+def test_core_door_pose_preset_fails_clearly_on_old_episodes(alex_a2) -> None:
+    """Episodes recorded before the door-pose terms existed must be rejected."""
+    import dataclasses
+
+    record = alex_a2[0]
+    stripped_obs = {
+        key: value
+        for key, value in record.obs.items()
+        if not key.startswith("door_rel_pos") and key != "door_yaw_rad"
+    }
+    old_record = dataclasses.replace(record, obs=stripped_obs)
+    with pytest.raises(ValueError, match="core_door_pose"):
+        obs_matrix(old_record, "core_door_pose")
 
 
 # ── A4 ────────────────────────────────────────────────────────────────────────
@@ -296,6 +358,17 @@ def test_validate_rejects_bad_contact_flags_and_sources(proxy_a2) -> None:
     assert any("contact source" in error for error in result.errors)
 
 
+def test_validate_episode_reports_malformed_observation_shape(proxy_a2) -> None:
+    record = proxy_a2[0]
+    bad_obs = dict(record.obs)
+    bad_obs["door_angle_rad"] = np.asarray(0.0)
+
+    result = validate_episode(dataclasses.replace(record, obs=bad_obs))
+
+    assert not result.ok
+    assert any("obs 'door_angle_rad'" in error and "shape" in error for error in result.errors)
+
+
 def test_validate_rejects_mislabeled_a3_actions(alex_exports) -> None:
     a3 = EpisodeDataset(alex_exports[A3_OBJ_REL_EE_DELTA])
     record = a3[0]
@@ -321,10 +394,11 @@ def test_validate_dataset_dir_reports_malformed_meta_and_action_rank(
     assert any("action_space" in error for error in result.errors)
 
     rank_dir = _copy_dataset(proxy_exports[A2_EE_DELTA], tmp_path, "bad_action_rank")
-    n_steps = EpisodeDataset(rank_dir)[0].n_steps
+    dataset = EpisodeDataset(rank_dir)
+    n_steps = dataset[0].n_steps
     import h5py
 
-    h5_path = next(rank_dir.glob("episode_*.hdf5"))
+    h5_path = sorted(rank_dir.glob("episode_*.hdf5"))[0]
     with h5py.File(h5_path, "r+") as h5:
         del h5["steps/action"]
         h5["steps"].create_dataset("action", data=np.zeros(n_steps))
@@ -397,6 +471,12 @@ def test_norm_stats_roundtrip_and_zero_std_guard(proxy_a2, tmp_path) -> None:
     assert loaded.train_episode_ids == tuple(train_ids)
     assert validate_norm_stats(loaded, proxy_a2, train_ids) == []
 
+    pose_stats = compute_norm_stats(proxy_a2, train_ids, obs_preset="core_door_pose")
+    assert pose_stats.dataset_fingerprint == dataset_fingerprint(
+        proxy_a2, "core_door_pose"
+    )
+    assert pose_stats.dataset_fingerprint != stats.dataset_fingerprint
+
 
 def test_norm_stats_validation_rejects_stale_or_wrong_dimension_stats(proxy_a2) -> None:
     train_ids = proxy_a2.episode_ids[:3]
@@ -407,6 +487,12 @@ def test_norm_stats_validation_rejects_stale_or_wrong_dimension_stats(proxy_a2) 
 
     wrong_train = validate_norm_stats(stats, proxy_a2, list(reversed(train_ids)))
     assert any("train_episode_ids" in error for error in wrong_train)
+
+    missing_dataset_ids = dataclasses.replace(stats, dataset_episode_ids=())
+    assert any(
+        "no dataset_episode_ids provenance" in error
+        for error in validate_norm_stats(missing_dataset_ids, proxy_a2, train_ids)
+    )
 
     bad_action = dataclasses.replace(
         stats.action,

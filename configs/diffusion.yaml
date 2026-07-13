@@ -1,0 +1,61 @@
+# Diffusion Policy baseline (Phase 3.3). Defaults mirror
+# policies/diffusion/config.py; override via Hydra key=value tokens, e.g.
+#   scripts/train_diffusion.py dataset.space=A3_obj_rel_ee_delta train.epochs=500
+
+dataset:
+  task: door_push_alex_v2
+  space: A2_ee_delta
+  version: v2_pose
+  obs_preset: core
+
+model:
+  horizon: 16                    # Tp: predicted chunk length (ticks at 60 Hz)
+  d_model: 128
+  n_heads: 4
+  n_decoder_layers: 4
+  dim_feedforward: 512
+  dropout: 0.1
+  num_train_timesteps: 100       # DDPM T (paper's CNN/transformer default)
+  beta_schedule: squaredcos_cap_v2
+  prediction_type: epsilon
+
+train:
+  epochs: 300
+  batch_size: 64
+  lr: 1.0e-4
+  weight_decay: 1.0e-3           # paper's transformer weight decay
+  grad_clip: 1.0
+  lr_schedule: cosine            # constant | cosine (with linear warmup)
+  lr_warmup_steps: 500
+  use_ema: true
+  ema_decay: 0.999
+  seed: 0
+  device: cuda                   # real runs are GPU-backed; gates override to cpu
+  val_every: 10
+  val_inference_steps: 10        # DDIM steps for the sampled-L1 val metric
+  overfit_episodes: null
+
+run:
+  experiment: diffusion_door_push
+  run_id: null
+
+rollout:
+  checkpoint: null
+  episodes_fixed: 5
+  episodes_randomized: 15
+  base_seed: 100
+  max_ticks: 600
+  success_angle_deg: 45.0
+  n_action_steps: 8              # Ta: executed prefix per chunk (receding horizon)
+  sampler: ddpm                  # ddpm | ddim
+  num_inference_steps: 100
+  policy_device: cuda            # learned-policy inference runs on GPU by default
+  reference_metrics: null
+  matched_scripted_reference: false
+  door_yaw_deg: 0.0              # door-task pose for this eval process (yaw about hinge)
+  door_offset_x: 0.0             # door-task pose: world-x translation (m)
+  door_offset_y: 0.0             # door-task pose: world-y translation (m)
+  door_pose_id: null             # pose label recorded per rollout row (e.g. D0)
+
+# Optional per-run W&B overrides; field names validated by WandbConfig.
+wandb: {}

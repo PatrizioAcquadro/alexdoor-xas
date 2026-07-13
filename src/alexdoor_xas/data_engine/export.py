@@ -28,6 +28,7 @@ from alexdoor_xas.action.spaces import (
     A3_OBJ_REL_EE_DELTA,
     A4_OBJ_CENTRIC_CHUNK,
 )
+from alexdoor_xas.dataset.robot_asset import dataset_robot_asset_payload
 from alexdoor_xas.recording import EpisodeBuffer, write_episode
 
 
@@ -42,35 +43,48 @@ def export_datasets(
     """
     if not episodes:
         raise ValueError("cannot export an empty episode list")
+    # Validate the complete batch before replacing any existing dataset dirs.
+    # This rejects mixed tasks and catches a V2 episode regardless of position.
+    robot_asset = dataset_robot_asset_payload(episodes)
     task = episodes[0].meta.task
     root = Path(datasets_root)
 
     exported: dict[str, Path] = {}
-    exported[A2_EE_DELTA] = _export_hdf5(episodes, root / task / A2_EE_DELTA / version)
+    exported[A2_EE_DELTA] = _export_hdf5(
+        episodes, root / task / A2_EE_DELTA / version, robot_asset
+    )
     a3_episodes = [_relabel_to_door_frame(episode) for episode in episodes]
     exported[A3_OBJ_REL_EE_DELTA] = _export_hdf5(
-        a3_episodes, root / task / A3_OBJ_REL_EE_DELTA / version
+        a3_episodes, root / task / A3_OBJ_REL_EE_DELTA / version, robot_asset
     )
     exported[A4_OBJ_CENTRIC_CHUNK] = _export_a4(
-        episodes, root / task / A4_OBJ_CENTRIC_CHUNK / version
+        episodes, root / task / A4_OBJ_CENTRIC_CHUNK / version, robot_asset
     )
     if all(_has_joint_targets(episode) for episode in episodes):
         a1_episodes = [_relabel_to_joint_delta(episode) for episode in episodes]
         exported[A1_JOINT_DELTA] = _export_hdf5(
-            a1_episodes, root / task / A1_JOINT_DELTA / version
+            a1_episodes, root / task / A1_JOINT_DELTA / version, robot_asset
         )
     return exported
 
 
-def _export_hdf5(episodes: list[EpisodeBuffer], directory: Path) -> Path:
+def _export_hdf5(
+    episodes: list[EpisodeBuffer],
+    directory: Path,
+    robot_asset: dict | None,
+) -> Path:
     _fresh_dir(directory)
     for episode in episodes:
         write_episode(episode, directory)
-    _write_dataset_meta(episodes, directory, episodes[0].meta.action_space)
+    _write_dataset_meta(episodes, directory, episodes[0].meta.action_space, robot_asset)
     return directory
 
 
-def _export_a4(episodes: list[EpisodeBuffer], directory: Path) -> Path:
+def _export_a4(
+    episodes: list[EpisodeBuffer],
+    directory: Path,
+    robot_asset: dict | None,
+) -> Path:
     _fresh_dir(directory)
     lines = []
     for episode in episodes:
@@ -82,7 +96,7 @@ def _export_a4(episodes: list[EpisodeBuffer], directory: Path) -> Path:
         }
         lines.append(json.dumps(record))
     (directory / "episodes.jsonl").write_text("\n".join(lines) + "\n")
-    _write_dataset_meta(episodes, directory, A4_OBJ_CENTRIC_CHUNK)
+    _write_dataset_meta(episodes, directory, A4_OBJ_CENTRIC_CHUNK, robot_asset)
     return directory
 
 
@@ -143,7 +157,10 @@ def _relabel_to_joint_delta(episode: EpisodeBuffer) -> EpisodeBuffer:
 
 
 def _write_dataset_meta(
-    episodes: list[EpisodeBuffer], directory: Path, action_space: str
+    episodes: list[EpisodeBuffer],
+    directory: Path,
+    action_space: str,
+    robot_asset: dict | None,
 ) -> None:
     outcomes = [episode.outcome for episode in episodes if episode.outcome is not None]
     meta = {
@@ -159,6 +176,7 @@ def _write_dataset_meta(
             "engine_cfg": episodes[0].extras.get("engine_cfg"),
             "controller_cfg": episodes[0].extras.get("controller_cfg"),
         },
+        "robot_asset": robot_asset,
         "git_commit": _git_commit(),
         "created_utc": datetime.now(UTC).isoformat(),
     }

@@ -129,3 +129,65 @@ def _reference_text(stage) -> list[str]:
         values.append(str(ref.assetPath))
         values.append(str(ref.primPath))
     return values
+
+
+def test_door_task_pose_authoring_pivots_at_doorframe_and_validates() -> None:
+    """Posed door-task USD: yaw about the Doorframe pivot + world XY offset.
+
+    The Doorframe (hinge) world position must move by exactly the offset (the
+    yaw pivots on it), its orientation must gain the yaw, and the FixDoorframe
+    world anchor must follow (validate_door_task_usd re-checks it). The default
+    pose must keep authoring a door root without xform ops (byte-stable USD).
+    """
+    import math
+
+    from pxr import Gf, Usd, UsdGeom
+
+    from alexdoor_xas.assets.door_task import door_task_pose_usd_path
+
+    def frame_world_xf(usd_path):
+        stage = Usd.Stage.Open(str(usd_path), Usd.Stage.LoadAll)
+        frame = stage.GetPrimAtPath("/World/DoorTaskDoor/Doorframe")
+        return stage, UsdGeom.XformCache().GetLocalToWorldTransform(frame)
+
+    default_path = ensure_door_task_usd()
+    default_stage, default_xf = frame_world_xf(default_path)
+    # The default pose authors no xform opinion of its own on the door root
+    # (any ops present are inherited from the referenced Door.usd).
+    door_root = default_stage.GetPrimAtPath("/World/DoorTaskDoor")
+    stack = door_root.GetAttribute("xformOpOrder").GetPropertyStack(Usd.TimeCode.Default())
+    assert all(spec.layer.identifier != str(default_path) for spec in stack)
+    pivot = default_xf.ExtractTranslation()
+
+    yaw = 0.10
+    offset = (0.02, -0.03)
+    posed_path = ensure_door_task_usd(door_yaw_rad=yaw, door_xy_offset_m=offset)
+    assert posed_path == door_task_pose_usd_path(yaw, offset)
+    assert posed_path != default_path
+
+    _, posed_xf = frame_world_xf(posed_path)
+    posed_pos = posed_xf.ExtractTranslation()
+    expected_pos = pivot + Gf.Vec3d(offset[0], offset[1], 0.0)
+    assert Gf.IsClose(posed_pos, expected_pos, 1e-6)
+
+    # Orientation gains exactly the yaw about +Z.
+    default_rot = default_xf.RemoveScaleShear().ExtractRotationQuat()
+    posed_rot = posed_xf.RemoveScaleShear().ExtractRotationQuat()
+    yaw_quat = Gf.Quatd(math.cos(yaw / 2.0), Gf.Vec3d(0.0, 0.0, math.sin(yaw / 2.0)))
+    expected_rot = yaw_quat * default_rot
+    delta = posed_rot * expected_rot.GetInverse()
+    assert abs(abs(delta.GetReal()) - 1.0) < 1e-9
+
+    # The posed file passes the full frozen validation (incl. anchor check).
+    validate_door_task_usd(posed_path)
+
+
+def test_door_task_pose_usd_paths_are_distinct_per_pose() -> None:
+    from alexdoor_xas.assets.door_task import door_task_pose_usd_path
+
+    default = door_task_pose_usd_path(0.0, (0.0, 0.0))
+    a = door_task_pose_usd_path(0.05, (0.02, 0.0))
+    b = door_task_pose_usd_path(-0.05, (0.02, 0.0))
+    c = door_task_pose_usd_path(0.05, (0.0, 0.02))
+    assert default == paths.OUTPUTS_DIR / "door_task" / "door_task.usda"
+    assert len({default, a, b, c}) == 4

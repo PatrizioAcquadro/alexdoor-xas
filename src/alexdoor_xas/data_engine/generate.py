@@ -14,6 +14,8 @@ export is a relabeling, not a recomputation.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -22,6 +24,11 @@ import torch
 
 from alexdoor_xas.action.frames import ObjectFrame, door_frame_from_body_pose, frame_delta_to_world
 from alexdoor_xas.action.spaces import A2_EE_DELTA
+from alexdoor_xas.assets.alex_v2_contract import (
+    AlexV2ContractError,
+    RobotAssetRef,
+    validate_alex_v2_manifest,
+)
 from alexdoor_xas.eval.failures import label_episode
 from alexdoor_xas.policies.scripted import (
     DoorPushController,
@@ -45,22 +52,7 @@ PROXY_LIMITATIONS = (
     "task layer); live articulation pose reads return zeros in this Isaac Lab build.",
 )
 
-ALEX_LIMITATIONS = (
-    "Alex is fixed-base (pelvis welded to the world): no stepping, balancing, or "
-    "regrasping; legs/torso/left arm are position-held at the standing pose.",
-    "A2 rotation deltas are clamped and recorded but not actuated (position-only "
-    "differential IK); same rotation contract as the proxy sphere.",
-    "A1 is exported as 29-wide full-body joint-position-target deltas relabeled "
-    "from the recorded per-tick targets; only the 6 right-arm IK joints move "
-    "(the rest are position-held, so their deltas are zero).",
-    "Contact force is the EE link's net contact force (PhysX could not build the "
-    "filtered gripper<->door pair view for the referenced door USD); in this scene "
-    "the gripper can only touch the door assembly.",
-    "The EE contact point is the gripper link's 0.05 m collision sphere; there is "
-    "no articulated hand.",
-    "The Alex env adds passive hinge damping (4 N*m*s/rad) so the door moves only "
-    "while pushed; the proxy env keeps the frozen undamped hinge.",
-)
+_MISSING = object()
 
 
 @dataclass(frozen=True)
@@ -75,6 +67,14 @@ class DataEngineCfg:
     max_ticks: int = 600
     limitations: tuple[str, ...] = PROXY_LIMITATIONS
     """Known limitations of the run setup, surfaced in the run report."""
+    door_pose_id: str | None = None
+    """Label of the door-task pose this run was generated at (e.g. ``D0``).
+    ``None`` = the default pose. The pose itself is fixed per process (the
+    door-task USD is authored at env construction), so it is engine-level."""
+    door_yaw_rad: float = 0.0
+    """Door-task yaw about the hinge axis (rad) authored into the scene USD."""
+    door_offset_xy: tuple[float, float] = (0.0, 0.0)
+    """Door-task world-frame XY translation (m) authored into the scene USD."""
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -106,6 +106,44 @@ def plan_episodes(
     return items
 
 
+def _validated_robot_asset_provenance(
+    env: Any,
+) -> tuple[RobotAssetRef | None, dict[str, Any] | None]:
+    """Validate an optional env-provided robot asset before executing it."""
+    accessor = getattr(env, "robot_asset_provenance", _MISSING)
+    if accessor is _MISSING:
+        return None, None
+    if not callable(accessor):
+        raise AlexV2ContractError("env robot_asset_provenance must be callable")
+
+    payload = accessor()
+    if not isinstance(payload, Mapping):
+        raise AlexV2ContractError("env robot_asset_provenance must return an object")
+    required = {"id", "sha256", "manifest_fingerprint", "manifest"}
+    missing = required.difference(payload)
+    if missing:
+        raise AlexV2ContractError(
+            "env robot_asset_provenance is missing required keys: "
+            + ", ".join(sorted(missing))
+        )
+
+    manifest_value = payload["manifest"]
+    if not isinstance(manifest_value, Mapping):
+        raise AlexV2ContractError("env robot_asset_provenance manifest must be an object")
+    manifest = deepcopy(dict(manifest_value))
+    validated = validate_alex_v2_manifest(manifest)
+    provided = RobotAssetRef(
+        asset_id=str(payload["id"]),
+        sha256=str(payload["sha256"]),
+        manifest_fingerprint=str(payload["manifest_fingerprint"]),
+    )
+    if provided != validated:
+        raise AlexV2ContractError(
+            "env robot asset reference does not match its canonical manifest"
+        )
+    return validated, manifest
+
+
 def run_episode(
     env,
     item: EpisodePlanItem,
@@ -116,14 +154,16 @@ def run_episode(
     """Roll out and record one episode; deterministic given (env state, item)."""
     engine_cfg = engine_cfg or DataEngineCfg()
     base_controller_cfg = controller_cfg or DoorPushControllerCfg()
+    robot_asset_ref, robot_asset_manifest = _validated_robot_asset_provenance(env)
 
     env.reset(seed=item.seed)
     door_frame = _read_door_frame(env)
 
     active_cfg = base_controller_cfg
+    settle_report: dict | None = None
     if item.variation is not None:
         active_cfg = item.variation.apply(base_controller_cfg)
-        apply_start_offset(env, door_frame, item.variation)
+        settle_report = apply_start_offset(env, door_frame, item.variation)
     controller = DoorPushController(active_cfg)
 
     sim_dt = float(env.cfg.sim.dt)
@@ -139,11 +179,32 @@ def run_episode(
         seed=item.seed,
         sim_dt=sim_dt,
         control_dt=control_dt,
+        robot_asset_id=robot_asset_ref.asset_id if robot_asset_ref is not None else "",
+        robot_asset_sha256=robot_asset_ref.sha256 if robot_asset_ref is not None else "",
     )
     buffer = EpisodeBuffer(meta=meta)
+    if robot_asset_manifest is not None:
+        buffer.extras["robot_asset_manifest"] = robot_asset_manifest
     actions_door_frame: list[np.ndarray] = []
     has_force_contact = hasattr(env, "contact_sensed") and hasattr(env, "contact_force_w")
     has_joint_state = hasattr(env, "robot_joint_state")
+
+    # Door-pose observation terms (constant per episode: the pose is authored
+    # into the scene USD per process, and the frame is static within a rollout).
+    # Yaw is derived from the recorded door-frame rotation; the translation is
+    # the door-frame origin relative to the robot base (world origin for the
+    # base-less proxy) so it stays meaningful if the robot is ever re-based.
+    door_yaw_rad = float(math.atan2(door_frame.rot[1, 0], door_frame.rot[0, 0]))
+    base_pos_w = np.zeros(3)
+    if hasattr(env, "robot_base_pos_w"):
+        base_pos_w = np.asarray(_numpy(env.robot_base_pos_w())[0], dtype=np.float64)
+    door_rel_pos = door_frame.origin - base_pos_w
+    door_pose_obs = {
+        "door_yaw_rad": door_yaw_rad,
+        "door_rel_pos_x": float(door_rel_pos[0]),
+        "door_rel_pos_y": float(door_rel_pos[1]),
+        "door_rel_pos_z": float(door_rel_pos[2]),
+    }
 
     notes = ""
     last_command = None
@@ -197,6 +258,7 @@ def run_episode(
                 object_state={
                     "door_angle_rad": angle,
                     "door_angular_velocity_rad_s": velocity,
+                    **door_pose_obs,
                 },
                 contact=contact,
                 safety={
@@ -221,6 +283,38 @@ def run_episode(
         if render_hook is not None:
             render_hook(tick)
 
+    # A DirectRLEnv auto-resets *inside* env.step when the episode budget is
+    # reached; everything read after that (final angle, final joint targets,
+    # clamp telemetry) would silently be post-reset state. The env's episode
+    # counter zeroes on reset, so a counter smaller than the executed step
+    # count is unambiguous evidence of a mid-episode reset. Fail loudly.
+    if buffer.n_steps and hasattr(env, "episode_length_buf"):
+        env_ticks = int(_numpy(env.episode_length_buf)[0])
+        if env_ticks < buffer.n_steps:
+            raise RuntimeError(
+                f"episode seed {item.seed} hit the env's auto-reset after "
+                f"{buffer.n_steps} executed steps (episode counter {env_ticks}); "
+                "the recorded final state would be invalid — lower engine "
+                "max_ticks or raise the env's episode_length_s"
+            )
+
+    # Terminal post-action safety sample (additive, phase2.v1-compatible):
+    # per-step contact samples are read *before* each tick's action, so the
+    # force/contact response to the final executed action is only visible in
+    # the env state at loop exit — capture it so the dataset admission bound
+    # covers the response to every executed action, including the last one.
+    if buffer.n_steps and has_force_contact:
+        buffer.extras["terminal_contact"] = {
+            "sensed": bool(_numpy(env.contact_sensed())[0]),
+            "force_n": float(np.linalg.norm(_numpy(env.contact_force_w())[0])),
+            "t": buffer.n_steps * control_dt,
+            "alignment": (
+                "post-step env state at loop exit: the contact/force response to "
+                "the final executed action (steps[t].contact is pre-action, i.e. "
+                "the response to action t-1)"
+            ),
+        }
+
     final_angle, _ = _hinge_state(env)
     chunk_log = controller.finalize()
     timed_out = bool(last_command is not None and last_command.timed_out)
@@ -236,8 +330,10 @@ def run_episode(
             "door_frame_quat_w_xyzw": _door_frame_quat(env),
             "a4_chunks": chunk_log.to_list(),
             "variation": item.variation.to_dict() if item.variation is not None else None,
+            "start_pose_settle": settle_report,
             "controller_cfg": asdict(active_cfg),
             "engine_cfg": engine_cfg.to_dict(),
+            "door_pose_id": engine_cfg.door_pose_id,
             "controller_done": controller_done,
             "controller_timed_out": timed_out,
             "last_phase": str(last_command.phase) if last_command is not None else "",
@@ -257,6 +353,12 @@ def run_episode(
     if hasattr(env, "robot_joint_limits"):
         for name, value in env.robot_joint_limits().items():
             buffer.extras[name] = np.asarray(value, dtype=np.float64)
+    if hasattr(env, "ik_clamp_telemetry"):
+        # Raw pre-clamp diff-IK excess per joint (anti-windup telemetry): how
+        # often and how far the solver ran past the position limits before the
+        # executor clamped the targets. JSON-able → lands in the sidecar-style
+        # /extras_json group.
+        buffer.extras["ik_clamp_telemetry"] = env.ik_clamp_telemetry()
     buffer.set_outcome(
         EpisodeOutcome(
             success=success,
@@ -349,14 +451,26 @@ def _door_frame_quat(env) -> np.ndarray:
     return _numpy(frame_quat)[0].astype(np.float64)
 
 
-def apply_start_offset(env, door_frame: ObjectFrame, variation: DoorPushVariation) -> None:
-    """Shift the EE start pose by the variation's door-frame offset (shared with eval)."""
+def apply_start_offset(
+    env, door_frame: ObjectFrame, variation: DoorPushVariation
+) -> dict | None:
+    """Shift the EE start pose by the variation's door-frame offset (shared with eval).
+
+    Returns the env's realized-state settle report when it exposes one
+    (``start_pose_settle_report``): requested/realized position, residual,
+    settle ticks, and pass/fail — the fail-closed postcondition itself lives
+    in the env's ``set_proxy_pose``. Teleporting envs (proxy sphere, test
+    fakes) realize the request exactly and return ``None``.
+    """
     pos, quat = env.proxy_pose_w()
     offset_w = door_frame.vector_to_world(np.asarray(variation.start_offset_door_frame))
     new_pos = _numpy(pos)[0] + offset_w
     env.set_proxy_pose(
         torch.as_tensor(new_pos, dtype=torch.float32).reshape(1, 3), quat.reshape(1, 4)
     )
+    if hasattr(env, "start_pose_settle_report"):
+        return env.start_pose_settle_report()
+    return None
 
 
 def _hinge_state(env) -> tuple[float, float]:
@@ -376,7 +490,6 @@ def _numpy(value) -> np.ndarray:
 
 
 __all__ = [
-    "ALEX_LIMITATIONS",
     "CONTACT_SOURCE",
     "CONTACT_SOURCE_FORCE",
     "PROXY_LIMITATIONS",

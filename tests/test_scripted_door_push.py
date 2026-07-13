@@ -2,21 +2,45 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
 from alexdoor_xas.action.frames import ObjectFrame, frame_delta_to_world, rot_z
 from alexdoor_xas.policies.scripted import (
-    ALEX_VARIATION_BOUNDS,
     DoorPushController,
     DoorPushControllerCfg,
     DoorPushPhase,
     VariationBounds,
-    alex_fixedbase_push_cfg,
+    alex_v2_push_cfg,
+    alex_v2_variation_bounds,
     sample_variation,
 )
 from alexdoor_xas.policies.scripted.door_push import PHASE_ORDER, DoorPushObservation
 from conftest import SyntheticDoorWorld
+
+
+def _v2_calibration():
+    return SimpleNamespace(
+        controller={
+            "push_radius_frac": 0.35,
+            "push_height_m": 0.15,
+            "approach_standoff_m": 0.12,
+            "align_standoff_m": 0.10,
+            "pre_contact_clearance_m": 0.01,
+            "contact_clearance_m": -0.005,
+            "contact_approach_max_step_m": 0.005,
+            "release_standoff_m": 0.30,
+            "contact_force_threshold_n": 2.5,
+        },
+        randomization_bounds={
+            "start_offset_low": (-0.04, -0.06, -0.05),
+            "start_offset_high": (0.06, 0.06, 0.05),
+            "push_radius_frac_range": (0.32, 0.40),
+            "push_height_m_range": (0.05, 0.18),
+        },
+    )
 
 
 def _observe(world: SyntheticDoorWorld) -> DoorPushObservation:
@@ -87,6 +111,34 @@ def test_step_magnitude_never_exceeds_max_step() -> None:
     assert float(step_norms.max()) <= cfg.max_step_m + 1e-12
 
 
+@pytest.mark.parametrize("phase", (DoorPushPhase.PRE_CONTACT, DoorPushPhase.CONTACT))
+def test_contact_approach_uses_its_dedicated_step_limit(phase) -> None:
+    cfg = DoorPushControllerCfg(max_step_m=0.015, contact_approach_max_step_m=0.005)
+    frame = ObjectFrame(origin=np.zeros(3), rot=np.eye(3))
+    controller = DoorPushController(cfg)
+    controller._state.phase = phase
+    obs = DoorPushObservation(
+        door_frame=frame,
+        hinge_angle_rad=0.0,
+        hinge_velocity_rad_s=0.0,
+        ee_pos_w=np.array([0.25, cfg.push_point_y_m, cfg.push_height_m]),
+        contact_sensed=False,
+    )
+
+    command = controller.act(obs)
+
+    assert command.phase is phase
+    assert np.linalg.norm(command.delta_door_frame[:3]) == pytest.approx(0.005)
+
+
+def test_alex_v2_preset_keeps_alignment_outside_contact_and_slows_final_approach() -> None:
+    cfg = alex_v2_push_cfg(_v2_calibration())
+
+    assert cfg.align_standoff_m == pytest.approx(0.10)
+    assert cfg.contact_approach_max_step_m == pytest.approx(0.005)
+    assert cfg.max_step_m == pytest.approx(0.015)
+
+
 def test_chunk_log_covers_all_phases_with_positive_durations() -> None:
     controller, _, _, _ = _run_episode(ObjectFrame(origin=np.zeros(3), rot=np.eye(3)))
     log = controller.finalize()
@@ -111,8 +163,8 @@ def test_phase_timeout_freezes_controller() -> None:
     np.testing.assert_array_equal(deltas[-1], np.zeros(6))
 
 
-def test_alex_preset_visits_all_phases_and_opens_door() -> None:
-    cfg = alex_fixedbase_push_cfg()
+def test_alex_v2_preset_visits_all_phases_and_opens_door() -> None:
+    cfg = alex_v2_push_cfg(_v2_calibration())
     controller, world, phases, _ = _run_episode(
         ObjectFrame(origin=np.zeros(3), rot=np.eye(3)),
         cfg=cfg,
@@ -180,8 +232,8 @@ def test_sample_variation_default_bounds_are_unchanged() -> None:
         )
 
 
-def test_alex_variation_bounds_are_respected() -> None:
-    bounds = ALEX_VARIATION_BOUNDS
+def test_alex_v2_variation_bounds_are_respected() -> None:
+    bounds = alex_v2_variation_bounds(_v2_calibration())
     for seed in range(20):
         variation = sample_variation(np.random.default_rng(seed), bounds)
         low, high = bounds.push_radius_frac_range

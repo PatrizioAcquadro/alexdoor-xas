@@ -119,6 +119,12 @@ def validate_episode(
             f"t {len(record.t)}, outcome.n_steps {outcome_steps})"
         )
     for key, array in record.obs.items():
+        array = np.asarray(array)
+        if array.ndim == 0:
+            result.errors.append(
+                f"{label}: obs {key!r} must have a leading step dimension, got shape {array.shape}"
+            )
+            continue
         if array.shape[0] != n_steps:
             result.errors.append(
                 f"{label}: obs {key!r} has {array.shape[0]} steps, expected {n_steps}"

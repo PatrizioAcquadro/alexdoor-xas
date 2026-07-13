@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -12,7 +13,7 @@ import torch
 from alexdoor_xas.action.frames import ObjectFrame, frame_delta_to_world, rot_z
 from alexdoor_xas.action.spaces import A4_PHASE_VOCAB, EE_DELTA_DIM, ObjectCentricChunk
 from alexdoor_xas.adapters import (
-    ALEX_LIMITS,
+    ALEX_V2_ROBOT_TAG,
     MAX_HINGE_ANGLE_RAD,
     PROXY_LIMITS,
     A2Adapter,
@@ -24,6 +25,7 @@ from alexdoor_xas.adapters import (
     RobotLimitsCfg,
     StepContext,
     WorkspaceSphere,
+    alex_v2_limits,
     limits_for_robot,
     replay_source,
     rollout_chunks,
@@ -52,6 +54,18 @@ def _ctx(
 
 def _identity_frame(origin=(0.0, 0.0, 0.0)) -> ObjectFrame:
     return ObjectFrame(origin=np.asarray(origin, dtype=np.float64), rot=np.eye(3))
+
+
+def _v2_limits(center=(1.0, 2.0, 3.0), reach_shell=(0.2, 0.8)):
+    calibration = SimpleNamespace(
+        reach_shell_m=reach_shell,
+        controller={
+            "align_standoff_m": 0.060,
+            "pre_contact_clearance_m": 0.010,
+            "contact_approach_max_step_m": 0.005,
+        },
+    )
+    return alex_v2_limits(calibration, workspace_center_w=center)
 
 
 def _chunk(
@@ -93,6 +107,73 @@ def test_a2_clamps_and_logs_correction():
     np.testing.assert_allclose(decision.applied, applied)
 
 
+def test_a2_shapes_calibrated_alex_first_contact_without_changing_request() -> None:
+    limits = _v2_limits(center=(0.0, 0.0, 0.0), reach_shell=(0.01, 2.0))
+    adapter = A2Adapter(limits, contact_entry_shaping=True)
+    frame = _identity_frame()
+    # Alex V2 exposes the collision-derived tool point, so panel contact is at
+    # x=panel_thickness (0.036 m). This state is inside the calibrated 60 mm
+    # align-to-contact corridor but has not sensed contact yet.
+    ctx = _ctx(ee_pos_w=(0.040, 0.30, 0.0), door_frame=frame, contact_sensed=False)
+    requested = np.array([-0.015, -0.001, 0.002, 0.0, 0.0, 0.0])
+
+    applied, decision = adapter.process(requested, ctx)
+
+    assert decision.status is AdapterStatus.CORRECTED
+    assert decision.checks["contact_approach_bounded"] is False
+    assert "contact approach" in decision.reason
+    np.testing.assert_allclose(decision.requested, requested)
+    assert np.linalg.norm(applied[:3]) == pytest.approx(0.005)
+    assert applied[0] < 0.0  # push direction/semantics are preserved
+
+
+def test_a2_contact_entry_shaping_is_opt_in_for_scripted_replay() -> None:
+    limits = _v2_limits(center=(0.0, 0.0, 0.0), reach_shell=(0.01, 2.0))
+    requested = np.array([-0.015, 0.0, 0.0, 0.0, 0.0, 0.0])
+    ctx = _ctx(
+        ee_pos_w=(0.040, 0.30, 0.0),
+        door_frame=_identity_frame(),
+        contact_sensed=False,
+    )
+
+    applied, decision = A2Adapter(limits).process(requested, ctx)
+
+    np.testing.assert_allclose(applied, requested)
+    assert decision.status is AdapterStatus.ACCEPTED
+
+
+def test_a2_does_not_shape_free_space_or_established_contact() -> None:
+    limits = _v2_limits(center=(0.0, 0.0, 0.0), reach_shell=(0.01, 2.0))
+    frame = _identity_frame()
+    requested = np.array([-0.015, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+    free, free_decision = A2Adapter(limits, contact_entry_shaping=True).process(
+        requested, _ctx(ee_pos_w=(0.20, 0.30, 0.0), door_frame=frame, contact_sensed=False)
+    )
+    contact, contact_decision = A2Adapter(limits, contact_entry_shaping=True).process(
+        requested, _ctx(ee_pos_w=(0.036, 0.30, 0.0), door_frame=frame, contact_sensed=True)
+    )
+
+    np.testing.assert_allclose(free, requested)
+    np.testing.assert_allclose(contact, requested)
+    assert free_decision.status is AdapterStatus.ACCEPTED
+    assert contact_decision.status is AdapterStatus.ACCEPTED
+
+
+def test_a2_does_not_shape_subthreshold_sensor_dropout_command() -> None:
+    limits = _v2_limits(center=(0.0, 0.0, 0.0), reach_shell=(0.01, 2.0))
+    adapter = A2Adapter(limits, contact_entry_shaping=True)
+    frame = _identity_frame()
+    requested = np.array([-0.0098, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+    applied, decision = adapter.process(
+        requested, _ctx(ee_pos_w=(0.040, 0.30, 0.0), door_frame=frame, contact_sensed=False)
+    )
+
+    np.testing.assert_allclose(applied, requested)
+    assert decision.status is AdapterStatus.ACCEPTED
+
+
 @pytest.mark.parametrize(
     "bad", [np.full(6, np.nan), np.zeros(3), np.zeros((2, 6)).reshape(-1)]
 )
@@ -105,9 +186,10 @@ def test_a2_rejects_malformed_deltas(bad):
 
 
 def test_a2_rejects_out_of_workspace_command():
-    adapter = A2Adapter(ALEX_LIMITS)
-    center = np.asarray(ALEX_LIMITS.workspace.center_w)
-    ee = center + np.array([ALEX_LIMITS.workspace.max_reach_m + 0.01, 0.0, 0.0])
+    limits = _v2_limits()
+    adapter = A2Adapter(limits)
+    center = np.asarray(limits.workspace.center_w)
+    ee = center + np.array([limits.workspace.max_reach_m + 0.01, 0.0, 0.0])
     applied, decision = adapter.process(
         np.array([0.02, 0.0, 0.0, 0.0, 0.0, 0.0]), _ctx(ee_pos_w=ee)
     )
@@ -118,9 +200,10 @@ def test_a2_rejects_out_of_workspace_command():
 
 
 def test_a2_warns_near_min_reach_but_accepts():
-    adapter = A2Adapter(ALEX_LIMITS)
-    center = np.asarray(ALEX_LIMITS.workspace.center_w)
-    ee = center + np.array([0.22, 0.0, 0.0])  # inside min reach 0.24
+    limits = _v2_limits(reach_shell=(0.24, 0.8))
+    adapter = A2Adapter(limits)
+    center = np.asarray(limits.workspace.center_w)
+    ee = center + np.array([0.22, 0.0, 0.0])
     applied, decision = adapter.process(np.zeros(6), _ctx(ee_pos_w=ee))
     assert decision.status is AdapterStatus.ACCEPTED
     assert any("min reach" in warning for warning in decision.warnings)
@@ -139,11 +222,109 @@ def test_a2_flags_joint_limit_excess_as_warning():
         "joint_vel_limits": np.full(n, 10.0),
     }
     _, decision = adapter.process(
-        np.zeros(6), _ctx(joint_state=joint_state, joint_limits=joint_limits)
+        np.zeros(6),
+        _ctx(
+            joint_state=joint_state,
+            joint_limits=joint_limits,
+            joint_names=("J0", "J1", "J2", "J3"),
+            tick_index=12,
+            rollout_phase="contact",
+        ),
     )
     assert decision.status is AdapterStatus.ACCEPTED
     assert any("position limit" in warning for warning in decision.warnings)
     assert any("velocity exceeds" in warning for warning in decision.warnings)
+    records = {warning.id: warning for warning in decision.warning_records}
+    assert set(records) == {"a2.joint_position_limit", "a2.joint_velocity_limit"}
+    velocity = records["a2.joint_velocity_limit"].evidence
+    assert velocity == {
+        "joint_index": 3,
+        "joint_name": "J3",
+        "tick_index": 12,
+        "rollout_phase": "contact",
+        "measured_velocity_rad_s": 12.0,
+        "configured_limit_rad_s": 10.0,
+        "exceedance_rad_s": 2.0,
+        "consecutive_ticks": 1,
+        "duration_ticks": 1,
+        "count": 1,
+    }
+
+
+def test_a2_emits_one_warning_per_simultaneous_joint_limit_violation() -> None:
+    adapter = A2Adapter(PROXY_LIMITS)
+    joint_limits = {
+        "joint_pos_limits": np.array([[-2.5, 2.5], [-2.5, 2.5], [-2.5, 2.5]]),
+        "joint_vel_limits": np.array([10.0, 10.0, 10.0]),
+    }
+
+    _, decision = adapter.process(
+        np.zeros(6),
+        _ctx(
+            joint_state={
+                "joint_pos": np.zeros(3),
+                "joint_vel": np.array([15.0, -12.0, 0.0]),
+                "joint_pos_target": np.array([2.7, -2.8, 0.0]),
+            },
+            joint_limits=joint_limits,
+            joint_names=("J0", "J1", "J2"),
+            tick_index=4,
+            rollout_phase="pre_contact",
+        ),
+    )
+
+    position_records = [
+        warning
+        for warning in decision.warning_records
+        if warning.id == "a2.joint_position_limit"
+    ]
+    velocity_records = [
+        warning
+        for warning in decision.warning_records
+        if warning.id == "a2.joint_velocity_limit"
+    ]
+    assert [warning.evidence["joint_index"] for warning in position_records] == [0, 1]
+    assert [warning.evidence["joint_index"] for warning in velocity_records] == [0, 1]
+    assert [warning.evidence["exceedance_rad_s"] for warning in velocity_records] == [5.0, 2.0]
+
+
+def test_a2_tracks_secondary_velocity_violation_per_joint_across_ticks() -> None:
+    adapter = A2Adapter(PROXY_LIMITS)
+    joint_limits = {
+        "joint_pos_limits": np.array([[-2.5, 2.5], [-2.5, 2.5]]),
+        "joint_vel_limits": np.array([10.0, 10.0]),
+    }
+
+    decisions = []
+    for tick, velocities in enumerate(([15.0, 12.0], [0.0, 12.0])):
+        _, decision = adapter.process(
+            np.zeros(6),
+            _ctx(
+                joint_state={
+                    "joint_pos": np.zeros(2),
+                    "joint_vel": np.asarray(velocities),
+                    "joint_pos_target": np.zeros(2),
+                },
+                joint_limits=joint_limits,
+                joint_names=("WORST_ON_FIRST_TICK", "SECONDARY_ON_FIRST_TICK"),
+                tick_index=tick,
+                rollout_phase="pre_contact",
+            ),
+        )
+        decisions.append(decision)
+
+    secondary_records = [
+        next(
+            warning
+            for warning in decision.warning_records
+            if warning.id == "a2.joint_velocity_limit"
+            and warning.evidence["joint_name"] == "SECONDARY_ON_FIRST_TICK"
+        )
+        for decision in decisions
+    ]
+    assert [warning.evidence["consecutive_ticks"] for warning in secondary_records] == [1, 2]
+    assert [warning.evidence["duration_ticks"] for warning in secondary_records] == [1, 2]
+    assert [warning.evidence["count"] for warning in secondary_records] == [1, 2]
 
 
 def test_a2_chunk_is_cut_at_first_rejection():
@@ -162,8 +343,42 @@ def test_a2_chunk_is_cut_at_first_rejection():
 
 def test_limits_for_robot_rejects_unknown_tag():
     assert limits_for_robot("proxy_ee_sphere_v0") is PROXY_LIMITS
+    with pytest.raises(ValueError, match="workspace_center_w"):
+        limits_for_robot(ALEX_V2_ROBOT_TAG)
     with pytest.raises(KeyError, match="no adapter limits"):
         limits_for_robot("robot_from_the_future_v9")
+
+
+def test_alex_v2_limits_use_calibrated_shell_and_caller_center() -> None:
+    calibration = SimpleNamespace(
+        reach_shell_m=(0.31, 0.77),
+        controller={
+            "align_standoff_m": 0.060,
+            "pre_contact_clearance_m": 0.010,
+            "contact_approach_max_step_m": 0.005,
+        },
+    )
+    center = (4.0, -2.0, 1.25)
+
+    limits = limits_for_robot(
+        ALEX_V2_ROBOT_TAG,
+        calibration=calibration,
+        workspace_center_w=center,
+    )
+
+    assert limits.robot == ALEX_V2_ROBOT_TAG
+    assert limits.workspace.center_w == center
+    assert limits.workspace.min_reach_m == pytest.approx(0.31)
+    assert limits.workspace.max_reach_m == pytest.approx(0.77)
+    assert limits.contact_surface_x_m == pytest.approx(0.036)
+    assert limits.contact_approach_start_clearance_m == pytest.approx(0.060)
+    assert limits.contact_approach_max_step_m == pytest.approx(0.005)
+
+
+@pytest.mark.parametrize("center", [(1.0, 2.0), (1.0, float("nan"), 3.0)])
+def test_alex_v2_limits_reject_invalid_caller_center(center) -> None:
+    with pytest.raises(ValueError, match="three finite"):
+        _v2_limits(center=center)
 
 
 # -- A3 -------------------------------------------------------------------------

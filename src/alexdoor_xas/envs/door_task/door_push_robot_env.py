@@ -1,16 +1,13 @@
-"""Phase 2.5 door-push DirectRLEnv: door fixture + fixed-base Alex with IK arm.
+"""Robot-agnostic door-push loop for a fixed-base articulated IK executor.
 
-Same action contract as the proxy env — a 6-dim EE delta ``(dx, dy, dz, drx,
-dry, drz)`` per control tick (A2), same clamps — but executed by the IHMC Alex
-humanoid: the clamped delta becomes a relative pose command for a differential
-IK controller on the RIGHT arm, whose joint-position targets are tracked by
-stiff PD actuators. Contact with the door is therefore made by the gripper
-link's collision sphere and measured by a contact force sensor
-(:class:`~isaaclab.sensors.ContactSensor`), not only inferred geometrically.
+The action contract is a 6-dim EE delta ``(dx, dy, dz, drx, dry, drz)`` per
+control tick (A2). The clamped translation becomes a relative position command
+for differential IK, and the resulting joint targets are applied to a robot
+articulation supplied by a concrete calibrated executor.
 
 The env exposes the same duck-typed accessor surface the data engine consumes
 (``door_frame_pose_w`` / ``hinge_state`` / ``proxy_pose_w`` / ``set_proxy_pose``)
-— ``proxy_pose_w`` now reports the Alex right-gripper EE pose — plus new
+— ``proxy_pose_w`` reports the configured robot EE pose — plus new
 optional accessors (``robot_joint_state``, ``contact_force_w``,
 ``contact_sensed``) the engine picks up via ``hasattr``.
 """
@@ -27,14 +24,15 @@ from isaaclab.envs import DirectRLEnv
 from isaaclab.sensors import ContactSensor
 
 from alexdoor_xas.assets.door_task import ensure_door_task_usd
+from alexdoor_xas.kinematics import StartPoseError, check_settle_postcondition
 
 from .door_env import resolve_hinge_joint_id
-from .door_push_alex_env_cfg import ALEX_EE_LINK_SUBPATH, build_alex_articulation_cfg
 from .door_push_env import read_doorframe_from_stage
 from .door_push_env_cfg import OBSERVATION_TERMS
+from .joint_limits import clamp_joint_targets
 
 if TYPE_CHECKING:
-    from .door_push_alex_env_cfg import DoorPushAlexEnvCfg
+    from .door_push_robot_env_cfg import DoorPushRobotEnvCfg
 
 
 def _as_torch(value) -> torch.Tensor:
@@ -42,16 +40,20 @@ def _as_torch(value) -> torch.Tensor:
     return value.torch if hasattr(value, "torch") else value
 
 
-class DoorPushAlexEnv(DirectRLEnv):
-    """Single-door push task executed by fixed-base Alex's right arm via diff-IK."""
+class DoorPushRobotEnv(DirectRLEnv):
+    """Single-door task loop for a configured fixed-base articulated robot."""
 
-    cfg: DoorPushAlexEnvCfg
+    cfg: DoorPushRobotEnvCfg
 
-    def __init__(self, cfg: DoorPushAlexEnvCfg, render_mode: str | None = None, **kwargs):
-        usd_path = ensure_door_task_usd()
+    def __init__(self, cfg: DoorPushRobotEnvCfg, render_mode: str | None = None, **kwargs):
+        usd_path = ensure_door_task_usd(
+            door_yaw_rad=cfg.door_yaw_rad, door_xy_offset_m=tuple(cfg.door_offset_xy)
+        )
         cfg.door_task_scene.spawn.usd_path = str(usd_path)
         if cfg.robot is None:
-            cfg.robot = build_alex_articulation_cfg()
+            raise RuntimeError("DoorPushRobotEnv requires an injected robot articulation config")
+        if cfg.ee_contact is None:
+            raise RuntimeError("DoorPushRobotEnv requires an injected EE contact sensor config")
 
         super().__init__(cfg, render_mode, **kwargs)
 
@@ -76,7 +78,7 @@ class DoorPushAlexEnv(DirectRLEnv):
         # -- IK plumbing (fixed base: jacobian body index shifts by -1, no
         # base-DoF column offset; see isaaclab task_space_actions).
         if not self._robot.is_fixed_base:
-            raise RuntimeError("DoorPushAlexEnv requires a fixed-base Alex articulation")
+            raise RuntimeError("DoorPushRobotEnv requires a fixed-base robot articulation")
         ee_ids, _ = self._robot.find_bodies(self.cfg.ee_body_name)
         if len(ee_ids) != 1:
             raise RuntimeError(
@@ -101,12 +103,25 @@ class DoorPushAlexEnv(DirectRLEnv):
         # proprio does not depend on backend target-readback support.
         self._joint_targets = _as_torch(self._robot.data.default_joint_pos).clone()
         self._arm_targets = self._joint_targets[:, self._arm_joint_ids].clone()
+        # Anti-windup: solved IK targets are clamped to the arm's position
+        # limits every solve; telemetry keeps the raw pre-clamp excess so the
+        # data engine can report how hard the solver leaned on the limits.
+        arm_pos_limits = _as_torch(self._robot.data.joint_pos_limits)[:, self._arm_joint_ids, :]
+        self._arm_pos_lower = arm_pos_limits[..., 0].clone()
+        self._arm_pos_upper = arm_pos_limits[..., 1].clone()
+        n_arm = len(self._arm_joint_ids)
+        self._clamp_excess_max = torch.zeros((self.num_envs, n_arm), device=self.device)
+        self._clamp_count = torch.zeros(
+            (self.num_envs, n_arm), dtype=torch.long, device=self.device
+        )
+        self._clamp_solve_ticks = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        self._last_settle_report: dict | None = None
 
     # -- scene ------------------------------------------------------------------
 
     def _setup_scene(self) -> None:
         if self.cfg.door_task_scene.spawn is None:
-            raise RuntimeError("DoorPushAlexEnvCfg.door_task_scene.spawn must be configured")
+            raise RuntimeError("DoorPushRobotEnvCfg.door_task_scene.spawn must be configured")
 
         self.cfg.door_task_scene.spawn.func(
             self.cfg.door_task_scene.prim_path,
@@ -122,13 +137,21 @@ class DoorPushAlexEnv(DirectRLEnv):
         if self.device == "cpu":
             self.scene.filter_collisions(global_prim_paths=[])
 
-        # The URDF importer nests link rigid bodies by kinematic chain, and the
-        # spawner's activate_contact_sensors stops at the first rigid body (the
-        # pelvis) — apply the contact-report API to the EE link explicitly.
+        # A URDF importer may nest link rigid bodies below the articulation root,
+        # while automatic activation stops at the first rigid body. Apply the
+        # contact-report API to the configured EE link explicitly.
         from isaaclab.sim.schemas import activate_contact_sensors  # noqa: PLC0415
 
+        contact_prim_pattern = str(self.cfg.ee_contact.prim_path)
+        if "env_.*" not in contact_prim_pattern:
+            raise RuntimeError(
+                "EE contact sensor prim path must contain the environment token 'env_.*': "
+                f"{contact_prim_pattern}"
+            )
         for env_id in range(self.scene.cfg.num_envs):
-            activate_contact_sensors(f"/World/envs/env_{env_id}/Alex/{ALEX_EE_LINK_SUBPATH}")
+            activate_contact_sensors(
+                contact_prim_pattern.replace("env_.*", f"env_{env_id}", 1)
+            )
 
         self.scene.articulations["door"] = self._door
         self.scene.articulations["robot"] = self._robot
@@ -140,7 +163,7 @@ class DoorPushAlexEnv(DirectRLEnv):
         expected_shape = (self.num_envs, self.cfg.action_space)
         if actions.shape != expected_shape:
             raise ValueError(
-                f"DoorPushAlexEnv expects actions with shape {expected_shape}, "
+                f"DoorPushRobotEnv expects actions with shape {expected_shape}, "
                 f"got {tuple(actions.shape)}"
             )
         clamped = actions.clone()
@@ -164,7 +187,13 @@ class DoorPushAlexEnv(DirectRLEnv):
             :, :, self._arm_joint_ids
         ]
         joint_pos = _as_torch(self._robot.data.joint_pos)[:, self._arm_joint_ids]
-        self._arm_targets = self._ik.compute(ee_pos, ee_quat, jacobian, joint_pos)
+        raw_targets = self._ik.compute(ee_pos, ee_quat, jacobian, joint_pos)
+        self._arm_targets, excess = clamp_joint_targets(
+            raw_targets, self._arm_pos_lower, self._arm_pos_upper
+        )
+        self._clamp_excess_max = torch.maximum(self._clamp_excess_max, excess)
+        self._clamp_count += (excess > 0).long()
+        self._clamp_solve_ticks += 1
         self._joint_targets[:, self._arm_joint_ids] = self._arm_targets
 
     def _apply_action(self) -> None:
@@ -208,7 +237,7 @@ class DoorPushAlexEnv(DirectRLEnv):
         self._door.write_joint_position_to_sim_index(position=door_joint_pos, env_ids=env_ids)
         self._door.write_joint_velocity_to_sim_index(velocity=door_joint_vel, env_ids=env_ids)
 
-        # Alex: default joint state + position targets (fixed base, no root write).
+        # Robot: default joint state + position targets (fixed base, no root write).
         joint_pos = _as_torch(self._robot.data.default_joint_pos)[env_ids].clone()
         joint_vel = torch.zeros_like(_as_torch(self._robot.data.default_joint_vel)[env_ids])
         self._robot.write_joint_position_to_sim_index(position=joint_pos, env_ids=env_ids)
@@ -219,6 +248,10 @@ class DoorPushAlexEnv(DirectRLEnv):
             self._joint_targets[env_ids] = joint_pos
             self._arm_targets[env_ids] = joint_pos[:, self._arm_joint_ids]
             self._ik.reset(env_ids)
+            self._clamp_excess_max[env_ids] = 0.0
+            self._clamp_count[env_ids] = 0
+            self._clamp_solve_ticks[env_ids] = 0
+            self._last_settle_report = None
 
     # -- Phase 2 state accessors (used by the scripted controller / recorder) ----
 
@@ -234,7 +267,7 @@ class DoorPushAlexEnv(DirectRLEnv):
         )
 
     def proxy_pose_w(self) -> tuple[torch.Tensor, torch.Tensor]:
-        """World position and ``(x, y, z, w)`` orientation of the Alex right-gripper EE.
+        """World position and ``(x, y, z, w)`` orientation of the configured EE.
 
         Named for the frozen data-engine contract; there is no proxy sphere here.
         """
@@ -245,21 +278,26 @@ class DoorPushAlexEnv(DirectRLEnv):
     ) -> None:
         """Drive the EE toward a requested start position with a bounded IK settle.
 
-        Unlike the teleporting proxy sphere, Alex's EE can only move through its
+        Unlike the teleporting proxy sphere, a robot EE can only move through its
         kinematics: this runs up to ``cfg.settle_ticks`` physics-only control
         ticks of the same clamped IK tracking the policy path uses. Orientation
-        is ignored (the scripted task commands no rotation). Residual error is
-        absorbed by the controller's APPROACH phase.
+        is ignored (the scripted task commands no rotation), so no orientation
+        residual is defined. Fail-closed postcondition: the realized EE
+        position must land within ``cfg.start_pose_tolerance_m`` of the request
+        or :class:`StartPoseError` aborts the episode/rollout; the measured
+        requested/realized/residual record is kept for provenance
+        (:meth:`start_pose_settle_report`).
         """
         if env_ids is None:
             env_ids = self._all_env_ids
         goal = pos_w.to(device=self.device, dtype=torch.float32).reshape(len(env_ids), 3)
         del quat_w  # orientation intentionally not tracked
 
+        ticks_used = 0
         for _ in range(self.cfg.settle_ticks):
             ee_pos, _ = self._ee_pose_w()
             error = goal - ee_pos[env_ids]
-            if bool((error.norm(dim=-1) < 0.005).all()):
+            if bool((error.norm(dim=-1) < self.cfg.settle_target_m).all()):
                 break
             delta = torch.zeros((self.num_envs, 6), device=self.device)
             delta[env_ids, :3] = error.clamp(
@@ -271,6 +309,29 @@ class DoorPushAlexEnv(DirectRLEnv):
                 self.scene.write_data_to_sim()
                 self.sim.step(render=False)
                 self.scene.update(dt=self.physics_dt)
+            ticks_used += 1
+
+        ee_pos, _ = self._ee_pose_w()
+        try:
+            report = check_settle_postcondition(
+                goal[0].detach().cpu().numpy(),
+                ee_pos[env_ids][0].detach().cpu().numpy(),
+                settle_ticks_used=ticks_used,
+                max_settle_ticks=int(self.cfg.settle_ticks),
+                tolerance_m=float(self.cfg.start_pose_tolerance_m),
+            )
+        except StartPoseError as error:
+            self._last_settle_report = error.report.to_dict()
+            raise
+        self._last_settle_report = report.to_dict()
+
+    def start_pose_settle_report(self) -> dict | None:
+        """Requested/realized/residual record of the last ``set_proxy_pose``.
+
+        ``None`` when no start pose was requested since the last reset (the
+        default fixed reset needs no settle).
+        """
+        return self._last_settle_report
 
     # -- Phase 2.5 accessors (force contact + joint proprio) ----------------------
 
@@ -304,6 +365,14 @@ class DoorPushAlexEnv(DirectRLEnv):
     def robot_joint_names(self) -> list[str]:
         return list(self._robot.joint_names)
 
+    def robot_base_pos_w(self) -> torch.Tensor:
+        """World position of the (fixed) pelvis base, shape ``(num_envs, 3)``.
+
+        Reference point for the relative door-pose observation terms; live
+        root reads are valid for the URDF-spawned Alex articulation.
+        """
+        return _as_torch(self._robot.data.root_pos_w).clone()
+
     def robot_joint_limits(self) -> dict:
         """Isaac-reported joint limits (numpy, env 0): position ``(J, 2)``, velocity ``(J,)``.
 
@@ -320,6 +389,29 @@ class DoorPushAlexEnv(DirectRLEnv):
     def arm_joint_ids(self) -> list[int]:
         return list(self._arm_joint_ids)
 
+    def ik_clamp_telemetry(self) -> dict:
+        """Anti-windup clamp telemetry since the last reset (env 0, JSON-able).
+
+        Covers every IK solve after the reset — the ``set_proxy_pose`` settle
+        ticks and the per-control-tick episode solves — so a recorded episode
+        reports exactly how often (and how far) the raw diff-IK targets ran
+        past the arm's position limits before clamping.
+        """
+        excess = self._clamp_excess_max.detach().cpu().numpy()[0]
+        counts = self._clamp_count.detach().cpu().numpy()[0]
+        return {
+            "joints": {
+                name: {
+                    "max_excess_rad": float(excess[i]),
+                    "clamp_ticks": int(counts[i]),
+                }
+                for i, name in enumerate(self._arm_joint_names)
+            },
+            "n_solve_ticks": int(self._clamp_solve_ticks.detach().cpu().numpy()[0]),
+            "max_excess_rad": float(excess.max()) if excess.size else 0.0,
+            "clamp_ticks_total": int(counts.sum()),
+        }
+
     # -- internals ----------------------------------------------------------------
 
     def _ee_pose_w(self) -> tuple[torch.Tensor, torch.Tensor]:
@@ -328,4 +420,4 @@ class DoorPushAlexEnv(DirectRLEnv):
         return pos.clone(), quat.clone()
 
 
-__all__ = ["DoorPushAlexEnv"]
+__all__ = ["DoorPushRobotEnv"]

@@ -17,9 +17,10 @@ from __future__ import annotations
 
 import numpy as np
 
+from alexdoor_xas.action.frames import panel_frame
 from alexdoor_xas.action.spaces import EE_DELTA_DIM
 
-from .base import AdapterDecision, AdapterLog, AdapterStatus, StepContext
+from .base import AdapterDecision, AdapterLog, AdapterStatus, AdapterWarning, StepContext
 from .limits import RobotLimitsCfg
 
 # Joint-limit flag bands, mirroring eval/sanity.py: unclamped dls-IK targets
@@ -32,9 +33,18 @@ JOINT_LIMIT_WARN_RAD = 0.1
 class A2Adapter:
     """Convert predicted world-frame EE deltas into executable clamped deltas."""
 
-    def __init__(self, limits: RobotLimitsCfg, log: AdapterLog | None = None):
+    def __init__(
+        self,
+        limits: RobotLimitsCfg,
+        log: AdapterLog | None = None,
+        *,
+        contact_entry_shaping: bool = False,
+    ):
         self.limits = limits
         self.log = log if log is not None else AdapterLog()
+        self.contact_entry_shaping = bool(contact_entry_shaping)
+        self._velocity_consecutive_ticks: dict[int, int] = {}
+        self._velocity_warning_counts: dict[int, int] = {}
 
     def process(self, delta_world, ctx: StepContext) -> tuple[np.ndarray, AdapterDecision]:
         """Adapt one 6-dim world-frame EE delta; returns (applied, decision).
@@ -44,6 +54,7 @@ class A2Adapter:
         """
         checks: dict[str, bool] = {}
         warnings: list[str] = []
+        warning_records: list[AdapterWarning] = []
         requested = np.asarray(delta_world, dtype=np.float64).reshape(-1)
 
         checks["shape"] = requested.shape == (EE_DELTA_DIM,)
@@ -58,6 +69,7 @@ class A2Adapter:
             return self._reject(requested, checks, "EE delta contains non-finite values")
 
         applied = requested.copy()
+        corrections: list[str] = []
         applied[:3] = np.clip(
             applied[:3], -self.limits.max_pos_delta_m, self.limits.max_pos_delta_m
         )
@@ -66,6 +78,19 @@ class A2Adapter:
         )
         clamped = bool(np.any(np.abs(applied - requested) > 0.0))
         checks["within_per_tick_limits"] = not clamped
+        if clamped:
+            corrections.append(
+                f"per-tick clamp to +/-{self.limits.max_pos_delta_m} m / "
+                f"+/-{self.limits.max_rot_delta_rad} rad"
+            )
+
+        contact_shaped = self._shape_first_contact_approach(applied, ctx)
+        checks["contact_approach_bounded"] = not contact_shaped
+        if contact_shaped:
+            corrections.append(
+                "calibrated first-contact approach bound to "
+                f"{self.limits.contact_approach_max_step_m} m"
+            )
 
         checks["reachable"] = True
         if self.limits.workspace is not None:
@@ -86,18 +111,30 @@ class A2Adapter:
                     f"{self.limits.workspace.min_reach_m:.2f} m of the shoulder "
                     "(near-singular region; IK may stall)"
                 )
+                warning_records.append(
+                    AdapterWarning(
+                        id="a2.workspace_min_reach",
+                        message=warnings[-1],
+                        evidence={
+                            "distance_from_shoulder_m": self.limits.workspace.distance(predicted),
+                            "configured_min_reach_m": self.limits.workspace.min_reach_m,
+                            "tick_index": ctx.tick_index,
+                            "rollout_phase": ctx.rollout_phase,
+                        },
+                    )
+                )
 
-        warnings.extend(self._joint_limit_flags(ctx))
+        joint_warnings = self._joint_limit_flags(ctx)
+        warnings.extend(warning.message for warning in joint_warnings)
+        warning_records.extend(joint_warnings)
 
-        if clamped:
+        if corrections:
             decision = AdapterDecision(
                 status=AdapterStatus.CORRECTED,
-                reason=(
-                    f"per-tick clamp to +/-{self.limits.max_pos_delta_m} m / "
-                    f"+/-{self.limits.max_rot_delta_rad} rad"
-                ),
+                reason="; ".join(corrections),
                 checks=checks,
                 warnings=tuple(warnings),
+                warning_records=tuple(warning_records),
                 requested=requested,
                 applied=applied,
             )
@@ -106,11 +143,49 @@ class A2Adapter:
                 status=AdapterStatus.ACCEPTED,
                 checks=checks,
                 warnings=tuple(warnings),
+                warning_records=tuple(warning_records),
                 requested=requested,
                 applied=applied,
             )
         self.log.record(decision)
         return applied, decision
+
+    def _shape_first_contact_approach(
+        self, applied: np.ndarray, ctx: StepContext
+    ) -> bool:
+        """Bound only the unsensed inward transition through the pre-contact corridor.
+
+        Learned A2/A3 policies have no scripted phase label. Geometry and the
+        live contact flag provide the minimal phase-independent equivalent of
+        Alex's calibrated scripted-controller contact approach bound: free
+        space, established-contact commands, and sub-threshold sensor-dropout
+        commands are unchanged. The impact trigger is twice the calibrated
+        approach step: it targets the observed ~15 mm force-producing entries
+        without repeatedly slowing the observed 5-10 mm post-contact motion.
+        """
+        limit = self.limits.contact_approach_max_step_m
+        clearance = self.limits.contact_approach_start_clearance_m
+        surface_x = self.limits.contact_surface_x_m
+        if (
+            not self.contact_entry_shaping
+            or limit is None
+            or clearance is None
+            or surface_x is None
+            or ctx.door_frame is None
+            or ctx.contact_sensed is True
+            or not np.isfinite(ctx.hinge_angle_rad)
+        ):
+            return False
+        panel = panel_frame(ctx.door_frame, ctx.hinge_angle_rad)
+        ee_panel = panel.point_from_world(ctx.ee_pos_w)
+        delta_panel = panel.vector_from_world(applied[:3])
+        translation_norm = float(np.linalg.norm(applied[:3]))
+        inside_corridor = ee_panel[0] <= surface_x + clearance
+        impact_risk = -delta_panel[0] > 2.0 * limit
+        if not (inside_corridor and impact_risk and translation_norm > limit):
+            return False
+        applied[:3] *= limit / translation_norm
+        return True
 
     def process_chunk(
         self, deltas_world, ctx: StepContext
@@ -146,9 +221,14 @@ class A2Adapter:
                 hinge_angle_rad=ctx.hinge_angle_rad,
                 hinge_velocity_rad_s=ctx.hinge_velocity_rad_s,
                 ee_pos_w=ee_pos.copy(),
+                ee_quat_w_xyzw=ctx.ee_quat_w_xyzw,
                 contact_sensed=ctx.contact_sensed,
+                contact_force_n=ctx.contact_force_n,
                 joint_state=ctx.joint_state if i == 0 else None,
                 joint_limits=ctx.joint_limits if i == 0 else None,
+                joint_names=ctx.joint_names,
+                tick_index=ctx.tick_index,
+                rollout_phase=ctx.rollout_phase,
             )
             step_applied, decision = self.process(delta, step_ctx)
             decisions.append(decision)
@@ -159,30 +239,79 @@ class A2Adapter:
             ee_pos += step_applied[:3]
         return applied, decisions
 
-    def _joint_limit_flags(self, ctx: StepContext) -> list[str]:
+    def _joint_limit_flags(self, ctx: StepContext) -> list[AdapterWarning]:
         if ctx.joint_state is None or ctx.joint_limits is None:
             return []
         targets = np.asarray(ctx.joint_state.get("joint_pos_target"), dtype=np.float64)
         pos_limits = np.asarray(ctx.joint_limits.get("joint_pos_limits"), dtype=np.float64)
-        warnings: list[str] = []
+        warnings: list[AdapterWarning] = []
+        names = ctx.joint_names or tuple(f"joint_{index}" for index in range(targets.size))
         if targets.ndim == 1 and pos_limits.shape == (targets.shape[0], 2):
             excess = np.maximum(pos_limits[:, 0] - targets, targets - pos_limits[:, 1])
-            worst = float(np.max(excess))
-            if worst > JOINT_LIMIT_IGNORE_RAD:
-                joint = int(np.argmax(excess))
+            for joint in np.flatnonzero(excess > JOINT_LIMIT_IGNORE_RAD):
+                joint = int(joint)
+                joint_excess = float(excess[joint])
+                message = (
+                    f"joint target {joint} exceeds its position limit by {joint_excess:.4f} rad"
+                    + (
+                        ""
+                        if joint_excess <= JOINT_LIMIT_WARN_RAD
+                        else " (beyond the known IK-drift band)"
+                    )
+                )
                 warnings.append(
-                    f"joint target {joint} exceeds its position limit by {worst:.4f} rad"
-                    + ("" if worst <= JOINT_LIMIT_WARN_RAD else " (beyond the known IK-drift band)")
+                    AdapterWarning(
+                        id="a2.joint_position_limit",
+                        message=message,
+                        evidence={
+                            "joint_index": joint,
+                            "joint_name": names[joint],
+                            "tick_index": ctx.tick_index,
+                            "rollout_phase": ctx.rollout_phase,
+                            "exceedance_rad": joint_excess,
+                            "configured_lower_limit_rad": float(pos_limits[joint, 0]),
+                            "configured_upper_limit_rad": float(pos_limits[joint, 1]),
+                            "target_rad": float(targets[joint]),
+                        },
+                    )
                 )
         velocities = np.asarray(ctx.joint_state.get("joint_vel"), dtype=np.float64)
         vel_limits = np.asarray(ctx.joint_limits.get("joint_vel_limits"), dtype=np.float64)
         if velocities.shape == vel_limits.shape and velocities.size:
             over = np.abs(velocities) - vel_limits
-            worst_vel = float(np.max(over))
-            if worst_vel > 0.0:
-                joint = int(np.argmax(over))
+            for index in range(velocities.size):
+                if over[index] > 0.0:
+                    self._velocity_consecutive_ticks[index] = (
+                        self._velocity_consecutive_ticks.get(index, 0) + 1
+                    )
+                    self._velocity_warning_counts[index] = (
+                        self._velocity_warning_counts.get(index, 0) + 1
+                    )
+                else:
+                    self._velocity_consecutive_ticks[index] = 0
+            for joint in np.flatnonzero(over > 0.0):
+                joint = int(joint)
+                joint_excess = float(over[joint])
+                message = (
+                    f"joint {joint} velocity exceeds its limit by {joint_excess:.3f} rad/s"
+                )
                 warnings.append(
-                    f"joint {joint} velocity exceeds its limit by {worst_vel:.3f} rad/s"
+                    AdapterWarning(
+                        id="a2.joint_velocity_limit",
+                        message=message,
+                        evidence={
+                            "joint_index": joint,
+                            "joint_name": names[joint],
+                            "tick_index": ctx.tick_index,
+                            "rollout_phase": ctx.rollout_phase,
+                            "measured_velocity_rad_s": float(abs(velocities[joint])),
+                            "configured_limit_rad_s": float(vel_limits[joint]),
+                            "exceedance_rad_s": joint_excess,
+                            "consecutive_ticks": self._velocity_consecutive_ticks[joint],
+                            "duration_ticks": self._velocity_consecutive_ticks[joint],
+                            "count": self._velocity_warning_counts[joint],
+                        },
+                    )
                 )
         return warnings
 

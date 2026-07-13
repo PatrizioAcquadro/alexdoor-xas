@@ -108,6 +108,13 @@ class DoorPushEnvCfg(DirectRLEnvCfg):
     max_rot_delta_rad = 0.05
     """Per-component axis-angle rotation delta clamp, radians per control tick."""
 
+    door_yaw_rad: float = 0.0
+    """Door-task pose variation: yaw about the hinge axis, authored into the
+    generated scene USD at env construction (fixed for the process)."""
+
+    door_offset_xy: tuple[float, float] = (0.0, 0.0)
+    """Door-task pose variation: world-frame XY translation in meters."""
+
 
 __all__ = [
     "ACTION_TERMS",

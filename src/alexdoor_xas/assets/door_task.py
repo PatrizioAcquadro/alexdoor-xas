@@ -32,9 +32,37 @@ def door_task_usd() -> Path:
     return ensure_door_task_usd()
 
 
-def ensure_door_task_usd(path: Path | None = None) -> Path:
-    """Create or refresh the deterministic single-door task USD and validate it."""
-    usd_path = Path(path) if path is not None else DOOR_TASK_USD
+def door_task_pose_usd_path(door_yaw_rad: float, door_xy_offset_m: tuple[float, float]) -> Path:
+    """Deterministic USD path for a door-task pose (default pose -> DOOR_TASK_USD).
+
+    Non-default poses get their own file next to the default one so concurrent
+    per-pose generation processes never overwrite each other's scene.
+    """
+    if door_yaw_rad == 0.0 and tuple(door_xy_offset_m) == (0.0, 0.0):
+        return DOOR_TASK_USD
+    name = (
+        f"door_task_yaw{door_yaw_rad:+.4f}"
+        f"_dx{door_xy_offset_m[0]:+.3f}_dy{door_xy_offset_m[1]:+.3f}.usda"
+    )
+    return DOOR_TASK_USD.parent / name
+
+
+def ensure_door_task_usd(
+    path: Path | None = None,
+    door_yaw_rad: float = 0.0,
+    door_xy_offset_m: tuple[float, float] = (0.0, 0.0),
+) -> Path:
+    """Create or refresh the deterministic single-door task USD and validate it.
+
+    ``door_yaw_rad`` / ``door_xy_offset_m`` author a door-task pose: the whole
+    door assembly is rotated by yaw about the Doorframe's (hinge) world
+    position, then translated in world XY. The ``FixDoorframe`` world-side
+    anchor is computed from the composed (posed) transform, so it follows the
+    pose automatically. The default pose authors byte-identical USD to before.
+    """
+    usd_path = (
+        Path(path) if path is not None else door_task_pose_usd_path(door_yaw_rad, door_xy_offset_m)
+    )
     usd_path = usd_path.expanduser()
     usd_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -42,7 +70,7 @@ def ensure_door_task_usd(path: Path | None = None) -> Path:
     if tmp_path.exists():
         tmp_path.unlink()
 
-    _author_door_task_usd(tmp_path)
+    _author_door_task_usd(tmp_path, door_yaw_rad, tuple(door_xy_offset_m))
     new_text = tmp_path.read_text()
     old_text = usd_path.read_text() if usd_path.exists() else None
     if old_text != new_text:
@@ -106,7 +134,13 @@ def validate_door_task_usd(path: str | Path) -> None:
     _validate_dependencies(usd_path, stage, UsdUtils)
 
 
-def _author_door_task_usd(path: Path) -> None:
+def _author_door_task_usd(
+    path: Path,
+    door_yaw_rad: float = 0.0,
+    door_xy_offset_m: tuple[float, float] = (0.0, 0.0),
+) -> None:
+    import math
+
     from pxr import Gf, Sdf, Usd, UsdGeom, UsdLux, UsdPhysics
 
     if not paths.DOOR_USD.is_file():
@@ -132,6 +166,31 @@ def _author_door_task_usd(path: Path) -> None:
     door_root = UsdGeom.Xform.Define(stage, "/World/DoorTaskDoor").GetPrim()
     door_root.GetReferences().AddReference(str(paths.DOOR_USD), Sdf.Path("/DoorObject"))
     UsdPhysics.ArticulationRootAPI.Apply(door_root)
+
+    if door_yaw_rad != 0.0 or door_xy_offset_m != (0.0, 0.0):
+        # Door-task pose: rotate the whole assembly about the Doorframe's
+        # (hinge) world position, then translate in world XY. The referenced
+        # door root already carries an inherited xform op, so the pose is
+        # baked into one matrix op (existing local transform composed with the
+        # world-space pivot pose; Gf uses row-vector composition, left applied
+        # first). Authored before the FixDoorframe anchor below, whose fresh
+        # XformCache composes the posed transform — the world anchor follows.
+        # The default pose authors nothing so its USD stays byte-identical.
+        unposed_frame = stage.GetPrimAtPath("/World/DoorTaskDoor/Doorframe")
+        pivot = Gf.Vec3d(
+            UsdGeom.XformCache().GetLocalToWorldTransform(unposed_frame).ExtractTranslation()
+        )
+        offset = Gf.Vec3d(door_xy_offset_m[0], door_xy_offset_m[1], 0.0)
+        pose = (
+            Gf.Matrix4d().SetTranslate(-pivot)
+            * Gf.Matrix4d().SetRotate(
+                Gf.Rotation(Gf.Vec3d(0.0, 0.0, 1.0), math.degrees(door_yaw_rad))
+            )
+            * Gf.Matrix4d().SetTranslate(pivot + offset)
+        )
+        door_xf = UsdGeom.Xformable(door_root)
+        existing_local = door_xf.GetLocalTransformation()
+        door_xf.MakeMatrixXform().Set(existing_local * pose)
 
     frame = stage.OverridePrim("/World/DoorTaskDoor/Doorframe")
     frame_rb = UsdPhysics.RigidBodyAPI.Apply(frame)
@@ -218,6 +277,16 @@ def _validate_world_joint_anchor(fixed_joint, frame, usd_path: Path) -> None:
             "door frame fixed joint world anchor must match the frame's world pose "
             f"({expected_pos}), got {local_pos0}: {usd_path}"
         )
+    # The rotation half of the anchor must match too: an identity rot0 under a
+    # yawed door pose would pass the position check yet twist the doorframe at
+    # solve time.
+    expected_rot = Gf.Quatf(frame_xf.RemoveScaleShear().ExtractRotationQuat())
+    delta = Gf.Quatf(local_rot0) * expected_rot.GetInverse()
+    if abs(abs(delta.GetReal()) - 1.0) > 1e-5:
+        raise ValueError(
+            "door frame fixed joint world anchor rotation must match the frame's "
+            f"world orientation ({expected_rot}), got {local_rot0}: {usd_path}"
+        )
 
 
 def _validate_dependencies(usd_path: Path, stage, usd_utils) -> None:
@@ -273,6 +342,7 @@ def _layer_text(layer) -> str:
 
 __all__ = [
     "DOOR_TASK_USD",
+    "door_task_pose_usd_path",
     "door_task_usd",
     "ensure_door_task_usd",
     "validate_door_task_usd",

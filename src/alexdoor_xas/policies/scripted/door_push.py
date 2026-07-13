@@ -85,6 +85,13 @@ class DoorPushControllerCfg:
     target_open_angle_rad: float = math.radians(50.0)
     hold_ticks: int = 30
     max_step_m: float = 0.015
+    contact_approach_max_step_m: float | None = None
+    """Optional tighter translation limit for PRE_CONTACT and CONTACT.
+
+    ``None`` preserves the general controller's historical ``max_step_m``.
+    Collision-heavy robot presets can slow only the final normal approach
+    without lengthening free-space motion or the tangential push.
+    """
 
     approach_max_ticks: int = 300
     align_max_ticks: int = 150
@@ -295,8 +302,14 @@ class DoorPushController:
         else:
             error = target_door - ee_door
             distance = float(np.linalg.norm(error))
-            if distance > cfg.max_step_m:
-                step = error * (cfg.max_step_m / distance)
+            max_step_m = cfg.max_step_m
+            if (
+                state.phase in (DoorPushPhase.PRE_CONTACT, DoorPushPhase.CONTACT)
+                and cfg.contact_approach_max_step_m is not None
+            ):
+                max_step_m = cfg.contact_approach_max_step_m
+            if distance > max_step_m:
+                step = error * (max_step_m / distance)
             else:
                 step = error
         return self._command(step, target_door, contact_geometric)

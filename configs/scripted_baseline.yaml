@@ -9,6 +9,11 @@ run:
   max_ticks: 600
   video: false
   clean_shutdown: false
+  export: true          # false: record under outputs/ only, never write datasets/
+  door_yaw_deg: 0.0     # door-task pose variation: yaw about the hinge axis
+  door_offset_x: 0.0    # door-task pose variation: world-x translation (m)
+  door_offset_y: 0.0    # door-task pose variation: world-y translation (m)
+  door_pose_id: null    # pose label recorded into episodes/manifests (e.g. D0)
 
 controller:
   overrides:
@@ -21,6 +26,7 @@ controller:
     align_standoff_m: null
     pre_contact_clearance_m: null
     contact_clearance_m: null
+    contact_approach_max_step_m: null
     release_standoff_m: null
     approach_tol_m: null
     align_tol_m: null

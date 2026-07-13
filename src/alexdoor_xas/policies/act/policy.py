@@ -2,10 +2,10 @@
 
 Bridges the trained :class:`ACTModel` to the adapter-v1 rollout driver
 (``adapters/rollout.rollout_chunks``) without importing it — the adapters
-never import policies and vice versa; scripts compose the two. The env is
-duck-typed through the frozen Phase 2 accessor surface (``proxy_pose_w`` /
-``hinge_state`` / optional ``contact_sensed``), so the pure test fakes and
-both Isaac envs work unchanged. No Isaac imports.
+never import policies and vice versa; scripts compose the two. The live obs
+readers and the success-stop wrapper are shared across chunk policies and
+live in ``policies.common.obs`` (re-exported here for compatibility).
+No Isaac imports.
 """
 
 from __future__ import annotations
@@ -16,57 +16,20 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from alexdoor_xas.dataset import OBS_PRESETS, DatasetNormStats
+from alexdoor_xas import paths
+from alexdoor_xas.assets.alex_v2_contract import (
+    RobotAssetRef,
+    assert_checkpoint_runtime_compatible,
+)
+from alexdoor_xas.dataset import DatasetNormStats
 from alexdoor_xas.policies.act.checkpoint import load_checkpoint
 from alexdoor_xas.policies.act.model import ACTModel
-
-OBS_CLIP = 10.0
-"""Normalized-observation clip: near-constant training dims have their std
-floored at 1e-8, so a small absolute rollout deviation would otherwise map to
-an enormous normalized value far outside anything the model saw."""
-
-ROLLOUT_OBS_PRESETS = ("core", "core_contact")
-"""Presets with a closed-loop env reader. ``alex_full`` training remains
-possible offline, but its joint-state/force layout has no verified live
-reader yet, so rollout refuses it rather than risk a silent mismatch."""
-
-
-def _scalar(value) -> float:
-    if isinstance(value, torch.Tensor):
-        return float(value.detach().cpu().reshape(-1)[0])
-    return float(np.asarray(value).reshape(-1)[0])
-
-
-def build_env_obs(env, preset: str) -> np.ndarray:
-    """Read the frozen observation preset live from the env, dataset-ordered."""
-    if preset not in OBS_PRESETS:
-        raise ValueError(f"unknown obs preset {preset!r} (known: {sorted(OBS_PRESETS)})")
-    if preset not in ROLLOUT_OBS_PRESETS:
-        raise ValueError(
-            f"obs preset {preset!r} has no closed-loop env reader "
-            f"(supported: {list(ROLLOUT_OBS_PRESETS)})"
-        )
-    ee_pos, ee_quat = env.proxy_pose_w()
-    angle, velocity = env.hinge_state()
-    parts = [
-        np.asarray(
-            ee_pos.detach().cpu().numpy() if isinstance(ee_pos, torch.Tensor) else ee_pos,
-            dtype=np.float64,
-        ).reshape(-1)[:3],
-        np.asarray(
-            ee_quat.detach().cpu().numpy() if isinstance(ee_quat, torch.Tensor) else ee_quat,
-            dtype=np.float64,
-        ).reshape(-1)[:4],
-        np.array([_scalar(angle), _scalar(velocity)], dtype=np.float64),
-    ]
-    if preset == "core_contact":
-        if not hasattr(env, "contact_sensed"):
-            raise ValueError(
-                "obs preset 'core_contact' needs env.contact_sensed(); "
-                "this env does not expose force contact sensing"
-            )
-        parts.append(np.array([_scalar(env.contact_sensed())], dtype=np.float64))
-    return np.concatenate(parts)
+from alexdoor_xas.policies.common.obs import (
+    OBS_CLIP,
+    ROLLOUT_OBS_PRESETS,
+    build_env_obs,
+    stop_on_hinge_angle,
+)
 
 
 class ActPolicy:
@@ -94,15 +57,39 @@ class ActPolicy:
         self.obs_clip = obs_clip
         self.checkpoint_config: dict | None = None
         self.checkpoint_meta: dict | None = None
+        self.checkpoint_split_episode_ids: dict[str, tuple[str, ...]] = {}
+        self.robot_asset: RobotAssetRef | None = None
+        self.robot_compatibility_label: str | None = None
         self.model.to(self.device)
         self.model.eval()
 
     @classmethod
-    def from_checkpoint(cls, path: str | Path, device: str = "cpu") -> ActPolicy:
+    def from_checkpoint(
+        cls,
+        path: str | Path,
+        device: str = "cpu",
+        *,
+        runtime_asset: RobotAssetRef | None = None,
+        allow_cross_model_evaluation: bool = False,
+    ) -> ActPolicy:
         loaded = load_checkpoint(path, map_location=device)
         policy = cls(loaded.model, loaded.stats, device=device)
         policy.checkpoint_config = loaded.config
         policy.checkpoint_meta = loaded.meta
+        policy.checkpoint_split_episode_ids = loaded.split_episode_ids
+        policy.robot_asset = loaded.robot_asset
+        dataset = loaded.config.get("dataset", {})
+        checkpoint_is_v2 = (
+            isinstance(dataset, dict) and dataset.get("task") == paths.ALEX_V2_TASK
+        )
+        if checkpoint_is_v2 and runtime_asset is None:
+            raise ValueError("Alex V2 policy loading requires a runtime robot asset")
+        if runtime_asset is not None:
+            policy.robot_compatibility_label = assert_checkpoint_runtime_compatible(
+                loaded.robot_asset,
+                runtime_asset,
+                allow_cross_model_evaluation=allow_cross_model_evaluation,
+            )
         return policy
 
     @property
@@ -174,25 +161,6 @@ def act_chunk_source(
         return action.reshape(1, -1)
 
     return ensemble_source
-
-
-def stop_on_hinge_angle(source: Callable, threshold_rad: float) -> Callable:
-    """End the rollout once the door is open past ``threshold_rad``.
-
-    The demos end when the scripted FSM completes, so a learned policy has no
-    in-distribution behavior after task completion — left running, the
-    extrapolating arm can knock the door shut again. This wrapper terminates
-    at the first source query (chunk boundary) where the hinge angle has
-    passed the threshold, bounding post-task extrapolation the same way the
-    scripted episode termination does.
-    """
-
-    def wrapped(ctx):
-        if ctx.hinge_angle_rad >= threshold_rad:
-            return None
-        return source(ctx)
-
-    return wrapped
 
 
 __all__ = [

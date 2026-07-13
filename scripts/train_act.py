@@ -9,7 +9,7 @@ prediction report over the validation split. W&B tracking is optional and
 disabled by default (no network or login needed)::
 
     PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/train_act.py \
-        dataset.space=A2_ee_delta
+        dataset.space=A2_ee_delta train.device=cuda
 """
 
 from __future__ import annotations
@@ -56,6 +56,8 @@ def main() -> int:
     cfg = parse_config()
 
     # Heavy imports after config resolution (config layer stays torch-free).
+    import torch
+
     from alexdoor_xas.policies.act.checkpoint import save_checkpoint
     from alexdoor_xas.policies.act.data import (
         ActDataError,
@@ -68,6 +70,18 @@ def main() -> int:
     from alexdoor_xas.policies.act.train import make_seeded_model, train_act
     from alexdoor_xas.tracking import load_wandb_config, start_wandb_run
 
+    if cfg.train.device.startswith("cuda") and not torch.cuda.is_available():
+        print(
+            "FAIL: train.device=cuda but torch.cuda.is_available() is False — "
+            "run on the GPU host or explicitly pass train.device=cpu"
+        )
+        return 2
+    device_info = (
+        torch.cuda.get_device_name(torch.device(cfg.train.device))
+        if cfg.train.device.startswith("cuda")
+        else "CPU"
+    )
+
     try:
         data = load_act_data(cfg.dataset)
     except ActDataError as error:
@@ -75,7 +89,12 @@ def main() -> int:
         return 1
 
     run_id = cfg.resolved_run_id()
-    run_dir = paths.OUTPUTS_DIR / cfg.run.experiment / run_id
+    output_root = (
+        paths.ALEX_V2_OUTPUTS_DIR
+        if cfg.dataset.task == paths.ALEX_V2_TASK
+        else paths.OUTPUTS_DIR
+    )
+    run_dir = output_root / cfg.run.experiment / run_id
     checkpoint_dir = run_dir / "checkpoints"
     train_ids = data.train_ids
     if cfg.train.overfit_episodes is not None:
@@ -92,7 +111,8 @@ def main() -> int:
         f"[train_act] {cfg.dataset.task}/{cfg.dataset.space}/{cfg.dataset.version} "
         f"obs={cfg.dataset.obs_preset}({data.obs_dim}) action_dim={data.action_dim} "
         f"episodes train={len(train_ids)} val={len(data.val_ids)} "
-        f"stats={data.stats_source} params={model.n_parameters:,}"
+        f"stats={data.stats_source} params={model.n_parameters:,} "
+        f"device={cfg.train.device} ({device_info})"
     )
     if cfg.train.overfit_episodes is not None:
         print(f"[train_act] overfit mode: {len(train_ids)} train episode(s)")
@@ -134,7 +154,19 @@ def main() -> int:
             run.log(payload)
             meta = {"epoch": stats.epoch, "val_l1": stats.val_l1, "run_id": run_id}
             if is_best:
-                save_checkpoint(best_path, model, config_dict, data.stats, meta=meta)
+                save_checkpoint(
+                    best_path,
+                    model,
+                    config_dict,
+                    data.stats,
+                    meta=meta,
+                    robot_asset=data.robot_asset,
+                    split_episode_ids={
+                        "train": train_ids,
+                        "val": data.val_ids,
+                        "test": data.test_ids,
+                    },
+                )
 
         history = train_act(
             model, make_train, cfg.train, make_val_batches=make_val, on_epoch=on_epoch
@@ -145,11 +177,29 @@ def main() -> int:
             config_dict,
             data.stats,
             meta={"epoch": cfg.train.epochs - 1, "run_id": run_id},
+            robot_asset=data.robot_asset,
+            split_episode_ids={"train": train_ids, "val": data.val_ids, "test": data.test_ids},
         )
         if not best_path.is_file():  # no val improvement recorded (degenerate run)
-            save_checkpoint(best_path, model, config_dict, data.stats, meta={"run_id": run_id})
+            save_checkpoint(
+                best_path,
+                model,
+                config_dict,
+                data.stats,
+                meta={"run_id": run_id},
+                robot_asset=data.robot_asset,
+                split_episode_ids={
+                    "train": train_ids,
+                    "val": data.val_ids,
+                    "test": data.test_ids,
+                },
+            )
 
-        policy = ActPolicy.from_checkpoint(best_path, device=cfg.train.device)
+        policy = ActPolicy.from_checkpoint(
+            best_path,
+            device=cfg.train.device,
+            runtime_asset=data.robot_asset,
+        )
         val_records = [data.dataset.by_id(episode_id) for episode_id in data.val_ids]
         report = open_loop_report(
             policy,
@@ -173,7 +223,9 @@ def main() -> int:
                 "config": _jsonable(config_dict),
                 "run_id": run_id,
                 "n_parameters": model.n_parameters,
+                "device_info": device_info,
                 "stats_source": data.stats_source,
+                "robot_asset": data.robot_asset.to_dict() if data.robot_asset else None,
                 "train_episode_ids": list(train_ids),
                 "val_episode_ids": list(data.val_ids),
                 "checkpoints": {"best": str(best_path), "last": str(last_path)},
