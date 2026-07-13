@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -101,8 +102,49 @@ def _load_plan(path: Path, config: SweepConfig) -> dict[str, Any]:
         raise ValueError("scale selection algorithm mismatch")
     if tuple(pose["pose_id"] for pose in plan["poses"]) != config.dataset.pose_ids:
         raise ValueError("scale pose inventory/order mismatch")
+    authoritative_path = paths.REPO_ROOT / config.selection.pose_plan
+    authoritative = json.loads(authoritative_path.read_text())
+    calibration = json.loads((paths.REPO_ROOT / config.selection.calibration).read_text())
+    if plan["calibration_fingerprint"] != calibration.get("fingerprint"):
+        raise ValueError("scale calibration fingerprint differs from the canonical artifact")
+    canonical = json.loads(
+        (paths.REPO_ROOT / config.selection.canonical_pose_plan).read_text()
+    )
+    canonical_poses = {pose["pose_id"]: pose for pose in canonical["poses"]}
+    authoritative_poses = {pose["pose_id"]: pose for pose in authoritative["poses"]}
     all_seeds: list[int] = []
     for pose in plan["poses"]:
+        expected_pose_keys = {
+            "pose_id",
+            "door_yaw_deg",
+            "door_yaw_rad",
+            "door_offset_x_m",
+            "door_offset_y_m",
+            "source_seed_start",
+            "source_seed_stop",
+            "overdraw_seed_start",
+            "overdraw_seed_stop",
+            "validated_probe",
+        }
+        if set(pose) != expected_pose_keys:
+            raise ValueError(f"pose {pose.get('pose_id')} plan keys mismatch")
+        pose_id = pose["pose_id"]
+        geometry_fields = (
+            "door_yaw_deg",
+            "door_yaw_rad",
+            "door_offset_x_m",
+            "door_offset_y_m",
+        )
+        if any(pose[name] != canonical_poses[pose_id][name] for name in geometry_fields):
+            raise ValueError(f"pose {pose_id} geometry differs from the canonical pose definition")
+        seed_fields = (
+            "source_seed_start",
+            "source_seed_stop",
+            "overdraw_seed_start",
+            "overdraw_seed_stop",
+        )
+        if any(pose[name] != authoritative_poses[pose_id][name] for name in seed_fields):
+            raise ValueError(f"pose {pose_id} seed ranges differ from the authoritative plan")
         source = list(range(pose["source_seed_start"], pose["source_seed_stop"]))
         overdraw = list(range(pose["overdraw_seed_start"], pose["overdraw_seed_stop"]))
         if len(source) != plan["source_candidates_per_pose"]:
@@ -393,6 +435,144 @@ def _source_fingerprint(paths_: list[Path]) -> str:
     return digest.hexdigest()
 
 
+def _validate_candidate_provenance(
+    plan: dict[str, Any],
+    provenance: list[dict[str, Any]],
+    *,
+    selected_episode_ids: list[str],
+    expected_source_fingerprint: str,
+    require_source_paths: bool,
+) -> dict[str, Any]:
+    """Validate the complete candidate ledger and selected-source binding."""
+    expected_inventory = {
+        (pose["pose_id"], seed): namespace
+        for pose in plan["poses"]
+        for namespace, start, stop in (
+            ("source", pose["source_seed_start"], pose["source_seed_stop"]),
+            ("overdraw", pose["overdraw_seed_start"], pose["overdraw_seed_stop"]),
+        )
+        for seed in range(start, stop)
+    }
+    if len(provenance) != len(expected_inventory):
+        raise ValueError(
+            f"candidate provenance inventory has {len(provenance)} rows, "
+            f"expected {len(expected_inventory)}"
+        )
+    required_keys = {
+        "pose_id",
+        "seed",
+        "namespace",
+        "episode_id",
+        "source_path",
+        "content_group_sha256",
+        "decision",
+        "reasons",
+        "replacement_for_seed",
+    }
+    rows: dict[tuple[str, int], dict[str, Any]] = {}
+    for row in provenance:
+        if not isinstance(row, dict) or set(row) != required_keys:
+            raise ValueError("candidate provenance row keys are invalid")
+        key = (str(row["pose_id"]), int(row["seed"]))
+        if key in rows:
+            raise ValueError(f"candidate provenance inventory duplicates {key}")
+        if expected_inventory.get(key) != row["namespace"]:
+            raise ValueError(f"candidate provenance namespace/seed inventory mismatch: {key}")
+        rows[key] = row
+    if set(rows) != set(expected_inventory):
+        raise ValueError("candidate provenance inventory is missing or has extra pose/seed rows")
+
+    selected = [row for row in provenance if row["decision"] == "SELECTED"]
+    if {str(row["episode_id"]) for row in selected} != set(selected_episode_ids):
+        raise ValueError("selected candidate episode IDs differ from the paired exports")
+    if len(selected) != len(selected_episode_ids) or len(selected_episode_ids) != len(
+        set(selected_episode_ids)
+    ):
+        raise ValueError("selected candidate episode IDs are duplicated")
+    expected_per_pose = int(plan["selected_episodes_per_pose"])
+    for pose in plan["poses"]:
+        count = sum(row["pose_id"] == pose["pose_id"] for row in selected)
+        if count != expected_per_pose:
+            raise ValueError(f"pose {pose['pose_id']} selected candidate balance is {count}")
+
+    selected_groups: set[str] = set()
+    skipped_sources: dict[tuple[str, int], dict[str, Any]] = {}
+    replacement_targets: set[tuple[str, int]] = set()
+    selected_paths: list[Path] = []
+    allowed = {"SELECTED", "SKIPPED", "NOT_NEEDED_OVERDRAW"}
+    for row in provenance:
+        decision = row["decision"]
+        reasons = row["reasons"]
+        if decision not in allowed or not isinstance(reasons, list):
+            raise ValueError("candidate provenance decision/reasons are invalid")
+        if decision == "SKIPPED" and not reasons:
+            raise ValueError("skipped candidate has no deterministic rejection reason")
+        if decision != "SKIPPED" and reasons:
+            raise ValueError("admitted/not-needed candidate unexpectedly carries rejection reasons")
+        if row["namespace"] == "source" and decision == "NOT_NEEDED_OVERDRAW":
+            raise ValueError("source candidate cannot be marked not-needed overdraw")
+        if decision == "SKIPPED" and row["namespace"] == "source":
+            skipped_sources[(row["pose_id"], row["seed"])] = row
+        replacement = row["replacement_for_seed"]
+        if replacement is not None:
+            if decision != "SELECTED" or row["namespace"] != "overdraw":
+                raise ValueError("replacement linkage belongs only to selected overdraw")
+            target = (row["pose_id"], int(replacement))
+            if target not in rows or rows[target]["namespace"] != "source":
+                raise ValueError("replacement link does not target a source candidate")
+            if rows[target]["decision"] != "SKIPPED" or target in replacement_targets:
+                raise ValueError(
+                    "replacement link is false, duplicated, or targets admitted source"
+                )
+            replacement_targets.add(target)
+        elif decision == "SELECTED" and row["namespace"] == "overdraw" and skipped_sources:
+            raise ValueError("selected overdraw candidate lacks deterministic replacement linkage")
+
+        if decision != "SELECTED":
+            continue
+        group = row["content_group_sha256"]
+        if not isinstance(group, str) or re.fullmatch(r"[0-9a-f]{64}", group) is None:
+            raise ValueError("selected candidate content-group hash is invalid")
+        if group in selected_groups:
+            raise ValueError("selected candidate content-group hashes are duplicated")
+        selected_groups.add(group)
+        if require_source_paths:
+            source_path = Path(str(row["source_path"]))
+            if not source_path.is_file():
+                raise ValueError(f"selected candidate source path is missing: {source_path}")
+            episode = read_episode(source_path)
+            if (
+                episode.meta.seed != row["seed"]
+                or episode.meta.episode_id != row["episode_id"]
+                or episode.extras.get("door_pose_id") != row["pose_id"]
+            ):
+                raise ValueError("selected candidate raw pose/seed/episode provenance mismatch")
+            if episode_content_key(load_episode_record(source_path)) != group:
+                raise ValueError("selected candidate content-group hash differs from raw source")
+            sanity = check_alex_episode(episode, force_error_n=FORCE_DATASET_LIMIT_N)
+            if sanity.errors or episode.outcome is None or not episode.outcome.success:
+                raise ValueError("selected candidate is not safe and successful")
+            selected_paths.append(source_path)
+    if set(skipped_sources) != replacement_targets:
+        raise ValueError("candidate replacement linkage does not cover every skipped source")
+    if require_source_paths and _source_fingerprint(selected_paths) != expected_source_fingerprint:
+        raise ValueError("selected-source fingerprint differs from the master manifest")
+    canonical_ledger = hashlib.sha256(
+        json.dumps(provenance, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    decisions = {
+        name: sum(row["decision"] == name for row in provenance) for name in sorted(allowed)
+    }
+    return {
+        "status": "PASS",
+        "candidate_count": len(provenance),
+        "selected_count": len(selected),
+        "decision_counts": decisions,
+        "candidate_provenance_sha256": canonical_ledger,
+        "source_fingerprint_sha256": expected_source_fingerprint,
+    }
+
+
 def publish(
     config: SweepConfig,
     plan: dict[str, Any],
@@ -415,6 +595,13 @@ def publish(
         raise RuntimeError("generation state pose plan hash mismatch")
     selected, selected_paths, provenance = _select_master(plan, state)
     source_fp = _source_fingerprint(selected_paths)
+    _validate_candidate_provenance(
+        plan,
+        provenance,
+        selected_episode_ids=[episode.meta.episode_id for episode in selected],
+        expected_source_fingerprint=source_fp,
+        require_source_paths=True,
+    )
     robot_asset = dataset_robot_asset_payload(selected)
     per_pose = {
         pose: sum(episode.extras.get("door_pose_id") == pose for episode in selected)
@@ -569,6 +756,12 @@ def verify(config: SweepConfig, plan: dict[str, Any], *, datasets_root: Path) ->
         raise RuntimeError("scale master manifest hash mismatch")
     if manifest.get("schema") != MASTER_SCHEMA or manifest.get("publication_status") != "COMPLETE":
         raise RuntimeError("scale master manifest contract mismatch")
+    if manifest.get("pose_plan") != config.selection.pose_plan:
+        raise RuntimeError("scale master pose-plan path mismatch")
+    if manifest.get("pose_plan_sha256") != _plan_hash(
+        paths.REPO_ROOT / config.selection.pose_plan
+    ):
+        raise RuntimeError("scale master pose-plan hash mismatch")
     if manifest.get("counts") != {
         "total": 550,
         "per_pose": {pose: 110 for pose in config.dataset.pose_ids},
@@ -589,6 +782,15 @@ def verify(config: SweepConfig, plan: dict[str, Any], *, datasets_root: Path) ->
         for episode_id in a2.episode_ids
     ):
         raise RuntimeError("A2/A3 paired masters are numerically identical")
+    ledger_report = _validate_candidate_provenance(
+        plan,
+        list(manifest.get("candidate_provenance") or ()),
+        selected_episode_ids=list(manifest.get("selected_episode_ids") or ()),
+        expected_source_fingerprint=str(manifest.get("source_fingerprint_sha256", "")),
+        require_source_paths=True,
+    )
+    if sorted(manifest["selected_episode_ids"]) != sorted(a2.episode_ids):
+        raise RuntimeError("candidate ledger selected IDs differ from paired exports")
     entries = split_entries(a2)
     view_counts = {view.view_id: view.train for view in config.views}
     views = {
@@ -641,6 +843,13 @@ def verify(config: SweepConfig, plan: dict[str, Any], *, datasets_root: Path) ->
         "action_spaces": manifest["action_spaces"],
         "views": manifest["views"],
         "normalization_artifacts": norm_rows,
+        "generation_provenance": {
+            **ledger_report,
+            "pose_plan": config.selection.pose_plan,
+            "pose_plan_sha256": manifest["pose_plan_sha256"],
+            "calibration": config.selection.calibration,
+            "calibration_fingerprint": plan["calibration_fingerprint"],
+        },
     }
     report_path = paths.OUTPUTS_DIR / "cluster_sweep" / "scale_verification.json"
     _atomic_json(report_path, report)

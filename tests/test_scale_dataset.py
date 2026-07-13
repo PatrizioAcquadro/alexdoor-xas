@@ -47,7 +47,28 @@ def test_official_scale_plan_is_strict_randomized_and_seed_disjoint(tmp_path) ->
     )
     bad = tmp_path / "overlap.json"
     bad.write_text(json.dumps(drifted))
-    with pytest.raises(ValueError, match="overlap"):
+    with pytest.raises(ValueError, match="overlap|seed ranges"):
+        scale._load_plan(bad, config)
+
+
+@pytest.mark.parametrize(
+    "mutation, message",
+    [
+        (lambda plan: plan.__setitem__("calibration_fingerprint", "0" * 64), "calibration"),
+        (lambda plan: plan["poses"][1].__setitem__("door_yaw_rad", 0.125), "geometry"),
+        (lambda plan: plan["poses"][2].__setitem__("source_seed_start", 30_001), "seed"),
+    ],
+)
+def test_scale_plan_binds_canonical_calibration_geometry_and_exact_seed_ranges(
+    tmp_path, mutation, message
+) -> None:
+    scale = _scale_module()
+    config = load_sweep_config(REPO_ROOT / "configs/cluster_sweep.v1.json")
+    payload = json.loads((REPO_ROOT / "configs/door_pose_plan_v3_scale.json").read_text())
+    mutation(payload)
+    bad = tmp_path / "bad-plan.json"
+    bad.write_text(json.dumps(payload))
+    with pytest.raises(ValueError, match=message):
         scale._load_plan(bad, config)
 
 
@@ -116,3 +137,40 @@ def test_master_selection_fails_closed_when_overdraw_cannot_fill_quota(tmp_path)
     plan["selected_episodes_per_pose"] = 3
     with pytest.raises(RuntimeError, match="need 3"):
         scale._select_master(plan, state)
+
+
+def test_candidate_ledger_rejects_deleted_row_and_false_replacement_link(tmp_path) -> None:
+    scale = _scale_module()
+    plan, state = _candidate_fixture(tmp_path)
+    selected, paths, provenance = scale._select_master(plan, state)
+    selected_ids = [episode.meta.episode_id for episode in selected]
+
+    validator = scale._validate_candidate_provenance
+    assert validator(
+        plan,
+        provenance,
+        selected_episode_ids=selected_ids,
+        expected_source_fingerprint=scale._source_fingerprint(paths),
+        require_source_paths=True,
+    )["status"] == "PASS"
+
+    with pytest.raises(ValueError, match="inventory"):
+        validator(
+            plan,
+            provenance[:-1],
+            selected_episode_ids=selected_ids,
+            expected_source_fingerprint=scale._source_fingerprint(paths),
+            require_source_paths=True,
+        )
+
+    falsified = json.loads(json.dumps(provenance))
+    replacement = next(row for row in falsified if row["seed"] == 20)
+    replacement["replacement_for_seed"] = 999
+    with pytest.raises(ValueError, match="replacement"):
+        validator(
+            plan,
+            falsified,
+            selected_episode_ids=selected_ids,
+            expected_source_fingerprint=scale._source_fingerprint(paths),
+            require_source_paths=True,
+        )

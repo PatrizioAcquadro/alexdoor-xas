@@ -22,6 +22,7 @@ from alexdoor_xas.cluster_pilot.transfer import (
 )
 from alexdoor_xas.dataset import (
     EpisodeDataset,
+    dataset_fingerprint,
     load_view_payload,
     split_entries,
     validate_nested_views,
@@ -76,7 +77,10 @@ def build_sweep_transfer_manifest(
     state = dict(source_state) if source_state is not None else git_state(root)
     _validate_source_state(state)
     files, dataset_contract, robot_asset = _collect_contract(
-        root, config, require_tracked=source_state is None
+        root,
+        config,
+        require_tracked=source_state is None,
+        require_local_sources=True,
     )
     entries = sorted(
         (
@@ -148,7 +152,10 @@ def verify_sweep_transfer_manifest(
         failures.append("manifest timestamp must equal the source commit timestamp")
     try:
         expected_files, expected_dataset, expected_asset = _collect_contract(
-            root, config, require_tracked=require_tracked
+            root,
+            config,
+            require_tracked=require_tracked,
+            require_local_sources=False,
         )
     except (OSError, ValueError, KeyError, PolicyDataError, SweepTransferError) as error:
         failures.append(f"cannot reconstruct sweep contract: {error}")
@@ -214,7 +221,11 @@ def verify_sweep_transfer_manifest(
 
 
 def _collect_contract(
-    root: Path, config: SweepConfig, *, require_tracked: bool
+    root: Path,
+    config: SweepConfig,
+    *,
+    require_tracked: bool,
+    require_local_sources: bool,
 ) -> tuple[list[tuple[Path, str]], dict[str, Any], dict[str, Any]]:
     inventory: list[tuple[Path, str]] = []
     task_root = root / "datasets" / config.dataset.task
@@ -235,9 +246,49 @@ def _collect_contract(
         "per_pose": {pose: 110 for pose in config.dataset.pose_ids},
     }:
         raise SweepTransferError("scale master count contract drifted")
+    pose_plan_path = root / config.selection.pose_plan
+    calibration_path = root / config.selection.calibration
+    canonical_pose_path = root / config.selection.canonical_pose_plan
+    for path in (pose_plan_path, calibration_path, canonical_pose_path):
+        if not path.is_file():
+            raise SweepTransferError(f"generation contract source is missing: {path}")
+    if master.get("pose_plan") != config.selection.pose_plan:
+        raise SweepTransferError("scale master pose-plan path is stale")
+    if master.get("pose_plan_sha256") != sha256_file(pose_plan_path):
+        raise SweepTransferError("scale master pose-plan hash is stale")
+    from scripts.build_scale_dataset import (
+        _load_plan,
+        _validate_candidate_provenance,
+    )
+
+    plan = _load_plan(pose_plan_path, config)
     source_ids = list(master.get("selected_episode_ids") or ())
     if len(source_ids) != 550 or len(source_ids) != len(set(source_ids)):
         raise SweepTransferError("scale master selected episode inventory is invalid")
+    try:
+        ledger_report = _validate_candidate_provenance(
+            plan,
+            list(master.get("candidate_provenance") or ()),
+            selected_episode_ids=source_ids,
+            expected_source_fingerprint=master["source_fingerprint_sha256"],
+            require_source_paths=require_local_sources,
+        )
+    except ValueError as error:
+        raise SweepTransferError(f"candidate provenance ledger failed: {error}") from error
+    verification_path = root / DEFAULT_OUTPUT_DIR / "scale_verification.json"
+    if not verification_path.is_file():
+        raise SweepTransferError("local scale generation verification report is missing")
+    verification = json.loads(verification_path.read_text())
+    expected_generation = {
+        **ledger_report,
+        "pose_plan": config.selection.pose_plan,
+        "pose_plan_sha256": master["pose_plan_sha256"],
+        "calibration": config.selection.calibration,
+        "calibration_fingerprint": plan["calibration_fingerprint"],
+    }
+    if verification.get("generation_provenance") != expected_generation:
+        raise SweepTransferError("scale generation verification report is stale")
+    inventory.append((verification_path, "generation_verification"))
 
     datasets: dict[str, EpisodeDataset] = {}
     spaces_contract: dict[str, Any] = {}
@@ -273,9 +324,13 @@ def _collect_contract(
             )
             inventory.append((path, category))
         declared = master["action_spaces"][space]
+        live_action_fingerprint = dataset_fingerprint(dataset, config.dataset.obs_preset)
+        if declared.get("dataset_fingerprint_sha256") != live_action_fingerprint:
+            raise SweepTransferError(f"master action dataset fingerprint is stale: {space}")
         spaces_contract[space] = {
             "path": relative,
-            "dataset_fingerprint_sha256": declared["dataset_fingerprint_sha256"],
+            "source_fingerprint_sha256": master["source_fingerprint_sha256"],
+            "dataset_fingerprint_sha256": live_action_fingerprint,
             "episode_ids": sorted(source_ids),
         }
     a2, a3 = datasets["A2_ee_delta"], datasets["A3_obj_rel_ee_delta"]
@@ -374,6 +429,14 @@ def _collect_contract(
             }
             for cell in config.cells
         ],
+        "generation_provenance": {
+            **expected_generation,
+            "verification_report": verification_path.relative_to(root).as_posix(),
+            "verification_report_sha256": sha256_file(verification_path),
+            "calibration_sha256": sha256_file(calibration_path),
+            "canonical_pose_plan": config.selection.canonical_pose_plan,
+            "canonical_pose_plan_sha256": sha256_file(canonical_pose_path),
+        },
     }
     if len({path.resolve() for path, _ in inventory}) != len(inventory):
         raise SweepTransferError("transfer inventory contains duplicate files")
