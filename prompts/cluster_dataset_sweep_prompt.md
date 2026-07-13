@@ -1,330 +1,443 @@
-# TASK: Cluster dataset-scale training and evaluation sweep
+# TASK: Prepare the Full Nested Dataset-Scale Sweep on Ubuntu
 
-Before doing anything, read `PROJECT_GUIDELINES.md` from the repo root. If it is not present, read `docs/PROJECT_GUIDELINES.md`. Treat it as binding project guidance.
+## Objective
 
-This task happens only after the local post-Phase 3.3 stabilization task has passed and been committed.
+Implement, generate, and validate the complete Ubuntu-side package for the later Gilbreth
+dataset-scale sweep.
 
-Do not start Phase 4, VLA, RL, WAM-lite, hardware-transfer work, post-processing comparison, or final scientific analysis.
+This task prepares the datasets, reproducibility contracts, transfer/return tooling, and 16-cell
+Slurm renderer. It must **not** transfer files to Gilbreth, call `sbatch`, run the full sweep, start
+closed-loop sweep evaluation, or begin Phase 4/VLA work.
 
-The goal is to use the cluster to generate/train/evaluate the full dataset-size matrix for ACT and Diffusion Policy. Produce clean artifacts for later comparison, but do not perform the comparison in this task.
+**DO NOT USE SUBAGENTS.** Work single-agent from inspection through validation.
 
-Use robotics workflows and subagents where useful:
+Use the `robotics-test` workflow first to freeze regression tests and acceptance criteria, then use
+`robotics-implementation` to implement them. Keep a local-only `TODO.md` and mark each gate complete
+as it passes. Do not commit `TODO.md`.
 
-- one subagent for cluster environment / reproducibility checks;
-- one subagent for dataset-generation job planning;
-- one subagent for ACT training/evaluation jobs;
-- one subagent for Diffusion Policy training/evaluation jobs;
-- one subagent for Hydra/W&B run-configuration review;
-- one subagent for final artifact/readiness review.
+## Verified Starting State
 
-## Cluster Assumptions
+- Repository: `/home/pacquadr/Desktop/DoorManipulation`
+- Expected starting `main`: `252fb91d370ddeb5e391306aed6e504e2dbf710a`
+- Local stabilization is complete.
+- Gilbreth compatibility pilot `11279452` completed and returned successfully.
+- W&B durable-publication canary `11279800` completed successfully:
+  - ACT-A2 and Diffusion-A3 both completed;
+  - durable W&B symlink count was zero;
+  - direct return packaging passed without manual staging;
+  - Ubuntu verified all returned hashes and loaded both checkpoints on CPU.
+- The existing `v2_pose` dataset is compatibility/stabilization evidence only.
+- `configs/cluster_pilot_n50.v1.json` records the future sweep contract but intentionally does not
+  implement or authorize it.
 
-The cluster has 8 A100 GPUs.
+Before editing, read completely:
 
-Use the GPUs primarily for training and parallel sweeps.
+- `CLAUDE.md`
+- `docs/PROJECT_GUIDELINES.md`
+- `docs/architecture.md`
+- `docs/development.md`
+- `docs/status.md`
+- `docs/cluster.md`
+- `configs/cluster_pilot_n50.v1.json`
+- the dataset generation, split, normalization, training, manifest, Slurm, W&B publication, and
+  return implementations and tests they reference.
 
-Do not assume the A100s automatically fix Isaac/data-engine issues. If Isaac Sim / Isaac Lab headless simulation is not stable on the cluster, do not force dataset generation there. In that case:
+The only allowed tracked change at task start is this prompt file. If that is the only change,
+review its diff and commit it alone on `main` with the message `Define full cluster sweep task`.
+Do not push it yet and do not mix it with implementation changes. If any other tracked or untracked
+change exists, stop and report it.
 
-- generate datasets locally or on the validated machine;
-- transfer validated datasets to the cluster;
-- use the cluster for training and evaluation only where supported.
+Require the prompt commit to sit directly on the synchronized expected `origin/main`, with no other
+local commits or changes. Preserve the ignored local `CLAUDE.md`, existing datasets, pilot
+manifests, returned attempts, cluster evidence, and unrelated user files. Create a task branch such
+as `impl/full-cluster-dataset-scale-sweep` from the local prompt commit.
 
-Before launching the full sweep, verify:
+If the starting commit differs, inspect the additional commits and continue only if they do not
+change this contract. Otherwise stop and report the conflict.
 
-- repo commit hash matches the local stabilized commit;
-- dependencies are installed;
-- Isaac/IsaacLab launcher works if dataset generation or closed-loop eval will run on the cluster;
-- dataset paths are correct;
-- output paths are writable;
-- W&B credentials/network are available if online tracking will be used;
-- W&B behavior is explicit through Hydra overrides, never implicit or hard-coded;
-- GPU visibility works for training.
+## Frozen Scientific Contract
 
-## Dataset Sizes
+### Dataset identity
 
-Run the full sweep for:
-
-- 50 episodes
-- 100 episodes
-- 250 episodes
-- 500 episodes
-
-Do not run 1000+ episodes unless the user explicitly approves it later.
-
-## Action Spaces
-
-For every dataset size, cover:
-
-- A2: `A2_ee_delta`
-- A3: `A3_obj_rel_ee_delta`
-
-A2 and A3 must use matched seed plans and matched door-pose/orientation variation.
-
-## Policies
-
-For every dataset size and action space, train and evaluate:
-
-- ACT
-- Diffusion Policy
-
-Expected matrix:
-
-| dataset size | ACT-A2 | ACT-A3 | Diffusion-A2 | Diffusion-A3 |
-|---:|---|---|---|---|
-| 50 | train + eval | train + eval | train + eval | train + eval |
-| 100 | train + eval | train + eval | train + eval | train + eval |
-| 250 | train + eval | train + eval | train + eval | train + eval |
-| 500 | train + eval | train + eval | train + eval | train + eval |
-
-## GPU Scheduling Guidance
-
-Prefer one GPU per training job.
-
-Do not add distributed multi-GPU training unless the repo already supports it cleanly and it is validated.
-
-A reasonable first cluster schedule is:
+Create one new deterministic master dataset version:
 
 ```text
-GPU 0: Diffusion-A2-50
-GPU 1: Diffusion-A3-50
-GPU 2: Diffusion-A2-100
-GPU 3: Diffusion-A3-100
-GPU 4: Diffusion-A2-250
-GPU 5: Diffusion-A3-250
-GPU 6: Diffusion-A2-500
-GPU 7: Diffusion-A3-500
+task: door_push_alex_v2
+master version: v3_scale_master
+observation preset: core_door_pose
+door poses: D0, D1, D2, D3, D4
+source episodes: 550 successful, sanity-clean, content-distinct episodes
+episodes per pose: 110
 ```
 
-ACT jobs are smaller and may be run before/after the Diffusion jobs, or in parallel where resources allow.
+Reuse the exact validated D0-D4 door geometry and Alex V2 calibration. Do not modify `v2_pose`, the
+robot asset, controller safety limits, force admission, action definitions, observation definitions,
+or adapter behavior.
 
-## Hydra and W&B Requirements
+Generate the master pool once on Ubuntu with the official IsaacLab launcher. Do not independently
+generate N50, N100, N250, and N500 datasets.
 
-Use the repo's Hydra/OmegaConf config pattern for all dataset-generation, training, and evaluation jobs.
+The 550 master episodes must be randomized, independently grouped trajectories. Fixed-start pose
+probes may be run before generation but must not be included as duplicated source episodes. Use
+explicit deterministic, non-overlapping seed and overdraw namespaces. Record every failed/skipped
+candidate and its deterministic replacement; never hide failures or admit partial/unsafe episodes.
 
-Do not hard-code dataset size, action space, seed, checkpoint path, device, run id, or W&B settings inside scripts unless the repo already requires it. Prefer Hydra overrides such as:
+### Fixed holdouts and nested training views
 
-```bash
-dataset.space=A2_ee_delta
-dataset.version=<dataset_version>
-train.seed=0
-train.device=cuda
-run.run_id=<clear_run_id>
-+wandb.mode=online
-+wandb.project=alexdoor-xas
-+wandb.group=<sweep_group>
-+wandb.name=<run_name>
-```
+Create four deterministic views:
 
-For cluster runs:
+| View | Training | Validation | Test | Total referenced |
+|---|---:|---:|---:|---:|
+| N50 | 50 | 25 | 25 | 100 |
+| N100 | 100 | 25 | 25 | 150 |
+| N250 | 250 | 25 | 25 | 300 |
+| N500 | 500 | 25 | 25 | 550 |
 
-- use W&B online where credentials and network are available, especially for long ACT/Diffusion training sweeps;
-- keep W&B explicit through Hydra overrides, never implicit or hard-coded;
-- each training run should log losses, validation metrics, config, dataset fingerprint, checkpoint paths, and run id;
-- each evaluation run should log success rate, final door angle, ticks/time to success, adapter accepted/corrected/rejected counts, adapter warning counts, eval JSON path, and dataset fingerprint;
-- record W&B run URLs or run ids in the final report;
-- never store W&B credentials, API keys, `.netrc` contents, or secrets in the repo.
+`N` means the exact number of **training episodes**.
 
-If W&B online is unavailable on the cluster:
+Every view must satisfy:
 
-- do not fail the entire task only for missing W&B connectivity;
-- fall back to offline/local logging under the repo's established `outputs/wandb` or run-output paths;
-- clearly report that online tracking was unavailable and include the reason;
-- keep all local/offline artifacts sufficient for later comparison.
+- validation IDs are identical across all four views;
+- test IDs are identical across all four views;
+- validation and test contain exactly five episodes from each pose;
+- training is pose-balanced:
+  - N50: 10 per pose;
+  - N100: 20 per pose;
+  - N250: 50 per pose;
+  - N500: 100 per pose;
+- `train(N50) ⊂ train(N100) ⊂ train(N250) ⊂ train(N500)`;
+- train, validation, and test are pairwise disjoint;
+- no trajectory-content group crosses a split;
+- all selected source episodes are content-distinct;
+- A2 and A3 use the exact same source episode IDs and split membership.
 
-Hydra must remain a config/override layer, not a replacement for Isaac `AppLauncher`. Keep all Isaac-backed commands using the canonical launcher pattern:
+Use deterministic per-pose ordering and record its seed/algorithm. Holdouts must be selected once
+from the master pool and excluded before constructing nested training prefixes.
 
-```bash
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p <script> <hydra_overrides>
-```
+### Efficient dataset views
 
-## Dataset Generation
+Do not duplicate or regenerate HDF5 episode payloads for every N.
 
-For each dataset size:
-
-- generate or load the validated dataset;
-- regenerate splits and norm stats;
-- verify dataset interface;
-- record dataset fingerprint;
-- record seed range and variation protocol;
-- store dataset manifests.
-
-If generation fails at any size:
-
-- stop at that size;
-- report exact failing seeds;
-- report failure type;
-- do not continue to train on partial or dirty data unless explicitly marked as a failed/debug artifact.
-
-## Training Requirements
-
-For every policy/action-space/dataset-size combination:
-
-- use deterministic seeds;
-- record full config;
-- record run id;
-- record dataset fingerprint;
-- save best and last checkpoints where supported;
-- save train/val logs;
-- save open-loop diagnostics where supported;
-- use W&B online when available and useful for the cluster sweep;
-- fall back to offline/disabled W&B only when online tracking is unavailable or inappropriate.
-
-Use clear run ids, for example:
+Keep one physical master export per action space:
 
 ```text
-act_a2_n50_seed0
-act_a3_n50_seed0
-diffusion_a2_n50_seed0
-diffusion_a3_n50_seed0
+datasets/door_push_alex_v2/A2_ee_delta/v3_scale_master/
+datasets/door_push_alex_v2/A3_obj_rel_ee_delta/v3_scale_master/
+```
+
+Add a backward-compatible dataset-view contract so training can select a split independently from
+the physical dataset version. Use canonical view IDs:
+
+```text
+v3_scale_n50
+v3_scale_n100
+v3_scale_n250
+v3_scale_n500
+```
+
+Existing configurations without an explicit view/split ID must continue resolving splits and
+normalization exactly as before. Do not break `v2_pose`, its checkpoints, or the pilot.
+
+Store one shared split file per view and one train-only normalization file per action-space/view.
+Normalization statistics must use only that view's training IDs. They must bind the master dataset
+fingerprint, view/split fingerprint, observation preset, action space, exact training IDs, and
+normalization-file hash. Validation/test data must never influence normalization.
+
+### Training matrix
+
+Create exactly 16 cells:
+
+```text
+4 dataset views × 2 policies × 2 action spaces
+```
+
+For every N, include:
+
+- ACT-A2
+- ACT-A3
+- Diffusion-A2
+- Diffusion-A3
+
+Use seed `0`, `core_door_pose`, `train.device=cuda`, `train.overfit_episodes=null`, and explicit W&B
+offline mode. Use the committed non-pilot ACT and Diffusion training defaults unless a live code
+constraint proves they are invalid:
+
+- ACT: 100 epochs, validation every 5 epochs;
+- Diffusion: 300 epochs, validation every 10 epochs, EMA enabled, 10-step DDIM validation metric;
+- preserve the existing model, optimizer, horizon, chunk, and scheduler defaults;
+- do not tune hyperparameters separately by N or action space;
+- do not reuse the two-epoch/two-episode compatibility-pilot limits.
+
+Use deterministic run IDs:
+
+```text
+sweep_act_a2_n50_seed0
+sweep_act_a3_n50_seed0
+sweep_diffusion_a2_n50_seed0
+sweep_diffusion_a3_n50_seed0
 ...
-diffusion_a3_n500_seed0
+sweep_diffusion_a3_n500_seed0
 ```
 
-## Evaluation Requirements
+Each cell is an independent **single-GPU** training job. Do not add DeepSpeed, ZeRO, DDP, or any
+multi-GPU model sharding. Render a stable `0-15` Slurm array with configurable concurrency and a
+conservative default of `%2`.
 
-For every trained checkpoint, run the same matched evaluation protocol:
+Gilbreth remains non-Isaac:
 
-- same fixed seeds;
-- same randomized seeds;
-- same door-pose variation plan;
-- same success threshold;
-- same max ticks;
-- same adapter-v1 path;
-- same warning/correction/rejection reporting.
+- no Isaac Sim/Lab installation or import;
+- no dataset generation;
+- no closed-loop simulation evaluation;
+- only package verification, preflight, GPU training, open-loop metrics, durable publication, and
+  return packaging.
 
-Each evaluation output must include:
+## Required Implementation
 
-- success rate;
-- final door angle;
-- time/ticks to success;
-- per-rollout rows with seed, fixed/randomized flag, door-pose/orientation id, success flag, final angle, ticks, failure label, and notes;
-- contact ticks and contact source;
-- sensed-force summaries when available, at minimum mean/max/p95 contact force and impulse; if unavailable, record why;
-- adapter accepted/corrected/rejected counts;
-- adapter warning counts and warning messages;
-- fixed-seed determinism evidence;
-- run config;
-- dataset id/fingerprint;
-- checkpoint path;
-- train/val/test split metadata;
-- policy-specific evaluation metadata, including ACT chunk horizon/settings or Diffusion sampler, inference steps, Tp/Ta horizon, and checkpoint horizon;
-- W&B run id/URL when online tracking is enabled.
+### 1. Tests and versioned configuration
 
-For Diffusion Policy, keep sampler and horizon effects separable from action-space effects:
+Write failing regressions first, then implement a versioned sweep configuration such as:
 
-- choose one primary deployment evaluation setting before running the matrix, based on the validated local stabilization result;
-- record the sampler (`ddpm` or `ddim`), number of inference steps, `model.horizon`, and `rollout.n_action_steps` for every run;
-- do not mix sampler/horizon settings inside the main ACT-vs-Diffusion or A2-vs-A3 matrix;
-- if compute allows, run a small diagnostic-only Diffusion panel on the hardest known seeds or a fixed stress subset with alternate sampler/horizon settings, and label those outputs as diagnostics rather than primary comparison artifacts.
+```text
+configs/cluster_sweep.v1.json
+configs/door_pose_plan_v3_scale.json
+```
 
-## Outputs
+The configuration must freeze:
 
-Produce structured outputs for every dataset size and run:
+- master dataset/version and five poses;
+- source count and per-pose count;
+- view IDs and exact train/validation/test counts;
+- deterministic selection/seed contract;
+- A2/A3 pairing;
+- `core_door_pose`;
+- 16-cell identity and stable task-index mapping;
+- training defaults and seed;
+- W&B offline mode;
+- one GPU per task and configurable array concurrency;
+- required source/dependency inventory;
+- scratch and durable attempt layout;
+- no-Isaac cluster boundary.
 
-- dataset manifest;
-- split file;
-- norm stats;
-- dataset verification report;
-- ACT run directories;
-- Diffusion Policy run directories;
-- checkpoint paths;
-- train logs;
-- open-loop reports;
-- closed-loop eval JSON files;
-- per-rollout normalized metrics tables suitable for Unified Phase 3 scientific evaluation;
-- policy metadata tables covering sampler/horizon/chunk settings;
-- W&B run ids/URLs when online tracking is enabled;
-- curated summary JSON/MD under `outputs/curated/`.
+Reject missing keys, unknown keys, duplicate cells, drifted counts, unequal pose balance, changed
+holdouts, non-nested training IDs, pilot overfit settings, online W&B, or distributed training.
 
-The curated summary should organize artifacts and metrics only.
+### 2. Master generation and deterministic view builder
 
-Allowed:
+Extend the existing pose-plan/generation/export flow instead of building a second data engine.
 
-- "Dataset size X generated successfully."
-- "Training completed."
-- "Evaluation completed."
-- "This run produced N warnings / corrections / rejections."
-- "W&B run id/URL: ..."
+Provide a deterministic orchestration and verification surface that:
 
-Not allowed:
+- runs one Isaac process per pose using the official launcher;
+- resumes safely without silently accepting incomplete output;
+- records candidate, skipped, replacement, and selected episode provenance;
+- selects exactly 110 clean, successful, content-distinct episodes per pose;
+- exports A2 and A3 once from the same 550 source episodes;
+- verifies force/sanity gates and Alex V2 asset provenance;
+- builds the four shared split/view files;
+- computes eight train-only normalization artifacts;
+- writes a master manifest plus per-view fingerprints/hashes;
+- fails closed before publishing an incomplete or inconsistent official dataset.
 
-- "A3 is better than A2."
-- "Diffusion is better than ACT."
-- "This proves generalization."
-- "This is ready for VLA."
-- Any final comparison or scientific conclusion.
+Use atomic publication for the official master/view metadata. Preserve failed generation output for
+diagnosis, but never let it become an official dataset.
 
-## Required Validation
+### 3. Backward-compatible data loading and provenance
 
-Run and report before or after the sweep as appropriate:
+Add the minimum backward-compatible configuration needed to select `dataset.version` and a separate
+view/split ID.
 
-```bash
-ruff check .
+Bind every training run and checkpoint to:
+
+- master dataset fingerprint;
+- view/split ID and fingerprint;
+- exact train/validation/test IDs and counts;
+- normalization artifact and SHA-256;
+- action space and `core_door_pose`;
+- source Git commit;
+- resolved training configuration.
+
+Checkpoint loading, evaluation metadata, and return verification must fail closed on any mismatch.
+Existing `v2_pose` loading and checkpoint tests must remain unchanged and pass.
+
+### 4. Sweep transfer manifest
+
+Implement a sweep-specific clean-tree manifest builder/verifier, reusing hardened pilot helpers
+where appropriate rather than copying them.
+
+The manifest must include exactly the required:
+
+- master A2/A3 datasets and metadata;
+- four shared split/view files;
+- eight normalization artifacts;
+- sweep configuration and source files;
+- pinned non-Isaac Python environment specification;
+- Slurm/preflight/publication/return tooling;
+- Alex V2 URDF provenance hash, without transferring Isaac.
+
+It must bind the clean source commit, exact inventory, sizes, SHA-256 hashes, master/view/dataset
+fingerprints, pose/count/nesting invariants, and secret scan. Generate checksum-based outbound
+`rsync-files.txt` and command artifacts. Never include credentials, W&B keys, `.netrc`, private
+keys, authenticated URLs, or unrelated outputs.
+
+Preserve all historical pilot and stabilization manifests unchanged.
+
+### 5. Gilbreth preflight and 16-cell Slurm renderer
+
+Reuse the verified Python 3.11/CUDA non-Isaac environment contract and the successful pilot/canary
+launcher patterns.
+
+The renderer must:
+
+- accept account, partition, optional QOS, depot root, scratch root, durable-results root, memory,
+  CPUs, wall time, and concurrency at render time;
+- render exactly 16 stable task mappings;
+- use one GPU per task and optionally enforce A100 80GB;
+- invoke only `$CONDA_PREFIX/bin/python`, never environment activation or inherited tool shims;
+- verify the sweep manifest before training;
+- run pure and live-CUDA preflight;
+- use attempt-specific scratch and durable paths keyed by array job ID/task ID/run ID;
+- preserve all resolved configs, checkpoints, logs, open-loop metrics, environment reports, and
+  Slurm evidence;
+- reuse the verified symlink-free W&B publisher before the final atomic durable move;
+- fail closed on publication/status errors, duplicates, unsafe W&B entries, source mismatch, or
+  missing completion evidence;
+- never overwrite or silently reuse an earlier attempt.
+
+Render and syntax-check the script locally with example paths. Do not call `salloc`, `srun`, or
+`sbatch` in this task.
+
+### 6. Sweep return tooling
+
+Implement exact-attempt return build/verify tooling for all 16 cells.
+
+Require:
+
+- exactly the configured 16 task identities;
+- completion status for every cell;
+- no mixed attempt/job/task/source identities;
+- no missing or duplicate cells;
+- no failure records;
+- symlink-free durable results and W&B publication reports;
+- all expected checkpoints/configs/logs/metrics/environment evidence;
+- SHA-256 verification of every returned payload;
+- CPU loading of every returned best checkpoint without Isaac;
+- checksum-based return file list and command.
+
+No staging workaround is allowed. A failed or partial sweep must not produce a verified return
+package. Do not automatically resubmit failed cells.
+
+### 7. Documentation
+
+Update only durable, relevant documentation:
+
+- `docs/architecture.md`: implemented dataset-view, sweep, provenance, and publication contracts;
+- `docs/development.md`: exact Ubuntu build/generation/verification commands and later transfer
+  workflow;
+- `docs/status.md`: datasets/package prepared locally, full sweep not transferred or launched;
+- `docs/cluster.md`: concise later Gilbreth verification/render/submit/return sequence.
+
+Keep historical job IDs `11279452` and `11279800` as evidence. Do not claim the full sweep ran or
+produced scientific conclusions.
+
+## Required Regression Coverage
+
+At minimum, tests must prove:
+
+- exact 550/110-per-pose master contract;
+- exact N and per-pose counts for all views;
+- identical fixed validation/test IDs across views;
+- strict training nesting and split disjointness;
+- content-group non-leakage and duplicate rejection;
+- exact A2/A3 source-ID pairing and numerical distinctness;
+- deterministic replay of view generation and fingerprints;
+- train-only, per-view normalization with provenance/hash validation;
+- backward compatibility for `v2_pose` configs/checkpoints;
+- complete, unique 16-cell mapping and stable run IDs;
+- no pilot overfit settings, online W&B, Isaac imports, activation, or distributed training;
+- exact manifest inventory/hash/secret checks and clean-tree binding;
+- polluted-`PATH` generated-script execution through `$CONDA_PREFIX/bin/python`;
+- one-GPU Slurm directives, configurable `%2` default concurrency, and `bash -n`;
+- attempt isolation, retry/no-overwrite behavior, durable failure publication, atomic success
+  publication, and W&B sanitization;
+- exact 16-cell return selection, no-symlink rule, hash verification, and CPU checkpoint loading;
+- failure on missing, duplicate, mixed, partial, stale, or tampered evidence.
+
+Use small synthetic fixtures for unit/integration tests; do not require 550 real episodes in the
+ordinary pytest suite.
+
+## Execution and Validation Order
+
+1. Create/update local-only `TODO.md` with all gates.
+2. Inspect current contracts and write regression tests first.
+3. Implement configuration, dataset views, provenance, sweep tooling, and documentation.
+4. Run focused tests until green.
+5. Run the full existing suite and static checks before expensive generation.
+6. Generate the real 550-episode master pool once on Ubuntu.
+7. Build and verify all four views, eight normalization artifacts, and fingerprints.
+8. Rerun dataset/sweep focused verification against the real artifacts.
+9. Commit the validated code/config/docs on the task branch.
+10. From the clean committed checkout, build and verify the final sweep transfer manifest and
+    checksum file list.
+11. Stop and report. Do not push, merge, transfer, allocate a GPU, submit, or train the full sweep
+    without a separate explicit user instruction.
+
+Use the official launcher for all repo Python/Isaac validation:
+
+```text
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p <script-or--m-module>
+```
+
+Also require:
+
+```text
+/home/pacquadr/.local/bin/ruff check .
 git diff --check
 PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p -m pytest -q
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_dataset_interface.py
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_act_training.py
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_act_rollout.py --viz none --device cpu
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_adapters.py --viz none --device cpu
+bash -n <every generated/bootstrap Slurm or shell script>
 ```
 
-Also run all Phase 3.3 Diffusion Policy gates that exist after Phase 3.3 is implemented.
-
-If some Isaac closed-loop validation cannot run on the cluster, report why and run it on the validated local machine instead. Do not silently skip it.
-
-## Constraints
-
-- This task is cluster execution only after local stabilization.
-- Do not perform post-processing comparison or final scientific analysis.
-- Do not start Phase 4/VLA/RL/WAM-lite work.
-- Do not implement hardware-control code.
-- Do not weaken frozen gates.
-- Use W&B online for cluster training/evaluation sweeps when credentials and network are available.
-- Keep W&B explicit through Hydra overrides, never implicit or hard-coded.
-- Keep Isaac entrypoints using the canonical launcher pattern.
-- Preserve adapter warning reporting.
-- Do not hide warnings; reduce them only through real behavior/safety improvements.
-- Keep all runs deterministic and reproducible.
-- Do not train on dirty or partially failed datasets.
-- Commit only code/config/script changes that are required and validated.
-- Large generated datasets/checkpoints should remain in the repo's established artifact/output locations, not blindly committed.
+Run existing dataset, ACT, Diffusion, stabilization, pilot, W&B publication, returned-checkpoint,
+and historical-manifest regressions. Historical hashes and returned pilot evidence must remain
+unchanged.
 
 ## Stop Conditions
 
-Stop and report instead of pushing forward if:
+Stop and report with exact evidence if:
 
-- cluster environment differs enough to break determinism or Isaac behavior;
-- 50 episodes fail despite passing locally;
-- any larger dataset size fails generation;
-- A2 and A3 become numerically identical again;
-- primary matrix runs use inconsistent Diffusion sampler/horizon settings;
-- per-rollout evaluation outputs are missing seed, variation, failure-label, contact, adapter, or policy-metadata fields needed for Unified Phase 3 scientific evaluation;
-- systematic adapter rejections appear;
-- warnings indicate unsafe or invalid behavior;
-- training succeeds only because evaluation was weakened;
-- any frozen gate would need to be weakened;
-- output artifacts cannot be reliably stored or recovered;
-- W&B online is unavailable and no offline/local artifact path can preserve the run evidence.
+- the starting checkout is dirty or contains unrelated user changes that overlap this task;
+- the five frozen door poses or Alex V2 calibration no longer pass their existing gates;
+- 110 safe, successful, content-distinct episodes cannot be obtained for any pose;
+- generation requires weakening force, sanity, success, adapter, or provenance gates;
+- any view is imbalanced, non-nested, overlapping, or changes holdout IDs;
+- A2/A3 source IDs differ or their actions become numerically identical;
+- normalization includes validation/test data;
+- existing `v2_pose`, pilot, stabilization, or checkpoint compatibility regresses;
+- the final manifest cannot be built from a clean committed checkout;
+- generated artifacts cannot be atomically preserved and hash-verified.
+
+Do not reinterpret a stop condition as permission to weaken the contract, delete evidence, edit
+generated results manually, or continue with partial data.
 
 ## Final Report
 
-Provide:
+Report only decision-relevant evidence:
 
-1. Cluster machine/environment summary.
-2. Repo commit hash used.
-3. Dataset sizes completed.
-4. Seed ranges and variation protocols.
-5. Dataset fingerprints/manifests.
-6. Training run ids for every ACT and Diffusion run.
-7. Checkpoint paths.
-8. Evaluation JSON paths.
-9. Per-rollout normalized metrics table paths.
-10. Policy metadata table paths, including Diffusion sampler/horizon settings.
-11. W&B run ids/URLs where online tracking was used.
-12. Adapter warning/correction/rejection summary for every run.
-13. Failed runs, if any, with exact reason.
-14. Exact validation commands and results.
-15. Remaining caveats.
-16. Commit hash, if code/config changes were made.
+- branch and implementation commit(s);
+- files/contracts added or changed;
+- master dataset path, 550 total count, 110-per-pose counts, generation seed/overdraw plan, skipped
+  candidates, and master fingerprint;
+- each view's train/validation/test counts, per-pose counts, split fingerprint, and nesting proof;
+- A2/A3 fingerprints and pairing proof;
+- eight normalization paths and hashes;
+- 16-cell mapping and rendered-script hash;
+- focused/full test, Ruff, `git diff --check`, manifest verification, and shell-syntax results;
+- final transfer-manifest path/hash, payload count/bytes, and rsync-file-list path/hash;
+- remaining limitations or blockers.
 
-Do not perform post-processing comparison or scientific interpretation.
+End explicitly with:
+
+```text
+Full sweep transferred: NO
+Full sweep submitted: NO
+Phase 4 started: NO
+```
