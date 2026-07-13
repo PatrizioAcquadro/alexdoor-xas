@@ -31,8 +31,10 @@ history.
   resumable candidate generation and atomic paired publication, shared nested
   views, train-only per-view normalization, view-bound checkpoint provenance,
   exact transfer/preflight/16-cell Slurm tooling, and exact-attempt return/CPU
-  checkpoint verification are implemented. Real `v3_scale_master` generation
-  and the final clean-tree transfer package remain local preparation gates.
+  checkpoint verification are implemented. The real `v3_scale_master` is
+  locally published and verified at 550 episodes (110 per D0–D4), with paired
+  A2/A3 exports, four nested views, and eight train-only norm files. The final
+  clean-tree transfer package remains a local preparation gate.
 
 ## Local stabilization evidence
 
@@ -87,8 +89,8 @@ artifact-bound values above against the local evidence.
 
 ## Known limitations
 
-- The official dataset is smoke-scale and covers one door family in
-  simulation.
+- The `v2_pose` stabilization dataset is smoke-scale. The 550-episode scale
+  master still covers only one door family in simulation.
 - Learned baselines are state-only; camera observations and language inputs are
   not implemented.
 - Simulator evaluation stays on CPU under the frozen calibration contract.
@@ -103,8 +105,8 @@ artifact-bound values above against the local evidence.
 
 1. Run and return-verify one two-cell Gilbreth canary using the automatic W&B
    durable-publication path, without manual return staging.
-2. Generate and validate the implemented master dataset, fixed holdouts, nested training
-   subsets, transfer manifest, and 16-cell Slurm matrix locally.
+2. Build and validate the final clean-tree transfer manifest and 16-cell Slurm
+   matrix locally from the verified scale master.
 3. Transfer and hash-verify the committed sweep package on Gilbreth only after
    separate authorization.
 4. Launch the full sweep only after every prior gate passes and submission is

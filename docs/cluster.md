@@ -253,8 +253,9 @@ array. N50/N100/N250/N500 mean the number of **training** episodes; every view
 also uses the same 25 validation and 25 test episodes. The current `v2_pose`
 dataset remains stabilization and pilot evidence and is not rewritten.
 
-After real scale publication and all local gates pass, a clean committed Ubuntu
-checkout may build and immediately re-verify the exact transfer package:
+With real scale publication complete and all local gates passing, a clean
+committed Ubuntu checkout may build and immediately re-verify the exact
+transfer package:
 
 ```bash
 PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p \

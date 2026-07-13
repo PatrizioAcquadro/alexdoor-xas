@@ -125,13 +125,13 @@ pass. Normalization statistics use only the training split and bind the full
 dataset fingerprint, action space, and observation preset. Re-exporting a
 version replaces that generation and requires regenerated splits/statistics.
 
-The current official Alex dataset is `door_push_alex_v2/v2_pose`: 50 episodes
-over five door poses with a grouped, pose-stratified 38/6/6 split. Dataset
-generation and merged export reject non-finite force or any sample outside the
-unchanged 0–200 N admission range.
+The stabilization Alex dataset is `door_push_alex_v2/v2_pose`: 50 episodes over
+five door poses with a grouped, pose-stratified 38/6/6 split. Dataset generation
+and merged export reject non-finite force or any sample outside the unchanged
+0–200 N admission range.
 
 The scale-sweep contract adds a separate physical master version,
-`v3_scale_master`, without replacing `v2_pose`. Its official publication is a
+`v3_scale_master`, without replacing `v2_pose`. Its local official publication is a
 paired A2/A3 payload built once from 550 randomized source episodes: exactly
 110 safe, successful, trajectory-content-distinct episodes for each of D0–D4.
 Source and overdraw seeds occupy explicit disjoint namespaces, and every
