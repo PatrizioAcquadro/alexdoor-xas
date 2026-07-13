@@ -14,6 +14,7 @@ from .transfer import (
     build_transfer_manifest,
     verify_transfer_manifest,
 )
+from .wandb_publication import WandbPublicationError, publish_wandb_tree
 
 __all__ = [
     "ClusterPreflightError",
@@ -22,10 +23,12 @@ __all__ = [
     "PilotTransferError",
     "ReturnManifestError",
     "SlurmRenderError",
+    "WandbPublicationError",
     "build_return_manifest",
     "build_transfer_manifest",
     "load_pilot_config",
     "probe_cuda_device",
+    "publish_wandb_tree",
     "render_slurm_script",
     "run_pure_preflight",
     "verify_return_checkpoints",

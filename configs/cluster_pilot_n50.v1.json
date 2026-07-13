@@ -99,6 +99,7 @@
     "src/alexdoor_xas/cluster_pilot/returns.py",
     "src/alexdoor_xas/cluster_pilot/slurm.py",
     "src/alexdoor_xas/cluster_pilot/transfer.py",
+    "src/alexdoor_xas/cluster_pilot/wandb_publication.py",
     "src/alexdoor_xas/policies/act/config.py",
     "src/alexdoor_xas/policies/diffusion/config.py"
   ],

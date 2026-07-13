@@ -25,6 +25,8 @@ The compatibility workflow completed end to end on Gilbreth on 2026-07-13 from c
 - the verified environment used Python 3.11.15, NumPy 2.4.6, PyTorch 2.12.1+cu126, CUDA 12.6,
   and Ruff 0.15.3;
 - the symlink-free return package contained 52 payload files and passed all hash checks;
+- the original durable W&B tree contained scratch-backed log symlinks, so this historical attempt
+  required one-time symlink materialization and `latest-run` omission during return staging;
 - Ubuntu loaded both returned best checkpoints successfully on CPU.
 
 The ignored Ubuntu evidence is under `outputs/cluster_pilot_n50/returned/11279452/`. This proves
@@ -205,10 +207,12 @@ directories are never selected implicitly.
 
 The return builder also rejects every symlink. W&B may create `debug.log`, `debug-internal.log`,
 `debug-core.log`, and `latest-run` links; some `debug-core.log` links may point back into scratch.
-Do not weaken the return verifier or modify the original durable attempt. A return copy must be
-symlink-free: materialize only validated log targets, omit redundant `latest-run` links, preserve
-the original evidence, and verify the staged copy before transfer. Durable publication must handle
-this automatically before the full sweep is authorized.
+Do not weaken the return verifier. New jobs sanitize W&B inside the temporary durable publication
+directory: validated in-tree file links become regular files, `latest-run` links are omitted, and
+the final atomic move occurs only after the destination is confirmed symlink-free. Each published
+W&B directory includes a credentials-free `publication_report.json` with the materialized paths
+and hashes. Attempt `11279452` remains historical evidence of the earlier manual staging path; it
+must not be modified.
 
 The resumable checksum-based return template uses the remote file list directly:
 
@@ -241,6 +245,5 @@ checkpoint loads pass should the later scientific dataset/sweep work be consider
 The later sweep uses one deterministic master pool, equal pose balance, paired A2/A3 exports from
 the same source episodes, fixed validation/test episodes, and nested N50/N100/N250/N500 training
 subsets. N means the number of **training** episodes. The current `v2_pose` dataset remains only
-stabilization and compatibility-pilot evidence. Before the 16-cell sweep, durable W&B publication
-must be symlink-free without manual staging. This task does not generate the scaling datasets or
-start the sweep.
+stabilization and compatibility-pilot evidence. New jobs publish symlink-free durable W&B artifacts
+automatically. This task does not generate the scaling datasets or start the sweep.
