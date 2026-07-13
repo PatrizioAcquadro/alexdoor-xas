@@ -16,6 +16,21 @@ The historical stabilization manifest at
 `outputs/local_smoke_n50/cluster_transfer_manifest.json` is preserved evidence. It is not the
 pilot-transfer manifest and must not be modified or used for this pilot.
 
+## Verified pilot evidence
+
+The compatibility workflow completed end to end on Gilbreth on 2026-07-13 from commit
+`10ba63ea1bc93501e9073683d9a2ce4f3416f393` (Slurm array `11279452`):
+
+- ACT-A2 and Diffusion-A3 both completed on A100 80GB GPUs;
+- the verified environment used Python 3.11.15, NumPy 2.4.6, PyTorch 2.12.1+cu126, CUDA 12.6,
+  and Ruff 0.15.3;
+- the symlink-free return package contained 52 payload files and passed all hash checks;
+- Ubuntu loaded both returned best checkpoints successfully on CPU.
+
+The ignored Ubuntu evidence is under `outputs/cluster_pilot_n50/returned/11279452/`. This proves
+the non-Isaac training and return path for the compatibility pilot only; it does not authorize or
+validate the later dataset-scale sweep.
+
 ## Required user-supplied Gilbreth values
 
 Fill these from the live Gilbreth account and allocation documentation:
@@ -65,21 +80,29 @@ rsync -avP --partial --checksum \
   ./ <user>@<host>:<remote_root>/
 ```
 
-Use the Gilbreth source checkout path as `<remote_root>`. The exact source commit must be made
-available to Gilbreth through a separately user-approved Git publication step; this preparation
-workflow creates a local commit but does not push it.
+Use the Gilbreth source checkout path as `<remote_root>`. The verified setup uses the single
+physical checkout at `/home/pacquadr/Desktop/DoorManipulation/`; the depot source path is a symlink
+to that checkout, not a second clone. The exact source commit must be available to Gilbreth through
+a separately user-approved Git publication step.
 
 ## 2. Gilbreth: exact source checkout and incoming verification
 
-Define the derived paths:
+Define the derived paths. Keep one physical checkout and require the depot path used by rendered
+jobs to resolve to it:
 
 ```bash
-export REPO_ROOT="$DEPOT_ROOT/alexdoor-xas/source"
+export REPO_ROOT=/home/pacquadr/Desktop/DoorManipulation
+export DEPOT_SOURCE_LINK="$DEPOT_ROOT/alexdoor-xas/source"
 export CONDA_PREFIX="$DEPOT_ROOT/envs/alexdoor-gilbreth-pilot-py311"
 export DURABLE_RESULTS_ROOT="$DEPOT_ROOT/alexdoor-xas/cluster_pilot_n50/results"
 export PILOT_SCRATCH_ROOT="$SCRATCH_ROOT/alexdoor-xas/cluster_pilot_n50"
 export PILOT_MANIFEST="$REPO_ROOT/outputs/cluster_pilot_n50/pilot_transfer_manifest.json"
+test "$(readlink -f "$DEPOT_SOURCE_LINK")" = "$REPO_ROOT"
 ```
+
+Alex V2 provenance verification also needs the pure URDF at
+`/home/pacquadr/Desktop/Alex/urdf/alex_v2.urdf`. It is not an Isaac dependency. Its required
+SHA-256 is `7742b88d9cb81e80f3d1e5c1906e31f38ca03734085454505e550b24009920b3`.
 
 Check out the exact `source_git.commit` printed by the local builder, then verify the transfer:
 
@@ -180,6 +203,13 @@ The builder requires the selected attempt to contain exactly task `0` with the A
 or task identities, stale status schemas, and any source-commit mismatch. Other attempt
 directories are never selected implicitly.
 
+The return builder also rejects every symlink. W&B may create `debug.log`, `debug-internal.log`,
+`debug-core.log`, and `latest-run` links; some `debug-core.log` links may point back into scratch.
+Do not weaken the return verifier or modify the original durable attempt. A return copy must be
+symlink-free: materialize only validated log targets, omit redundant `latest-run` links, preserve
+the original evidence, and verify the staged copy before transfer. Durable publication must handle
+this automatically before the full sweep is authorized.
+
 The resumable checksum-based return template uses the remote file list directly:
 
 ```bash
@@ -211,5 +241,6 @@ checkpoint loads pass should the later scientific dataset/sweep work be consider
 The later sweep uses one deterministic master pool, equal pose balance, paired A2/A3 exports from
 the same source episodes, fixed validation/test episodes, and nested N50/N100/N250/N500 training
 subsets. N means the number of **training** episodes. The current `v2_pose` dataset remains only
-stabilization and compatibility-pilot evidence. This task does not generate those datasets or
-start the 16-cell sweep.
+stabilization and compatibility-pilot evidence. Before the 16-cell sweep, durable W&B publication
+must be symlink-free without manual staging. This task does not generate the scaling datasets or
+start the sweep.
