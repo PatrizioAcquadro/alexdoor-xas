@@ -27,6 +27,12 @@ history.
   80GB GPUs, the return package passed its hash checks, and Ubuntu loaded both
   returned checkpoints on CPU. Automatic symlink-free W&B publication is
   implemented and locally tested for later jobs.
+- **Full nested-sweep implementation:** strict scale pose/sweep configs,
+  resumable candidate generation and atomic paired publication, shared nested
+  views, train-only per-view normalization, view-bound checkpoint provenance,
+  exact transfer/preflight/16-cell Slurm tooling, and exact-attempt return/CPU
+  checkpoint verification are implemented. Real `v3_scale_master` generation
+  and the final clean-tree transfer package remain local preparation gates.
 
 ## Local stabilization evidence
 
@@ -69,9 +75,10 @@ artifact-bound values above against the local evidence.
 - The **Gilbreth N50 compatibility pilot is complete and return-verified**.
   Its automatic W&B durable-publication fix was merged afterward and still
   requires one live two-cell canary before full-sweep execution.
-- The **full cluster dataset-scale sweep has not started**. The future nested
-  N50/N100/N250/N500 contract is recorded only; no new master dataset or
-  16-cell matrix is authorized by the compatibility-pilot work.
+- The **full cluster dataset-scale sweep has not started**. Its nested
+  N50/N100/N250/N500 implementation is local-only preparation. No sweep package
+  has been transferred, no 16-cell array has been submitted, and no full-sweep
+  training result exists.
 - **Phase 4 VLA work has not started**. There is no image/VLA observation
   pipeline, OpenVLA fine-tuning, or mixed-action-space model yet.
 - A4 is recorded and adapter-executable but has no learned A4 policy.
@@ -96,8 +103,9 @@ artifact-bound values above against the local evidence.
 
 1. Run and return-verify one two-cell Gilbreth canary using the automatic W&B
    durable-publication path, without manual return staging.
-2. Define and implement the scientific nested dataset-scale sweep on Ubuntu.
-3. Generate and validate the master dataset, fixed holdouts, nested training
+2. Generate and validate the implemented master dataset, fixed holdouts, nested training
    subsets, transfer manifest, and 16-cell Slurm matrix locally.
-4. Transfer and hash-verify the committed sweep package on Gilbreth.
-5. Launch the full sweep only after every prior gate passes.
+3. Transfer and hash-verify the committed sweep package on Gilbreth only after
+   separate authorization.
+4. Launch the full sweep only after every prior gate passes and submission is
+   separately authorized.

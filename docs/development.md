@@ -74,6 +74,27 @@ headless physics traces must be compared within their own mode. Non-default
 door-pose runs cannot export directly; create per-pose no-export runs and merge
 them once with `scripts/export_merged_dataset.py` and a tracked pose plan.
 
+The full nested scale master has a dedicated fail-closed orchestrator. It
+requires a clean committed checkout and launches one fresh simulator process
+per pose. Generation state is commit/plan-hash bound and resumes only after
+re-verifying a completed pose attempt:
+
+```bash
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p \
+  scripts/build_scale_dataset.py generate
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p \
+  scripts/build_scale_dataset.py publish
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p \
+  scripts/build_scale_dataset.py verify
+```
+
+`generate` preserves every candidate and failure under ignored outputs.
+`publish` admits exactly the configured successful, safe, content-distinct
+episodes, uses overdraw only to replace rejected source seeds, publishes the
+paired A2/A3 master atomically, builds the four shared nested views, and writes
+eight train-only norm files. Official version directories are never silently
+replaced or accumulated.
+
 `scripts/verify_dataset_interface.py` is read-only by default. Use
 `--write-artifacts` only when intentionally refreshing official split and
 normalization files after a dataset regeneration.
@@ -89,6 +110,18 @@ PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/train_act.py \
 PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/train_diffusion.py \
   dataset.space=A3_obj_rel_ee_delta dataset.version=v2_pose
 ```
+
+For a scale cell, keep the physical version and logical view independent:
+
+```bash
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/train_act.py \
+  dataset.space=A2_ee_delta dataset.version=v3_scale_master \
+  dataset.view_id=v3_scale_n100 dataset.obs_preset=core_door_pose
+```
+
+The view loader requires the final publication marker, exact shared split
+payload, and the matching per-view norm. It never recomputes a scale norm on
+the cluster or includes validation/test records in normalization.
 
 Diffusion training is CUDA-first and fails rather than silently falling back
 to CPU. Simulator evaluation remains on CPU under the validated calibration
@@ -113,6 +146,11 @@ It transfers only the existing N50 dataset and two short training cells. It is
 not the full scientific dataset-scale sweep. Do not build a transfer manifest
 from a dirty tree, guess Gilbreth account/runtime values, submit `sbatch`, or
 start the later sweep without explicit authorization.
+
+The prepared full-sweep workflow is also documented there. Local preparation
+may build and verify its ignored transfer artifacts and render/syntax-check an
+example array script. Transfer, `sbatch`, training, and Phase 4 remain separate
+explicitly authorized actions.
 
 ## Change discipline
 

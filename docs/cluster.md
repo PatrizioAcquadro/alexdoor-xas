@@ -244,10 +244,55 @@ PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p \
 Only after returned hashes, the source commit, the resolved environment evidence, and both CPU
 checkpoint loads pass should the later scientific dataset/sweep work be considered.
 
-## Future sweep contract (recorded only)
+## Full nested dataset-scale sweep preparation
 
-The later sweep uses one deterministic master pool, equal pose balance, paired A2/A3 exports from
-the same source episodes, fixed validation/test episodes, and nested N50/N100/N250/N500 training
-subsets. N means the number of **training** episodes. The current `v2_pose` dataset remains only
-stabilization and compatibility-pilot evidence. New jobs publish symlink-free durable W&B artifacts
-automatically. This task does not generate the scaling datasets or start the sweep.
+The full-sweep tooling is separate from the historical two-cell pilot. It uses
+`configs/cluster_sweep.v1.json`, one physical `v3_scale_master`, four shared
+logical views, eight train-only normalization files, and a stable 16-cell
+array. N50/N100/N250/N500 mean the number of **training** episodes; every view
+also uses the same 25 validation and 25 test episodes. The current `v2_pose`
+dataset remains stabilization and pilot evidence and is not rewritten.
+
+After real scale publication and all local gates pass, a clean committed Ubuntu
+checkout may build and immediately re-verify the exact transfer package:
+
+```bash
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p \
+  scripts/build_cluster_sweep_manifest.py build \
+  --config configs/cluster_sweep.v1.json \
+  --output-dir outputs/cluster_sweep
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p \
+  scripts/build_cluster_sweep_manifest.py verify \
+  --config configs/cluster_sweep.v1.json \
+  --manifest outputs/cluster_sweep/sweep_transfer_manifest.json
+```
+
+The generated `rsync-files.txt` is an exact checksummed inventory of the two
+paired datasets, master/view/norm metadata, and cluster-required source. It
+binds the clean source commit and live Alex V2 URDF hash but deliberately does
+not transfer the machine-local URDF. Do not continue on a count, identity,
+fingerprint, hash, secret, clean-tree, or asset mismatch.
+
+On Gilbreth, verify the received manifest first, use the persistent Python 3.11
+environment, and render the array with explicit live account/partition/depot
+and scratch values. The renderer defaults to `0-15%2`, requests one GPU per
+cell, invokes `$CONDA_PREFIX/bin/python` directly, forbids Isaac and distributed
+launchers, and keeps all W&B runs offline. Each cell verifies the transfer,
+runs pure and live-CUDA preflight, trains one exact policy/space/view mapping,
+and atomically publishes symlink-free evidence from scratch to:
+
+```text
+attempts/<SLURM_ARRAY_JOB_ID>/<SLURM_ARRAY_TASK_ID>/<run_id>/
+```
+
+After all 16 cells complete, select one explicit numeric array job ID and build
+its return package with `scripts/build_cluster_sweep_return_manifest.py`. The
+builder rejects partial/failed cells, mixed or duplicate identities, symlinks,
+unexpected files, stale source/view/norm provenance, and hash drift. Ubuntu
+then runs `scripts/verify_returned_cluster_sweep.py`, which verifies the exact
+return inventory and CPU-loads every `best.pt` checkpoint. This verification
+does not start Isaac or closed-loop evaluation.
+
+Historical pilot attempts `11279452` and `11279800` remain immutable evidence.
+At this documentation state the full sweep has not been transferred or
+submitted, and Phase 4 has not started.

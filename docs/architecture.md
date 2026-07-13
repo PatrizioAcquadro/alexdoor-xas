@@ -130,6 +130,27 @@ over five door poses with a grouped, pose-stratified 38/6/6 split. Dataset
 generation and merged export reject non-finite force or any sample outside the
 unchanged 0–200 N admission range.
 
+The scale-sweep contract adds a separate physical master version,
+`v3_scale_master`, without replacing `v2_pose`. Its official publication is a
+paired A2/A3 payload built once from 550 randomized source episodes: exactly
+110 safe, successful, trajectory-content-distinct episodes for each of D0–D4.
+Source and overdraw seeds occupy explicit disjoint namespaces, and every
+candidate records its admission decision and any replacement relationship.
+The A2 and A3 exports retain identical episode identities but must be
+numerically distinct.
+
+Four logical views select data from that one physical master:
+`v3_scale_n50`, `v3_scale_n100`, `v3_scale_n250`, and `v3_scale_n500`.
+Validation and test are fixed at 25 episodes each, balanced five per pose.
+Training is a balanced, strictly nested prefix of 10, 20, 50, or 100 episodes
+per pose. Views are shared across action spaces and fingerprint the master,
+selection seed, split membership, and content groups. Each action-space/view
+pair owns one train-only normalization artifact, for eight total. A view
+checkpoint binds the master and view fingerprints, exact split IDs, norm file
+hash and semantic fingerprint, action space, observation preset, source
+commit, and resolved training config. Legacy version-only checkpoints and
+`v2_pose` loading remain readable through the unchanged path.
+
 ## Artifacts and provenance
 
 - `datasets/` holds reusable exported episodes; see
@@ -141,3 +162,10 @@ unchanged 0–200 N admission range.
 Generated data and raw run artifacts remain ignored. Every scientific result
 must bind its source commit, dataset fingerprint, observation preset, split,
 configuration, checkpoint, seed protocol, and evaluation protocol.
+
+The full-sweep orchestration lives in `cluster_sweep/`. Its versioned config
+defines a stable 16-cell array: ACT then Diffusion across A2/A3 for each nested
+training view, seed 0, normal non-pilot epochs, offline W&B, one visible GPU,
+and no distributed or Isaac runtime. Transfer and return manifests are exact
+SHA-256 inventories. Scratch and durable results are isolated by numeric array
+job ID, task ID, and run ID; only one complete 16-cell attempt can be returned.
