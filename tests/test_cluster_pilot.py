@@ -170,6 +170,10 @@ def test_transfer_inventory_is_exactly_a2_a3_split_and_tracked_pilot_files(
     assert sum(entry["category"] == "pilot_source" for entry in entries) == len(
         config.tracked_transfer_files
     )
+    assert (
+        "src/alexdoor_xas/cluster_pilot/wandb_publication.py"
+        in config.tracked_transfer_files
+    )
     assert all("A1_joint_delta" not in path for path in paths)
     assert all("A4_obj_centric_chunk" not in path for path in paths)
     assert all("outputs/local_smoke" not in path for path in paths)
@@ -379,6 +383,11 @@ def test_slurm_renderer_freezes_two_cells_and_durable_fail_closed_flow(
     assert "ENTRYPOINT=scripts/train_act.py" in rendered
     assert "ENTRYPOINT=scripts/train_diffusion.py" in rendered
     assert f'{prefix_python} "$ENTRYPOINT"' in rendered
+    assert (
+        f"{prefix_python} src/alexdoor_xas/cluster_pilot/wandb_publication.py"
+        in rendered
+    )
+    assert 'cp -a "$CELL_RUNTIME/wandb"' not in rendered
 
 
 def test_rendered_slurm_polluted_path_smoke_preserves_durable_failure(
@@ -414,6 +423,17 @@ case "$1" in
     command -v ruff >> "$SMOKE_RUFF_LOG"
     ruff --version
     exit 41
+    ;;
+  src/alexdoor_xas/cluster_pilot/wandb_publication.py)
+    while [ $# -gt 0 ]; do
+      if [ "$1" = "--destination" ]; then
+        mkdir -p "$2"
+        printf '{}\n' > "$2/publication_report.json"
+        exit 0
+      fi
+      shift
+    done
+    exit 99
     ;;
   *)
     exit 99
@@ -883,3 +903,19 @@ def test_return_manifest_verification_rejects_wrong_selected_attempt(
         manifest, results, config, attempt_id="111111"
     )
     assert any("selected attempt mismatch" in failure for failure in failures)
+
+
+def test_return_manifest_keeps_fail_closed_symlink_rejection(
+    tmp_path, config, transfer_manifest
+) -> None:
+    results = tmp_path / "results"
+    _make_return_tree(results, config)
+    run = _attempt_run_root(results, config.cells[0])
+    target = run / "wandb/offline-run-test/debug.log"
+    target.write_text("debug\n")
+    (run / "wandb/debug.log").symlink_to(target)
+
+    with pytest.raises(ReturnManifestError, match="symlinks are forbidden"):
+        build_return_manifest(
+            results, config, transfer_manifest, attempt_id=ATTEMPT_ID
+        )
