@@ -95,13 +95,15 @@ paired A2/A3 master atomically, builds the four shared nested views, and writes
 eight train-only norm files. Official version directories are never silently
 replaced or accumulated.
 
-`verify` independently revalidates the canonical D0-D4 geometry, calibration
-fingerprint, exact disjoint source/overdraw seed inventories, every candidate
-decision and replacement link, selected raw-source content, the common source
-fingerprint, both action-export fingerprints, all four deterministic view
-memberships, and every numerical field of all eight norms recomputed from the
-exact training IDs. A refreshed inner or outer hash cannot make altered
-normalization values pass.
+`verify` independently revalidates the canonical D0-D4 geometry, the validated
+calibration schema/content/self-fingerprint and master robot/runtime identity,
+exact disjoint source/overdraw seed inventories, all 750 raw candidate fields,
+decisions, reasons and replacement links, the common source fingerprint, both
+action-export fingerprints, all four deterministic view memberships, and every
+numerical field of all eight norms recomputed from the exact training IDs. The
+transferable report binds the successful Ubuntu raw replay without requiring
+Ubuntu-only paths on Gilbreth. Refreshed inner or outer hashes cannot make
+altered candidate, calibration, or normalization evidence pass.
 
 `scripts/verify_dataset_interface.py` is read-only by default. Use
 `--write-artifacts` only when intentionally refreshing official split and

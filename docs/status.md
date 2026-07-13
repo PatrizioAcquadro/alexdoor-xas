@@ -31,12 +31,13 @@ history.
   resumable candidate generation and atomic paired publication, shared nested
   views, exact train-only normalization recomputation, dual source/action
   fingerprints, exact resolved-cell checkpoint provenance, complete candidate
-  ledger verification, exact transfer/preflight/16-cell Slurm tooling, and
-  directly transferable exact-attempt return controls are implemented. The
-  real `v3_scale_master` is locally published and verified at 550 episodes
-  (110 per D0-D4), with paired A2/A3 exports, four nested views, and eight
-  train-only norm files. Clean-tree manifest build and verification remain
-  local preparation evidence only.
+  ledger verification with full 750-row raw replay, calibration
+  self-fingerprint/master-identity validation, exact transfer/preflight/16-cell
+  Slurm tooling, and directly transferable exact-attempt return controls are
+  implemented. The real `v3_scale_master` is locally published and verified at
+  550 episodes (110 per D0-D4), with paired A2/A3 exports, four nested views,
+  and eight train-only norm files. Clean-tree manifest build and verification
+  remain local preparation evidence only.
 
 ## Local stabilization evidence
 

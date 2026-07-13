@@ -137,6 +137,11 @@ paired A2/A3 payload built once from 550 randomized source episodes: exactly
 110 safe, successful, trajectory-content-distinct episodes for each of D0–D4.
 Source and overdraw seeds occupy explicit disjoint namespaces, and every
 candidate records its admission decision and any replacement relationship.
+Publication and Ubuntu verification use the same deterministic evaluator to
+replay all 750 raw candidates in canonical order, including unused overdraw
+rows, and bind the complete raw-evidence hash into the transferable verification
+report. The scale pose-plan loader also uses the validated calibration contract,
+recomputes its self-fingerprint, and requires exact master robot/runtime identity.
 The A2 and A3 exports retain identical episode identities but must be
 numerically distinct.
 

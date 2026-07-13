@@ -271,8 +271,14 @@ PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p \
 The generated `rsync-files.txt` is an exact checksummed inventory of the two
 paired datasets, master/view/norm metadata, and cluster-required source. It
 binds the clean source commit and live Alex V2 URDF hash but deliberately does
-not transfer the machine-local URDF. Do not continue on a count, identity,
-fingerprint, hash, secret, clean-tree, or asset mismatch.
+not transfer the machine-local URDF. Ubuntu rebuilds every one of the 750
+candidate rows from the completed raw runs with the shared publication
+evaluator, and the transfer binds that replay report and raw-evidence hash;
+Gilbreth verifies the transferable ledger/report invariants without depending
+on Ubuntu-only raw paths. Calibration contents pass the shared validated loader,
+stored-fingerprint recomputation, pose-plan binding, and master robot/runtime
+identity before packaging. Do not continue on a count, identity, fingerprint,
+hash, secret, clean-tree, or asset mismatch.
 
 On Gilbreth, verify the received manifest first and use the proven persistent
 Python 3.11 prefix `envs/alexdoor-gilbreth-pilot-py311`; the config, transfer
