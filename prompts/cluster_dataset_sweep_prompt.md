@@ -1,442 +1,379 @@
-# TASK: Prepare the Full Nested Dataset-Scale Sweep on Ubuntu
+# TASK: Fix Full-Sweep Readiness Locally on Ubuntu
 
 ## Objective
 
-Implement, generate, and validate the complete Ubuntu-side package for the later Gilbreth
-dataset-scale sweep.
+Fix every confirmed blocker from the read-only review of the completed nested dataset-scale sweep
+implementation. Work only in the Ubuntu checkout and finish with a clean, committed, independently
+verified transfer package that is safe to hand to Gilbreth later.
 
-This task prepares the datasets, reproducibility contracts, transfer/return tooling, and 16-cell
-Slurm renderer. It must **not** transfer files to Gilbreth, call `sbatch`, run the full sweep, start
-closed-loop sweep evaluation, or begin Phase 4/VLA work.
+Do **not** regenerate the 550 episodes unless a corrected verifier proves the published dataset is
+actually invalid. The current real dataset, views, A2/A3 conversion, and eight normalization values
+were independently verified as correct. This task fixes fail-open contracts, provenance, environment
+selection, return packaging, and missing integration coverage.
 
-**DO NOT USE SUBAGENTS.** Work single-agent from inspection through validation.
+Do **not** push, merge, transfer files, connect to Gilbreth, request an allocation, call `sbatch`, run
+the full sweep, start closed-loop evaluation, or begin Phase 4.
 
-Use the `robotics-test` workflow first to freeze regression tests and acceptance criteria, then use
-`robotics-implementation` to implement them. Keep a local-only `TODO.md` and mark each gate complete
-as it passes. Do not commit `TODO.md`.
+Use the `robotics-test` workflow first to add regressions that reproduce the defects, then use
+`robotics-implementation` to make the smallest fixes. Replace the completed local-only `TODO.md`
+with a checklist for this fix task, keep it ignored, and update it as each gate passes.
 
 ## Verified Starting State
 
 - Repository: `/home/pacquadr/Desktop/DoorManipulation`
-- Expected starting `main`: `252fb91d370ddeb5e391306aed6e504e2dbf710a`
-- Local stabilization is complete.
-- Gilbreth compatibility pilot `11279452` completed and returned successfully.
-- W&B durable-publication canary `11279800` completed successfully:
-  - ACT-A2 and Diffusion-A3 both completed;
-  - durable W&B symlink count was zero;
-  - direct return packaging passed without manual staging;
-  - Ubuntu verified all returned hashes and loaded both checkpoints on CPU.
-- The existing `v2_pose` dataset is compatibility/stabilization evidence only.
-- `configs/cluster_pilot_n50.v1.json` records the future sweep contract but intentionally does not
-  implement or authorize it.
+- Branch: `impl/full-cluster-dataset-scale-sweep`
+- Reviewed implementation commit: `bfa79f2ef866cb20b7cbf46a360c48e1f58021aa`
+- Review baseline: `origin/main` at `252fb91d370ddeb5e391306aed6e504e2dbf710a`
+- Expected only initial tracked change: this prompt file.
+- Baseline full suite: 701 passed, with two existing IsaacLab deprecation warnings.
+- Real transfer manifest before fixes:
+  - SHA-256: `41bb2659519ce51b82af768917e56c64c3ee0c1e5a217236b1949b9e4328cc81`
+  - 2,292 payload files
+  - 235,585,511 bytes
+  - 2,294 rsync paths
+- Real source-master fingerprint:
+  `79dd3e819c2fbb2d21b9cf3848df7942bd6e69f163a9d82ef892710f5e39d27b`
+- Real action-export fingerprints:
+  - A2: `5179595aeeb7a69898456750658feb59b6a2aaff1821f6ce8af36739f04f9e06`
+  - A3: `3b528ceb451e9547c2aec76d47dafbf7129f870bdfaa6c691769304487ca615f`
+- Proven Gilbreth environment prefix:
+  `envs/alexdoor-gilbreth-pilot-py311`
 
 Before editing, read completely:
 
 - `CLAUDE.md`
 - `docs/PROJECT_GUIDELINES.md`
-- `docs/architecture.md`
-- `docs/development.md`
-- `docs/status.md`
-- `docs/cluster.md`
-- `configs/cluster_pilot_n50.v1.json`
-- the dataset generation, split, normalization, training, manifest, Slurm, W&B publication, and
-  return implementations and tests they reference.
+- `TODO.md`
+- this prompt
+- all files named in the findings below
+- the related ACT, Diffusion, dataset-view, normalization, pilot-return, sweep-return, Slurm,
+  transfer, and checkpoint tests.
 
-The only allowed tracked change at task start is this prompt file. If that is the only change,
-review its diff and commit it alone on `main` with the message `Define full cluster sweep task`.
-Do not push it yet and do not mix it with implementation changes. If any other tracked or untracked
-change exists, stop and report it.
+If this prompt is the only worktree change, review it and commit it alone on the current branch with
+the message `Define full sweep readiness fixes`. If any unrelated change exists, preserve it and
+stop if it overlaps this task. Do not reset, clean, or discard user work.
 
-Require the prompt commit to sit directly on the synchronized expected `origin/main`, with no other
-local commits or changes. Preserve the ignored local `CLAUDE.md`, existing datasets, pilot
-manifests, returned attempts, cluster evidence, and unrelated user files. Create a task branch such
-as `impl/full-cluster-dataset-scale-sweep` from the local prompt commit.
+## Required Fixes
 
-If the starting commit differs, inspect the additional commits and continue only if they do not
-change this contract. Otherwise stop and report the conflict.
+### 1. Bind every returned checkpoint to the exact configured sweep cell
 
-## Frozen Scientific Contract
+The current sweep return verifier checks dataset provenance but does not prove that a returned
+checkpoint used the intended training configuration.
 
-### Dataset identity
+Fix the contract so each of the 16 returned cells is validated against its exact expected resolved
+configuration, including:
 
-Create one new deterministic master dataset version:
-
-```text
-task: door_push_alex_v2
-master version: v3_scale_master
-observation preset: core_door_pose
-door poses: D0, D1, D2, D3, D4
-source episodes: 550 successful, sanity-clean, content-distinct episodes
-episodes per pose: 110
-```
-
-Reuse the exact validated D0-D4 door geometry and Alex V2 calibration. Do not modify `v2_pose`, the
-robot asset, controller safety limits, force admission, action definitions, observation definitions,
-or adapter behavior.
-
-Generate the master pool once on Ubuntu with the official IsaacLab launcher. Do not independently
-generate N50, N100, N250, and N500 datasets.
-
-The 550 master episodes must be randomized, independently grouped trajectories. Fixed-start pose
-probes may be run before generation but must not be included as duplicated source episodes. Use
-explicit deterministic, non-overlapping seed and overdraw namespaces. Record every failed/skipped
-candidate and its deterministic replacement; never hide failures or admit partial/unsafe episodes.
-
-### Fixed holdouts and nested training views
-
-Create four deterministic views:
-
-| View | Training | Validation | Test | Total referenced |
-|---|---:|---:|---:|---:|
-| N50 | 50 | 25 | 25 | 100 |
-| N100 | 100 | 25 | 25 | 150 |
-| N250 | 250 | 25 | 25 | 300 |
-| N500 | 500 | 25 | 25 | 550 |
-
-`N` means the exact number of **training episodes**.
-
-Every view must satisfy:
-
-- validation IDs are identical across all four views;
-- test IDs are identical across all four views;
-- validation and test contain exactly five episodes from each pose;
-- training is pose-balanced:
-  - N50: 10 per pose;
-  - N100: 20 per pose;
-  - N250: 50 per pose;
-  - N500: 100 per pose;
-- `train(N50) ⊂ train(N100) ⊂ train(N250) ⊂ train(N500)`;
-- train, validation, and test are pairwise disjoint;
-- no trajectory-content group crosses a split;
-- all selected source episodes are content-distinct;
-- A2 and A3 use the exact same source episode IDs and split membership.
-
-Use deterministic per-pose ordering and record its seed/algorithm. Holdouts must be selected once
-from the master pool and excluded before constructing nested training prefixes.
-
-### Efficient dataset views
-
-Do not duplicate or regenerate HDF5 episode payloads for every N.
-
-Keep one physical master export per action space:
-
-```text
-datasets/door_push_alex_v2/A2_ee_delta/v3_scale_master/
-datasets/door_push_alex_v2/A3_obj_rel_ee_delta/v3_scale_master/
-```
-
-Add a backward-compatible dataset-view contract so training can select a split independently from
-the physical dataset version. Use canonical view IDs:
-
-```text
-v3_scale_n50
-v3_scale_n100
-v3_scale_n250
-v3_scale_n500
-```
-
-Existing configurations without an explicit view/split ID must continue resolving splits and
-normalization exactly as before. Do not break `v2_pose`, its checkpoints, or the pilot.
-
-Store one shared split file per view and one train-only normalization file per action-space/view.
-Normalization statistics must use only that view's training IDs. They must bind the master dataset
-fingerprint, view/split fingerprint, observation preset, action space, exact training IDs, and
-normalization-file hash. Validation/test data must never influence normalization.
-
-### Training matrix
-
-Create exactly 16 cells:
-
-```text
-4 dataset views × 2 policies × 2 action spaces
-```
-
-For every N, include:
-
-- ACT-A2
-- ACT-A3
-- Diffusion-A2
-- Diffusion-A3
-
-Use seed `0`, `core_door_pose`, `train.device=cuda`, `train.overfit_episodes=null`, and explicit W&B
-offline mode. Use the committed non-pilot ACT and Diffusion training defaults unless a live code
-constraint proves they are invalid:
-
-- ACT: 100 epochs, validation every 5 epochs;
-- Diffusion: 300 epochs, validation every 10 epochs, EMA enabled, 10-step DDIM validation metric;
-- preserve the existing model, optimizer, horizon, chunk, and scheduler defaults;
-- do not tune hyperparameters separately by N or action space;
-- do not reuse the two-epoch/two-episode compatibility-pilot limits.
-
-Use deterministic run IDs:
-
-```text
-sweep_act_a2_n50_seed0
-sweep_act_a3_n50_seed0
-sweep_diffusion_a2_n50_seed0
-sweep_diffusion_a3_n50_seed0
-...
-sweep_diffusion_a3_n500_seed0
-```
-
-Each cell is an independent **single-GPU** training job. Do not add DeepSpeed, ZeRO, DDP, or any
-multi-GPU model sharding. Render a stable `0-15` Slurm array with configurable concurrency and a
-conservative default of `%2`.
-
-Gilbreth remains non-Isaac:
-
-- no Isaac Sim/Lab installation or import;
-- no dataset generation;
-- no closed-loop simulation evaluation;
-- only package verification, preflight, GPU training, open-loop metrics, durable publication, and
-  return packaging.
-
-## Required Implementation
-
-### 1. Tests and versioned configuration
-
-Write failing regressions first, then implement a versioned sweep configuration such as:
-
-```text
-configs/cluster_sweep.v1.json
-configs/door_pose_plan_v3_scale.json
-```
-
-The configuration must freeze:
-
-- master dataset/version and five poses;
-- source count and per-pose count;
-- view IDs and exact train/validation/test counts;
-- deterministic selection/seed contract;
-- A2/A3 pairing;
-- `core_door_pose`;
-- 16-cell identity and stable task-index mapping;
-- training defaults and seed;
+- policy and stable run ID;
+- dataset task, physical version, view ID, action space, and `core_door_pose`;
+- seed `0`;
+- `train.device=cuda`;
+- `train.overfit_episodes=null`;
+- ACT epochs `100` and validation cadence `5`;
+- Diffusion epochs `300`, validation cadence `10`, EMA enabled, and 10 validation inference steps;
 - W&B offline mode;
-- one GPU per task and configurable array concurrency;
-- required source/dependency inventory;
-- scratch and durable attempt layout;
-- no-Isaac cluster boundary.
+- all other resolved model, optimizer, horizon, chunk, and scheduler values inherited from the
+  committed base policy configuration.
 
-Reject missing keys, unknown keys, duplicate cells, drifted counts, unequal pose balance, changed
-holdouts, non-nested training IDs, pilot overfit settings, online W&B, or distributed training.
+For each returned cell:
 
-### 2. Master generation and deterministic view builder
+1. Parse its durable `resolved_config.json`.
+2. Canonicalize and SHA-256 hash it using the same algorithm used during training.
+3. Require that hash to equal checkpoint provenance `resolved_training_config_sha256`.
+4. Require the loaded checkpoint configuration to equal the durable resolved configuration.
+5. Reconstruct the expected cell configuration through the normal config/override path and require
+   exact equality for all scientifically relevant fields, not only the dataset block.
+6. Reject wrong epochs, validation cadence, EMA, inference steps, seed, device, overfit value,
+   policy, run ID, W&B mode, or resolved-config content.
 
-Extend the existing pose-plan/generation/export flow instead of building a second data engine.
+Do not create a second permissive validator. Keep one authoritative cell-configuration contract
+shared by rendering, training, and return verification.
 
-Provide a deterministic orchestration and verification surface that:
+### 2. Separate source-master and action-export fingerprints
 
-- runs one Isaac process per pose using the official launcher;
-- resumes safely without silently accepting incomplete output;
-- records candidate, skipped, replacement, and selected episode provenance;
-- selects exactly 110 clean, successful, content-distinct episodes per pose;
-- exports A2 and A3 once from the same 550 source episodes;
-- verifies force/sanity gates and Alex V2 asset provenance;
-- builds the four shared split/view files;
-- computes eight train-only normalization artifacts;
-- writes a master manifest plus per-view fingerprints/hashes;
-- fails closed before publishing an incomplete or inconsistent official dataset.
+The current checkpoint field named `master_dataset_fingerprint_sha256` contains the action-export
+fingerprint from normalization instead of the common 550-source fingerprint.
 
-Use atomic publication for the official master/view metadata. Preserve failed generation output for
-diagnosis, but never let it become an official dataset.
+Correct the provenance model:
 
-### 3. Backward-compatible data loading and provenance
+- carry the view's real `master_dataset_fingerprint_sha256` through `PolicyData`;
+- validate it against the physical dataset manifest's `source_fingerprint_sha256`;
+- embed it in every view-selected ACT and Diffusion checkpoint as
+  `master_dataset_fingerprint_sha256`;
+- add a separate `action_dataset_fingerprint_sha256` containing the A2 or A3 export fingerprint;
+- validate both fields during checkpoint load, evaluation metadata construction, sweep return
+  verification, and any other scale-checkpoint compatibility gate;
+- preserve loading of existing `v2_pose` and compatibility-pilot checkpoints that do not use a
+  scale view.
 
-Add the minimum backward-compatible configuration needed to select `dataset.version` and a separate
-view/split ID.
+Use a backward-compatible provenance schema evolution. Do not silently reinterpret historical
+checkpoint fields.
 
-Bind every training run and checkpoint to:
+Required real values are:
 
-- master dataset fingerprint;
-- view/split ID and fingerprint;
-- exact train/validation/test IDs and counts;
-- normalization artifact and SHA-256;
-- action space and `core_door_pose`;
-- source Git commit;
-- resolved training configuration.
+- source master: `79dd3e819c2fbb2d21b9cf3848df7942bd6e69f163a9d82ef892710f5e39d27b`;
+- A2 export: `5179595aeeb7a69898456750658feb59b6a2aaff1821f6ce8af36739f04f9e06`;
+- A3 export: `3b528ceb451e9547c2aec76d47dafbf7129f870bdfaa6c691769304487ca615f`.
 
-Checkpoint loading, evaluation metadata, and return verification must fail closed on any mismatch.
-Existing `v2_pose` loading and checkpoint tests must remain unchanged and pass.
+### 3. Recompute normalization values from the declared training episodes
 
-### 4. Sweep transfer manifest
+The existing validator accepts numerically wrong means/std/min/max when their self-fingerprint and
+outer manifest hash are refreshed.
 
-Implement a sweep-specific clean-tree manifest builder/verifier, reusing hardened pilot helpers
-where appropriate rather than copying them.
+Make numerical correctness authoritative:
 
-The manifest must include exactly the required:
+- recompute action and observation count/mean/std/min/max from exactly the view's declared training
+  IDs;
+- compare every recomputed value with the stored artifact;
+- run this comparison when publication encounters an existing normalization file;
+- run it in local scale-dataset verification;
+- run it while reconstructing/building the sweep transfer contract;
+- ensure the committed verifier on Gilbreth can validate the transferred artifact against the
+  transferred dataset without Isaac;
+- retain validation of action space, observation preset, dataset IDs/fingerprint, view ID and
+  fingerprint, exact train IDs, normalization fingerprint, and file SHA-256.
 
-- master A2/A3 datasets and metadata;
-- four shared split/view files;
-- eight normalization artifacts;
-- sweep configuration and source files;
-- pinned non-Isaac Python environment specification;
-- Slurm/preflight/publication/return tooling;
-- Alex V2 URDF provenance hash, without transferring Isaac.
+The comparison must reject a modified numeric value even if every self-hash and manifest hash is
+recomputed. Use deterministic recomputation and explicit finite/count/shape checks. Validation and
+test episodes must remain excluded.
 
-It must bind the clean source commit, exact inventory, sizes, SHA-256 hashes, master/view/dataset
-fingerprints, pose/count/nesting invariants, and secret scan. Generate checksum-based outbound
-`rsync-files.txt` and command artifacts. Never include credentials, W&B keys, `.netrc`, private
-keys, authenticated URLs, or unrelated outputs.
+### 4. Make generation provenance machine-consistent and fail closed
 
-Preserve all historical pilot and stabilization manifests unchanged.
+The checked-in seed namespace descriptions do not match the actual pose plan. The current dataset
+verifier also does not validate the complete candidate ledger or bind the live pose plan and
+calibration to the published master.
 
-### 5. Gilbreth preflight and 16-cell Slurm renderer
+Create one authoritative, machine-readable generation contract:
 
-Reuse the verified Python 3.11/CUDA non-Isaac environment contract and the successful pilot/canary
-launcher patterns.
+- remove or replace the misleading namespace formulas in `configs/cluster_sweep.v1.json`;
+- encode or reference the exact per-pose source and overdraw ranges from
+  `configs/door_pose_plan_v3_scale.json` without maintaining contradictory duplicate truth;
+- require exact non-overlapping seed inventories for D0-D4;
+- bind the tracked pose-plan path and SHA-256 to the master manifest and transfer contract;
+- validate the calibration fingerprint against the canonical Alex V2 calibration artifact;
+- validate D0-D4 yaw/offset geometry against the already validated canonical pose definition;
+- reject changed seed ranges, plan hash, calibration fingerprint, or geometry even when counts still
+  look valid.
 
-The renderer must:
+Validate the complete candidate-provenance ledger locally on Ubuntu:
 
-- accept account, partition, optional QOS, depot root, scratch root, durable-results root, memory,
-  CPUs, wall time, and concurrency at render time;
-- render exactly 16 stable task mappings;
-- use one GPU per task and optionally enforce A100 80GB;
-- invoke only `$CONDA_PREFIX/bin/python`, never environment activation or inherited tool shims;
-- verify the sweep manifest before training;
-- run pure and live-CUDA preflight;
-- use attempt-specific scratch and durable paths keyed by array job ID/task ID/run ID;
-- preserve all resolved configs, checkpoints, logs, open-loop metrics, environment reports, and
-  Slurm evidence;
-- reuse the verified symlink-free W&B publisher before the final atomic durable move;
-- fail closed on publication/status errors, duplicates, unsafe W&B entries, source mismatch, or
-  missing completion evidence;
-- never overwrite or silently reuse an earlier attempt.
+- exactly 750 unique pose/seed candidates for the current artifact;
+- exact source and overdraw membership per pose;
+- every selected, skipped, failed, replacement, and not-needed decision has valid reasons and
+  deterministic replacement linkage;
+- selected episode IDs and pose IDs match the paired exports;
+- selected content-group hashes match the raw generated candidates;
+- selected source paths exist during Ubuntu publication/verification;
+- the recomputed selected-source fingerprint matches the master manifest;
+- all 550 selected episodes are safe, successful, content-distinct, and balanced 110 per pose.
 
-Render and syntax-check the script locally with example paths. Do not call `salloc`, `srun`, or
-`sbatch` in this task.
+The cluster verifier cannot depend on Ubuntu-only raw candidate paths. Bind the verified Ubuntu
+ledger/report into the transfer manifest by hash and verify all transferable invariants from the
+received files. Do not weaken the clean-tree or exact-inventory gates.
 
-### 6. Sweep return tooling
+The existing real ledger is expected to remain:
 
-Implement exact-attempt return build/verify tooling for all 16 cells.
+- 550 `SELECTED` source candidates;
+- 200 `NOT_NEEDED_OVERDRAW` candidates;
+- no replacements required.
 
-Require:
+If the corrected contract matches these artifacts, do not regenerate HDF5 files or change episode
+IDs, views, holdouts, or normalization values.
 
-- exactly the configured 16 task identities;
-- completion status for every cell;
-- no mixed attempt/job/task/source identities;
-- no missing or duplicate cells;
-- no failure records;
-- symlink-free durable results and W&B publication reports;
-- all expected checkpoints/configs/logs/metrics/environment evidence;
-- SHA-256 verification of every returned payload;
-- CPU loading of every returned best checkpoint without Isaac;
-- checksum-based return file list and command.
+### 5. Make the sweep return package directly transferable and verifiable
 
-No staging workaround is allowed. A failed or partial sweep must not produce a verified return
-package. Do not automatically resubmit failed cells.
+Bring sweep return packaging to parity with the proven pilot contract.
 
-### 7. Documentation
+The written `return-files.txt` must contain exactly once:
 
-Update only durable, relevant documentation:
+- every manifest payload path;
+- `.sweep_return/attempts/<ARRAY_JOB_ID>/return_manifest.json`;
+- `.sweep_return/attempts/<ARRAY_JOB_ID>/return-files.txt`.
 
-- `docs/architecture.md`: implemented dataset-view, sweep, provenance, and publication contracts;
-- `docs/development.md`: exact Ubuntu build/generation/verification commands and later transfer
-  workflow;
-- `docs/status.md`: datasets/package prepared locally, full sweep not transferred or launched;
-- `docs/cluster.md`: concise later Gilbreth verification/render/submit/return sequence.
+The checksum rsync command must use that remote file list and transfer the controls to the Ubuntu
+return root together with the 16-cell payload. After transfer, the documented Ubuntu verifier must
+find the manifest at the transferred path and verify all hashes plus all 16 CPU checkpoint loads.
 
-Keep historical job IDs `11279452` and `11279800` as evidence. Do not claim the full sweep ran or
-produced scientific conclusions.
+Reject malformed, missing, duplicated, mixed-attempt, or self-inconsistent control paths. Do not
+include the rsync command itself unless the existing pilot contract requires it.
 
-## Required Regression Coverage
+### 6. Reuse the proven Gilbreth environment path
 
-At minimum, tests must prove:
+Do not create an unsupported second environment implicitly.
 
-- exact 550/110-per-pose master contract;
-- exact N and per-pose counts for all views;
-- identical fixed validation/test IDs across views;
-- strict training nesting and split disjointness;
-- content-group non-leakage and duplicate rejection;
-- exact A2/A3 source-ID pairing and numerical distinctness;
-- deterministic replay of view generation and fingerprints;
-- train-only, per-view normalization with provenance/hash validation;
-- backward compatibility for `v2_pose` configs/checkpoints;
-- complete, unique 16-cell mapping and stable run IDs;
-- no pilot overfit settings, online W&B, Isaac imports, activation, or distributed training;
-- exact manifest inventory/hash/secret checks and clean-tree binding;
-- polluted-`PATH` generated-script execution through `$CONDA_PREFIX/bin/python`;
-- one-GPU Slurm directives, configurable `%2` default concurrency, and `bash -n`;
-- attempt isolation, retry/no-overwrite behavior, durable failure publication, atomic success
-  publication, and W&B sanitization;
-- exact 16-cell return selection, no-symlink rule, hash verification, and CPU checkpoint loading;
-- failure on missing, duplicate, mixed, partial, stale, or tampered evidence.
+- Change the sweep contract to use `envs/alexdoor-gilbreth-pilot-py311`, the environment proven by
+  pilot and canary jobs.
+- Ensure the renderer, preflight, documentation, example Slurm script, and transfer metadata all
+  agree on this prefix.
+- Bind and preflight the expected non-Isaac runtime evidence: Python 3.11, NumPy 2.4.6, PyTorch
+  2.12.1+cu126, Torch CUDA 12.6, and no Isaac imports.
+- Reuse the existing explicit prefix-Python launcher pattern; never activate Conda or depend on
+  inherited Python/Ruff shims.
+- If a bootstrap/update path is retained, it must target the same configured prefix and remain
+  credential-free. Do not require recreating the already verified environment.
 
-Use small synthetic fixtures for unit/integration tests; do not require 550 real episodes in the
-ordinary pytest suite.
+### 7. Add the missing generated-Slurm integration coverage
 
-## Execution and Validation Order
+Execute a rendered sweep script with synthetic fixtures and a fake prefix environment. No GPU,
+Isaac, network, or real training is allowed in ordinary tests.
 
-1. Create/update local-only `TODO.md` with all gates.
-2. Inspect current contracts and write regression tests first.
-3. Implement configuration, dataset views, provenance, sweep tooling, and documentation.
-4. Run focused tests until green.
-5. Run the full existing suite and static checks before expensive generation.
-6. Generate the real 550-episode master pool once on Ubuntu.
-7. Build and verify all four views, eight normalization artifacts, and fingerprints.
-8. Rerun dataset/sweep focused verification against the real artifacts.
-9. Commit the validated code/config/docs on the task branch.
-10. From the clean committed checkout, build and verify the final sweep transfer manifest and
-    checksum file list.
-11. Stop and report. Do not push, merge, transfer, allocate a GPU, submit, or train the full sweep
-    without a separate explicit user instruction.
+At minimum prove:
 
-Use the official launcher for all repo Python/Isaac validation:
+- polluted host `PATH` still invokes only `$CONDA_PREFIX/bin/python` and prefix-owned tools;
+- exact `0-15%2` default array and one GPU per task;
+- stable task-index/cell/run-ID mapping;
+- successful scratch execution and atomic durable publication;
+- durable failure evidence when preflight or training fails;
+- W&B sanitization before final publication;
+- duplicate final destination is rejected;
+- retry uses a new attempt ID and never overwrites earlier evidence;
+- no Conda activation, Isaac import, `torchrun`, DeepSpeed, ZeRO, or DDP;
+- rendered shell passes `bash -n`.
+
+## Regression Requirements
+
+Write failing tests before implementation for every confirmed defect:
+
+1. A checkpoint whose resolved config has the wrong epoch/EMA/run ID must fail return verification.
+2. A tampered `resolved_config.json`, with or without an updated checkpoint hash, must fail.
+3. A scale view where source-master and action-export fingerprints differ must preserve and verify
+   both exact values; tampering either must fail.
+4. A normalization mean modified by `+123`, with refreshed normalization and manifest hashes, must
+   still fail numerical recomputation.
+5. A changed pose seed range, yaw, calibration fingerprint, or pose-plan hash must fail dataset and
+   transfer verification.
+6. A deleted/falsified candidate-provenance row or replacement link must fail.
+7. The actual written return file list must contain all payload and two control files exactly once.
+8. A polluted-`PATH` rendered-script smoke must exercise success, failure, duplicate prevention,
+   and new-attempt retry.
+9. The configured/rendered Conda prefix must equal the supported bootstrap/proven environment
+   prefix.
+10. Existing `v2_pose`, pilot, W&B canary, historical manifests, checkpoint loading, and returned
+    pilot evidence must remain unchanged and pass.
+
+Use small synthetic fixtures for unit and integration tests. Do not make the ordinary test suite
+read all 550 real episodes unless it is an explicitly separate real-artifact gate.
+
+## Implementation Boundaries
+
+- Do not change the scientific matrix, N definitions, fixed holdouts, pose balance, seed 0,
+  training epochs, policy defaults, action/observation semantics, controller limits, or force gates.
+- Do not change the Alex V2 URDF or calibration.
+- Do not modify `v2_pose`, pilot datasets, historical job evidence, returned checkpoints, or
+  historical manifests.
+- Do not hand-edit generated HDF5, checkpoint, normalization, or manifest evidence to force a pass.
+- Prefer shared authoritative helpers over parallel validators or copied contracts.
+- Keep Isaac imports out of cluster modules and returned-checkpoint verification.
+- Preserve exact-attempt, no-overwrite, atomic-publication, symlink-free W&B, and secret-scan
+  behavior.
+
+## Execution Order
+
+1. Record the findings and gates in ignored `TODO.md`.
+2. Commit this prompt alone if it is the only initial change.
+3. Add focused failing regressions for all seven required-fix sections.
+4. Implement checkpoint/config and dual-fingerprint binding.
+5. Implement normalization recomputation.
+6. Implement generation-plan, calibration, and candidate-ledger verification.
+7. Fix return controls and the environment prefix.
+8. Add generated-Slurm integration coverage.
+9. Run focused tests after each block and make concise commits only when green.
+10. Run the full existing suite and static/shell checks.
+11. Run the real local dataset, A2/A3, view, normalization, generation-provenance, and transfer
+    verifiers against the existing artifacts.
+12. Confirm the existing 550 HDF5 files, episode IDs, view memberships, and numerical normalization
+    values did not change.
+13. Update only durable relevant documentation.
+14. From a clean committed checkout, rebuild and verify the final sweep transfer manifest,
+    checksum file list, command artifact, and example Slurm script.
+15. Commit final generated metadata if required by repository policy, re-run affected verification,
+    and stop.
+
+Do not push or merge.
+
+## Required Validation
+
+Use the official launcher for repository Python validation:
 
 ```text
 PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p <script-or--m-module>
 ```
 
-Also require:
+Run at minimum:
 
 ```text
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p -m pytest -q
 /home/pacquadr/.local/bin/ruff check .
 git diff --check
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p -m pytest -q
 bash -n <every generated/bootstrap Slurm or shell script>
 ```
 
-Run existing dataset, ACT, Diffusion, stabilization, pilot, W&B publication, returned-checkpoint,
-and historical-manifest regressions. Historical hashes and returned pilot evidence must remain
-unchanged.
+Also require:
+
+- focused regressions for every finding;
+- real `build_scale_dataset.py verify` success with strengthened checks;
+- real A2/A3 distinctness and exact-conversion success;
+- independent deterministic replay of all four views;
+- exact recomputation of all eight normalization artifacts;
+- exact candidate-ledger and selected-source-fingerprint verification;
+- sweep transfer-manifest build and verify from a clean committed checkout;
+- exact 16-cell config/render consistency;
+- generated-script integration smoke under polluted `PATH`;
+- return-package control-file integration test;
+- historical pilot/stabilization manifest hashes unchanged;
+- final worktree clean.
+
+The final full suite must not regress below the 701-test baseline except for deliberate additions;
+the two existing IsaacLab deprecation warnings are allowed.
 
 ## Stop Conditions
 
-Stop and report with exact evidence if:
+Stop and report exact evidence if:
 
-- the starting checkout is dirty or contains unrelated user changes that overlap this task;
-- the five frozen door poses or Alex V2 calibration no longer pass their existing gates;
-- 110 safe, successful, content-distinct episodes cannot be obtained for any pose;
-- generation requires weakening force, sanity, success, adapter, or provenance gates;
-- any view is imbalanced, non-nested, overlapping, or changes holdout IDs;
-- A2/A3 source IDs differ or their actions become numerically identical;
-- normalization includes validation/test data;
-- existing `v2_pose`, pilot, stabilization, or checkpoint compatibility regresses;
-- the final manifest cannot be built from a clean committed checkout;
-- generated artifacts cannot be atomically preserved and hash-verified.
+- unrelated user changes overlap the task;
+- a fix requires changing the frozen scientific matrix or safety contracts;
+- the corrected verifier proves any of the 550 published source episodes, views, or normalization
+  values are invalid;
+- preserving backward compatibility would require silently reinterpreting historical checkpoints;
+- the proven Gilbreth environment contract cannot support the full-sweep runtime;
+- any focused/full test, Ruff, diff, shell, real-artifact, historical-hash, or clean-tree gate fails;
+- the final transfer manifest cannot be rebuilt from the exact clean implementation commit.
 
-Do not reinterpret a stop condition as permission to weaken the contract, delete evidence, edit
-generated results manually, or continue with partial data.
+Do not weaken a validator, regenerate evidence unnecessarily, delete historical artifacts, or
+continue with partial success.
+
+## Documentation
+
+Update only key durable facts in:
+
+- `docs/architecture.md` for dual dataset fingerprints and exact resolved-config provenance;
+- `docs/development.md` for strengthened local verification and manifest rebuilding;
+- `docs/cluster.md` for the proven environment prefix and directly transferable return package;
+- `docs/status.md` for local readiness status only.
+
+Keep documentation concise. Do not claim that files were transferred, the full sweep ran, or any
+scientific result exists.
 
 ## Final Report
 
 Report only decision-relevant evidence:
 
-- branch and implementation commit(s);
-- files/contracts added or changed;
-- master dataset path, 550 total count, 110-per-pose counts, generation seed/overdraw plan, skipped
-  candidates, and master fingerprint;
-- each view's train/validation/test counts, per-pose counts, split fingerprint, and nesting proof;
-- A2/A3 fingerprints and pairing proof;
-- eight normalization paths and hashes;
-- 16-cell mapping and rendered-script hash;
-- focused/full test, Ruff, `git diff --check`, manifest verification, and shell-syntax results;
-- final transfer-manifest path/hash, payload count/bytes, and rsync-file-list path/hash;
+- branch and commits;
+- files/contracts changed;
+- focused and full test results;
+- dual fingerprint values and tamper-test results;
+- normalization recomputation results for all eight artifacts;
+- pose-plan, calibration, seed-range, candidate-ledger, and source-fingerprint verification;
+- supported Conda prefix and rendered Slurm hash;
+- return-file-list/control-file proof;
+- final transfer-manifest path/hash, payload count/bytes, and rsync-list path/hash;
+- confirmation that real episodes, IDs, views, normalization values, pilot evidence, and historical
+  manifests remained unchanged;
 - remaining limitations or blockers.
 
-End explicitly with:
+End exactly with:
 
 ```text
+Ready to transfer full sweep: YES or NO
 Full sweep transferred: NO
 Full sweep submitted: NO
 Phase 4 started: NO
