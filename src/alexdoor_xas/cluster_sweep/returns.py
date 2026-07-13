@@ -13,7 +13,13 @@ from typing import Any
 
 from alexdoor_xas.cluster_pilot.transfer import secret_problems, sha256_file
 
-from .config import SweepCell, SweepConfig
+from .config import (
+    SweepCell,
+    SweepConfig,
+    SweepConfigError,
+    canonical_resolved_config_sha256,
+    validate_resolved_sweep_cell_config,
+)
 
 RETURN_SCHEMA = "alexdoor_xas.cluster_sweep_return_manifest.v1"
 STATUS_SCHEMA = "alexdoor_xas.cluster_sweep_cell_status.v1"
@@ -222,6 +228,7 @@ def _collect_attempt(
         for relative in required:
             if not (run_root / relative).is_file():
                 raise SweepReturnError(f"completed cell {cell.run_id} missing {relative}")
+        _load_resolved_cell_config(run_root, config, cell)
         publication = json.loads((run_root / "wandb/publication_report.json").read_text())
         if (
             publication.get("destination_contains_symlinks") is not False
@@ -298,6 +305,12 @@ def verify_sweep_checkpoints(
     for cell in config.cells:
         path = root / "attempts" / attempt / str(cell.index) / cell.run_id / "checkpoints/best.pt"
         loaded = active_loaders[cell.policy](path)
+        run_root = path.parents[1]
+        durable_config = _load_resolved_cell_config(run_root, config, cell)
+        if loaded.config != durable_config:
+            raise SweepReturnError(
+                f"returned checkpoint config differs from durable resolved config: {cell.run_id}"
+            )
         dataset_cfg = loaded.config.get("dataset") or {}
         expected_dataset = {
             "task": config.dataset.task,
@@ -319,8 +332,10 @@ def verify_sweep_checkpoints(
         ).hexdigest()
         expected_provenance = {
             "master_dataset_fingerprint_sha256": transfer_manifest["dataset"][
-                "spaces"
-            ][cell.space]["dataset_fingerprint_sha256"],
+                "source_fingerprint_sha256"
+            ],
+            "action_dataset_fingerprint_sha256": transfer_manifest["dataset"]["spaces"]
+            [cell.space]["dataset_fingerprint_sha256"],
             "view_id": cell.view_id,
             "view_fingerprint_sha256": view["view_fingerprint_sha256"],
             "split_episode_ids": splits,
@@ -333,6 +348,9 @@ def verify_sweep_checkpoints(
             "source_git_commit": source_commit,
             "action_space": cell.space,
             "obs_preset": config.dataset.obs_preset,
+            "resolved_training_config_sha256": canonical_resolved_config_sha256(
+                durable_config
+            ),
         }
         for name, expected in expected_provenance.items():
             if provenance.get(name) != expected:
@@ -343,6 +361,25 @@ def verify_sweep_checkpoints(
     return statuses
 
 
+def _load_resolved_cell_config(
+    run_root: Path, config: SweepConfig, cell: SweepCell
+) -> dict[str, Any]:
+    path = run_root / "resolved_config.json"
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        raise SweepReturnError(
+            f"cannot parse durable resolved config for {cell.run_id}: {error}"
+        ) from error
+    if not isinstance(payload, dict):
+        raise SweepReturnError(f"durable resolved config is not an object: {cell.run_id}")
+    try:
+        validate_resolved_sweep_cell_config(config, cell, payload)
+    except SweepConfigError as error:
+        raise SweepReturnError(str(error)) from error
+    return payload
+
+
 def return_file_list(manifest: dict[str, Any]) -> list[str]:
     entries = manifest.get("files")
     if not isinstance(entries, list):
@@ -350,7 +387,56 @@ def return_file_list(manifest: dict[str, Any]) -> list[str]:
     paths = sorted(entry["path"] for entry in entries)
     if len(paths) != len(set(paths)):
         raise SweepReturnError("return manifest files are duplicated")
-    return paths
+    attempt = _attempt_id(str(manifest.get("attempt_id")))
+    controls = [
+        f".sweep_return/attempts/{attempt}/return_manifest.json",
+        f".sweep_return/attempts/{attempt}/return-files.txt",
+    ]
+    combined = sorted([*paths, *controls])
+    if len(combined) != len(set(combined)):
+        raise SweepReturnError("return payload and control paths overlap or are duplicated")
+    return combined
+
+
+def verify_return_control_files(
+    results_root: str | Path,
+    manifest: dict[str, Any],
+    *,
+    manifest_path: str | Path,
+    files_path: str | Path,
+) -> list[str]:
+    """Verify the two transferable controls and their exact checksum file list."""
+    root = Path(results_root).resolve()
+    attempt = _attempt_id(str(manifest.get("attempt_id")))
+    expected_directory = root / ".sweep_return" / "attempts" / attempt
+    expected_manifest = expected_directory / "return_manifest.json"
+    expected_files = expected_directory / "return-files.txt"
+    actual_manifest = Path(manifest_path).resolve()
+    actual_files = Path(files_path).resolve()
+    failures: list[str] = []
+    if actual_manifest != expected_manifest:
+        failures.append("return manifest control path is malformed or mixed-attempt")
+    if actual_files != expected_files:
+        failures.append("return file-list control path is malformed or mixed-attempt")
+    for label, path in (("manifest", actual_manifest), ("file list", actual_files)):
+        if path.is_symlink() or not path.is_file():
+            failures.append(f"return {label} control is missing or a symlink")
+    if failures:
+        return failures
+    try:
+        if json.loads(actual_manifest.read_text()) != manifest:
+            failures.append("return manifest control content is self-inconsistent")
+    except (OSError, json.JSONDecodeError):
+        failures.append("return manifest control is not valid JSON")
+    rows = actual_files.read_text().splitlines()
+    if len(rows) != len(set(rows)):
+        failures.append("return file list contains duplicate paths")
+    if any(not row or Path(row).is_absolute() or ".." in Path(row).parts for row in rows):
+        failures.append("return file list contains malformed paths")
+    expected_rows = return_file_list(manifest)
+    if rows != expected_rows:
+        failures.append("return file list is missing, extra, reordered, or self-inconsistent")
+    return failures
 
 
 def return_rsync_template() -> str:
@@ -377,6 +463,14 @@ def write_return_artifacts(
     _atomic_write(manifest_path, json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     _atomic_write(files_path, "\n".join(return_file_list(manifest)) + "\n")
     _atomic_write(command_path, return_rsync_template() + "\n")
+    failures = verify_return_control_files(
+        root,
+        manifest,
+        manifest_path=manifest_path,
+        files_path=files_path,
+    )
+    if failures:
+        raise SweepReturnError("return controls failed verification: " + "; ".join(failures))
     return manifest_path, files_path, command_path
 
 
@@ -436,6 +530,7 @@ __all__ = [
     "build_sweep_return_manifest",
     "return_file_list",
     "return_rsync_template",
+    "verify_return_control_files",
     "verify_sweep_checkpoints",
     "verify_sweep_return_manifest",
     "write_return_artifacts",

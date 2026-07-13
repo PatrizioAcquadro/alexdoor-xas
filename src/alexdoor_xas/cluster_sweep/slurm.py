@@ -8,7 +8,7 @@ import re
 import shlex
 from pathlib import Path
 
-from .config import SweepCell, SweepConfig
+from .config import SweepConfig, sweep_cell_override_values
 
 SAFE_DIRECTIVE_RE = re.compile(r"^[A-Za-z0-9._/+:-]+$")
 
@@ -110,7 +110,7 @@ def render_sweep_slurm_script(
             '[[ -z "$(git status --porcelain --untracked-files=all)" ]] || { echo "source tree is dirty" >&2; exit 25; }',
             "",
             'case "$TASK_ID" in',
-            *_render_cells(config.cells),
+            *_render_cells(config),
             '  *) echo "unexpected array task: $TASK_ID" >&2; exit 26 ;;',
             "esac",
             "",
@@ -119,6 +119,7 @@ def render_sweep_slurm_script(
             'RUN_OUTPUT_ROOT="$CELL_ROOT/output"',
             'RUN_DIR="$RUN_OUTPUT_ROOT/$EXPERIMENT/$RUN_ID"',
             'PUBLISH_FINAL="$DURABLE_RESULTS_ROOT/attempts/$ATTEMPT_ID/$TASK_ID/$RUN_ID"',
+            'CELL_OVERRIDES+=("run.output_root=$RUN_OUTPUT_ROOT" "+wandb.dir=$CELL_RUNTIME/wandb")',
             '[[ ! -e "$CELL_ROOT" ]] || { echo "scratch attempt already exists" >&2; exit 27; }',
             '[[ ! -e "$PUBLISH_FINAL" ]] || { echo "durable attempt already exists" >&2; exit 28; }',
             'mkdir -p "$CELL_RUNTIME/environment" "$CELL_RUNTIME/slurm" "$CELL_RUNTIME/status" "$CELL_RUNTIME/wandb"',
@@ -158,20 +159,6 @@ def render_sweep_slurm_script(
             "}",
             "trap publish_result EXIT",
             "",
-            "COMMON_OVERRIDES=(",
-            f'  "dataset.task={config.dataset.task}"',
-            f'  "dataset.version={config.dataset.master_version}"',
-            '  "dataset.view_id=$VIEW_ID"',
-            f'  "dataset.obs_preset={config.dataset.obs_preset}"',
-            f'  "train.seed={config.training.seed}"',
-            f'  "train.device={config.training.device}"',
-            '  "train.overfit_episodes=null"',
-            '  "run.run_id=$RUN_ID"',
-            '  "run.output_root=$RUN_OUTPUT_ROOT"',
-            f'  "+wandb.mode={config.training.wandb_mode}"',
-            '  "+wandb.dir=$CELL_RUNTIME/wandb"',
-            ")",
-            "",
             '"$CONDA_PREFIX/bin/python" scripts/build_cluster_sweep_manifest.py verify --config configs/cluster_sweep.v1.json --manifest "$MANIFEST"',
             "PREFLIGHT_ARGS=(--config configs/cluster_sweep.v1.json --manifest \"$MANIFEST\" --scratch-output \"$CELL_RUNTIME\" --report \"$CELL_RUNTIME/environment/preflight_report.json\" --environment-dir \"$CELL_RUNTIME/environment\" --live-cuda --expected-device-count 1 --requested-partition \"$PARTITION\")",
         ]
@@ -185,7 +172,7 @@ def render_sweep_slurm_script(
             '"$CONDA_PREFIX/bin/python" scripts/preflight_cluster_sweep.py "${PREFLIGHT_ARGS[@]}" > "$CELL_RUNTIME/slurm/stdout.log" 2> "$CELL_RUNTIME/slurm/stderr.log"',
             "run_code=$?",
             "if [[ $run_code -eq 0 ]]; then",
-            '  "$CONDA_PREFIX/bin/python" "$ENTRYPOINT" "dataset.space=$SPACE" "${COMMON_OVERRIDES[@]}" "${POLICY_OVERRIDES[@]}" >> "$CELL_RUNTIME/slurm/stdout.log" 2>> "$CELL_RUNTIME/slurm/stderr.log"',
+            '  "$CONDA_PREFIX/bin/python" "$ENTRYPOINT" "${CELL_OVERRIDES[@]}" >> "$CELL_RUNTIME/slurm/stdout.log" 2>> "$CELL_RUNTIME/slurm/stderr.log"',
             "  run_code=$?",
             "fi",
             "set -e",
@@ -203,10 +190,10 @@ def render_sweep_slurm_script(
     return "\n".join(lines)
 
 
-def _render_cells(cells: tuple[SweepCell, ...]) -> list[str]:
+def _render_cells(config: SweepConfig) -> list[str]:
     experiments = {"act": "act_door_push", "diffusion": "diffusion_door_push"}
     lines: list[str] = []
-    for cell in cells:
+    for cell in config.cells:
         lines.extend(
             [
                 f"  {cell.index})",
@@ -216,14 +203,39 @@ def _render_cells(cells: tuple[SweepCell, ...]) -> list[str]:
                 f"    RUN_ID={shlex.quote(cell.run_id)}",
                 f"    ENTRYPOINT={shlex.quote(cell.entrypoint)}",
                 f"    EXPERIMENT={shlex.quote(experiments[cell.policy])}",
-                "    POLICY_OVERRIDES=(",
+                "    CELL_OVERRIDES=(",
             ]
         )
-        for key, value in cell.overrides.items():
-            rendered = str(value).lower() if isinstance(value, bool) else str(value)
-            lines.append(f"      {shlex.quote(f'{key}={rendered}')}")
+        values = sweep_cell_override_values(
+            config,
+            cell,
+            output_root="__RUNTIME_OUTPUT_ROOT__",
+            wandb_dir="__RUNTIME_WANDB_DIR__",
+        )
+        for key, value in values.items():
+            if key in {"run.output_root", "+wandb.dir"}:
+                continue
+            rendered = _override_text(value)
+            if key == "dataset.space":
+                rendered = "$SPACE"
+            elif key == "dataset.view_id":
+                rendered = "$VIEW_ID"
+            elif key == "run.run_id":
+                rendered = "$RUN_ID"
+            argument = f"{key}={rendered}"
+            lines.append(
+                f'      "{argument}"' if "$" in rendered else f"      {shlex.quote(argument)}"
+            )
         lines.extend(["    )", "    ;;"])
     return lines
+
+
+def _override_text(value: object) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return str(value).lower()
+    return str(value)
 
 
 def _absolute(name: str, value: Path) -> Path:

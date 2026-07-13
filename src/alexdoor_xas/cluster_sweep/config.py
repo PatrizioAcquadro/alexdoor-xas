@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,10 @@ EXPECTED_VIEWS = (
     ("v3_scale_n250", 250, 25, 25, 50),
     ("v3_scale_n500", 500, 25, 25, 100),
 )
+SUPPORTED_CONDA_PREFIX = "envs/alexdoor-gilbreth-pilot-py311"
+SUPPORTED_NUMPY_VERSION = "2.4.6"
+SUPPORTED_TORCH_VERSION = "2.12.1+cu126"
+SUPPORTED_TORCH_CUDA_VERSION = "12.6"
 
 
 class SweepConfigError(ValueError):
@@ -43,8 +48,9 @@ class SweepSelectionConfig:
     algorithm: str
     seed: int
     holdout_per_pose_per_split: int
-    source_seed_namespace: str
-    overdraw_seed_namespace: str
+    pose_plan: str
+    canonical_pose_plan: str
+    calibration: str
 
 
 @dataclass(frozen=True)
@@ -91,6 +97,9 @@ class SweepStorageConfig:
 @dataclass(frozen=True)
 class SweepEnvironmentConfig:
     python_major_minor: str
+    numpy_version: str
+    torch_version: str
+    torch_cuda_version: str
     specification: str
     torch_package_spec: None
     torch_index_url: None
@@ -243,8 +252,9 @@ def _selection(node: dict[str, Any]) -> SweepSelectionConfig:
             "algorithm",
             "seed",
             "holdout_per_pose_per_split",
-            "source_seed_namespace",
-            "overdraw_seed_namespace",
+            "pose_plan",
+            "canonical_pose_plan",
+            "calibration",
         },
     )
     from alexdoor_xas.dataset.views import SELECTION_ALGORITHM
@@ -254,11 +264,24 @@ def _selection(node: dict[str, Any]) -> SweepSelectionConfig:
     seed = _nonnegative("selection.seed", node["seed"])
     if node["holdout_per_pose_per_split"] != 5:
         raise SweepConfigError("selection holdouts must be exactly five per pose and split")
-    source = _text("selection.source_seed_namespace", node["source_seed_namespace"])
-    overdraw = _text("selection.overdraw_seed_namespace", node["overdraw_seed_namespace"])
-    if source == overdraw:
-        raise SweepConfigError("source and overdraw seed namespaces must not overlap")
-    return SweepSelectionConfig(SELECTION_ALGORITHM, seed, 5, source, overdraw)
+    expected_paths = {
+        "pose_plan": "configs/door_pose_plan_v3_scale.json",
+        "canonical_pose_plan": "configs/door_pose_plan_v2_pose.json",
+        "calibration": "configs/alex_v2_door_calibration.v0.json",
+    }
+    selected_paths = {
+        name: _relative(f"selection.{name}", node[name]) for name in expected_paths
+    }
+    if selected_paths != expected_paths:
+        raise SweepConfigError("selection pose plan, canonical geometry, or calibration drifted")
+    return SweepSelectionConfig(
+        SELECTION_ALGORITHM,
+        seed,
+        5,
+        selected_paths["pose_plan"],
+        selected_paths["canonical_pose_plan"],
+        selected_paths["calibration"],
+    )
 
 
 def _views(value: Any) -> tuple[SweepView, ...]:
@@ -391,10 +414,17 @@ def _storage(node: dict[str, Any]) -> SweepStorageConfig:
     layout = _text("storage.attempt_layout", node["attempt_layout"])
     if layout != "attempts/{slurm_array_job_id}/{slurm_array_task_id}/{run_id}":
         raise SweepConfigError("storage attempt layout drifted")
+    conda_prefix = _relative(
+        "storage.conda_prefix_relative", node["conda_prefix_relative"]
+    )
+    if conda_prefix != SUPPORTED_CONDA_PREFIX:
+        raise SweepConfigError(
+            "storage.conda_prefix_relative must reuse the proven pilot environment"
+        )
     return SweepStorageConfig(
         None,
         None,
-        _relative("storage.conda_prefix_relative", node["conda_prefix_relative"]),
+        conda_prefix,
         _relative("storage.source_checkout_relative", node["source_checkout_relative"]),
         _relative("storage.durable_results_relative", node["durable_results_relative"]),
         _relative("storage.scratch_runs_relative", node["scratch_runs_relative"]),
@@ -408,6 +438,9 @@ def _environment(node: dict[str, Any]) -> SweepEnvironmentConfig:
         node,
         {
             "python_major_minor",
+            "numpy_version",
+            "torch_version",
+            "torch_cuda_version",
             "specification",
             "torch_package_spec",
             "torch_index_url",
@@ -416,6 +449,14 @@ def _environment(node: dict[str, Any]) -> SweepEnvironmentConfig:
     )
     if node["python_major_minor"] != "3.11":
         raise SweepConfigError("environment Python must be 3.11")
+    if node["numpy_version"] != SUPPORTED_NUMPY_VERSION:
+        raise SweepConfigError(f"environment NumPy must be {SUPPORTED_NUMPY_VERSION}")
+    if node["torch_version"] != SUPPORTED_TORCH_VERSION:
+        raise SweepConfigError(f"environment PyTorch must be {SUPPORTED_TORCH_VERSION}")
+    if node["torch_cuda_version"] != SUPPORTED_TORCH_CUDA_VERSION:
+        raise SweepConfigError(
+            f"environment Torch CUDA must be {SUPPORTED_TORCH_CUDA_VERSION}"
+        )
     if node["torch_package_spec"] is not None or node["torch_index_url"] is not None:
         raise SweepConfigError(
             "checked-in PyTorch build must remain unset pending live cluster evidence"
@@ -423,7 +464,14 @@ def _environment(node: dict[str, Any]) -> SweepEnvironmentConfig:
     if node["require_no_isaac"] is not True:
         raise SweepConfigError("cluster environment must require no Isaac")
     return SweepEnvironmentConfig(
-        "3.11", _relative("environment.specification", node["specification"]), None, None, True
+        "3.11",
+        SUPPORTED_NUMPY_VERSION,
+        SUPPORTED_TORCH_VERSION,
+        SUPPORTED_TORCH_CUDA_VERSION,
+        _relative("environment.specification", node["specification"]),
+        None,
+        None,
+        True,
     )
 
 
@@ -487,6 +535,8 @@ def _tracked(value: Any) -> tuple[str, ...]:
     required = {
         "configs/cluster_sweep.v1.json",
         "configs/door_pose_plan_v3_scale.json",
+        "configs/door_pose_plan_v2_pose.json",
+        "configs/alex_v2_door_calibration.v0.json",
         "environment/gilbreth_pilot_py311.yml",
         "scripts/build_cluster_sweep_manifest.py",
         "scripts/preflight_cluster_sweep.py",
@@ -503,6 +553,124 @@ def _tracked(value: Any) -> tuple[str, ...]:
     if missing:
         raise SweepConfigError(f"tracked_transfer_files missing required paths: {missing}")
     return paths
+
+
+def canonical_resolved_config_sha256(resolved_config: Mapping[str, Any]) -> str:
+    """Hash one resolved trainer configuration with the training-time algorithm."""
+    if not isinstance(resolved_config, Mapping):
+        raise SweepConfigError("resolved training config must be a mapping")
+    try:
+        canonical = json.dumps(
+            dict(resolved_config), sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode()
+    except (TypeError, ValueError) as error:
+        raise SweepConfigError(
+            f"resolved training config is not canonical JSON: {error}"
+        ) from error
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def sweep_cell_override_values(
+    config: SweepConfig,
+    cell: SweepCell,
+    *,
+    output_root: str,
+    wandb_dir: str,
+) -> dict[str, Any]:
+    """Return the one authoritative Hydra override mapping for a sweep cell."""
+    if cell not in config.cells:
+        raise SweepConfigError("sweep cell is not part of the loaded configuration")
+    if not output_root or not wandb_dir:
+        raise SweepConfigError("sweep runtime output and W&B directories must be non-empty")
+    return {
+        "dataset.task": config.dataset.task,
+        "dataset.space": cell.space,
+        "dataset.version": config.dataset.master_version,
+        "dataset.view_id": cell.view_id,
+        "dataset.obs_preset": config.dataset.obs_preset,
+        "train.seed": config.training.seed,
+        "train.device": config.training.device,
+        "train.overfit_episodes": None,
+        "run.run_id": cell.run_id,
+        "run.output_root": output_root,
+        "+wandb.mode": config.training.wandb_mode,
+        "+wandb.dir": wandb_dir,
+        **cell.overrides,
+    }
+
+
+def resolved_sweep_cell_config(
+    config: SweepConfig,
+    cell: SweepCell,
+    *,
+    output_root: str,
+    wandb_dir: str,
+) -> dict[str, Any]:
+    """Compose one cell through the same ACT/Diffusion config loaders used for training."""
+    values = sweep_cell_override_values(
+        config, cell, output_root=output_root, wandb_dir=wandb_dir
+    )
+    overrides = [f"{key}={_override_text(value)}" for key, value in values.items()]
+    if cell.policy == "act":
+        from alexdoor_xas.policies.act.config import load_act_config
+
+        resolved = load_act_config(overrides)
+    elif cell.policy == "diffusion":
+        from alexdoor_xas.policies.diffusion.config import load_diffusion_config
+
+        resolved = load_diffusion_config(overrides)
+    else:  # pragma: no cover - load_sweep_config already freezes this inventory.
+        raise SweepConfigError(f"unsupported sweep policy: {cell.policy}")
+    return asdict(resolved)
+
+
+def validate_resolved_sweep_cell_config(
+    config: SweepConfig,
+    cell: SweepCell,
+    resolved_config: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Require exact equality with the normal resolved config for this cell."""
+    resolved = dict(resolved_config)
+    run = resolved.get("run")
+    wandb = resolved.get("wandb_overrides")
+    if not isinstance(run, dict) or not isinstance(wandb, dict):
+        raise SweepConfigError("resolved sweep config lacks run or W&B mappings")
+    output_root = run.get("output_root")
+    wandb_dir = wandb.get("dir")
+    if not isinstance(output_root, str) or not output_root:
+        raise SweepConfigError("resolved sweep config has no runtime output root")
+    if not isinstance(wandb_dir, str) or not wandb_dir:
+        raise SweepConfigError("resolved sweep config has no W&B directory")
+    expected = resolved_sweep_cell_config(
+        config,
+        cell,
+        output_root=output_root,
+        wandb_dir=wandb_dir,
+    )
+    if resolved != expected:
+        raise SweepConfigError(
+            f"resolved config does not equal configured sweep cell {cell.run_id}: "
+            f"{_first_difference(expected, resolved)}"
+        )
+    return expected
+
+
+def _override_text(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return str(value).lower()
+    return str(value)
+
+
+def _first_difference(expected: Any, actual: Any, path: str = "root") -> str:
+    if isinstance(expected, dict) and isinstance(actual, dict):
+        if set(expected) != set(actual):
+            return f"{path} keys expected={sorted(expected)} actual={sorted(actual)}"
+        for key in expected:
+            if expected[key] != actual[key]:
+                return _first_difference(expected[key], actual[key], f"{path}.{key}")
+    return f"{path} expected={expected!r} actual={actual!r}"
 
 
 def _mapping(name: str, value: Any) -> dict[str, Any]:
@@ -549,6 +717,10 @@ __all__ = [
     "EXPECTED_POSES",
     "EXPECTED_SPACES",
     "EXPECTED_VIEWS",
+    "SUPPORTED_CONDA_PREFIX",
+    "SUPPORTED_NUMPY_VERSION",
+    "SUPPORTED_TORCH_CUDA_VERSION",
+    "SUPPORTED_TORCH_VERSION",
     "SweepCell",
     "SweepConfig",
     "SweepConfigError",
@@ -559,5 +731,9 @@ __all__ = [
     "SweepStorageConfig",
     "SweepTrainingConfig",
     "SweepView",
+    "canonical_resolved_config_sha256",
     "load_sweep_config",
+    "resolved_sweep_cell_config",
+    "sweep_cell_override_values",
+    "validate_resolved_sweep_cell_config",
 ]

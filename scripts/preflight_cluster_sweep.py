@@ -9,15 +9,13 @@ import sys
 from pathlib import Path
 
 from alexdoor_xas import paths
-from alexdoor_xas.cluster_pilot.preflight import (
-    dependency_inventory,
-    write_environment_reports,
-)
+from alexdoor_xas.cluster_pilot.preflight import write_environment_reports
 from alexdoor_xas.cluster_sweep.config import load_sweep_config
 from alexdoor_xas.cluster_sweep.preflight import (
     atomic_json,
     probe_cuda_device,
     run_sweep_preflight,
+    sweep_dependency_inventory,
 )
 
 
@@ -40,7 +38,7 @@ def main() -> int:
     try:
         config = load_sweep_config(args.config)
         manifest = json.loads(args.manifest.read_text())
-        dependencies = dependency_inventory()
+        dependencies = sweep_dependency_inventory()
         report = run_sweep_preflight(
             repo_root=paths.REPO_ROOT,
             config=config,

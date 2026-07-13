@@ -21,8 +21,9 @@
     "algorithm": "sha256(seed:pose_id:content_group):ascending",
     "seed": 3407,
     "holdout_per_pose_per_split": 5,
-    "source_seed_namespace": "pose_index*100000 + [1000,99999]",
-    "overdraw_seed_namespace": "pose_index*100000 + [200000,299999]"
+    "pose_plan": "configs/door_pose_plan_v3_scale.json",
+    "canonical_pose_plan": "configs/door_pose_plan_v2_pose.json",
+    "calibration": "configs/alex_v2_door_calibration.v0.json"
   },
   "views": [
     {"view_id": "v3_scale_n50", "train": 50, "val": 25, "test": 25, "train_per_pose": 10},
@@ -62,7 +63,7 @@
   "storage": {
     "depot_root": null,
     "scratch_root": null,
-    "conda_prefix_relative": "envs/alexdoor-gilbreth-py311",
+    "conda_prefix_relative": "envs/alexdoor-gilbreth-pilot-py311",
     "source_checkout_relative": "alexdoor-xas/source",
     "durable_results_relative": "alexdoor-xas/cluster_sweep/results",
     "scratch_runs_relative": "alexdoor-xas/cluster_sweep",
@@ -70,6 +71,9 @@
   },
   "environment": {
     "python_major_minor": "3.11",
+    "numpy_version": "2.4.6",
+    "torch_version": "2.12.1+cu126",
+    "torch_cuda_version": "12.6",
     "specification": "environment/gilbreth_pilot_py311.yml",
     "torch_package_spec": null,
     "torch_index_url": null,
@@ -105,6 +109,8 @@
     "configs/wandb.yaml",
     "configs/cluster_sweep.v1.json",
     "configs/door_pose_plan_v3_scale.json",
+    "configs/door_pose_plan_v2_pose.json",
+    "configs/alex_v2_door_calibration.v0.json",
     "environment/gilbreth_pilot_py311.yml",
     "scripts/build_scale_dataset.py",
     "scripts/build_cluster_sweep_manifest.py",

@@ -10,6 +10,7 @@ from pathlib import Path
 
 from alexdoor_xas.cluster_sweep.config import load_sweep_config
 from alexdoor_xas.cluster_sweep.returns import (
+    verify_return_control_files,
     verify_sweep_checkpoints,
     verify_sweep_return_manifest,
 )
@@ -34,6 +35,13 @@ def main() -> int:
             config=config,
             transfer_manifest=transfer,
         )
+        controls = verify_return_control_files(
+            args.results_root,
+            returned,
+            manifest_path=args.return_manifest,
+            files_path=args.return_manifest.with_name("return-files.txt"),
+        )
+        failures.extend(controls)
         if failures:
             raise ValueError("; ".join(failures))
         statuses = verify_sweep_checkpoints(

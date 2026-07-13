@@ -28,11 +28,11 @@ def run_sweep_preflight(
     manifest: dict[str, Any],
     scratch_output: str | Path,
     source_state: dict[str, Any] | None = None,
-    dependency_probe: Callable[[], dict[str, str]] = dependency_inventory,
+    dependency_probe: Callable[[], dict[str, str]] | None = None,
     module_probe: Callable[[], dict[str, str]] = isaac_module_inventory,
     checkpoint_probe: Callable[[Path], None] | None = None,
 ) -> dict[str, Any]:
-    dependencies = dependency_probe()
+    dependencies = (dependency_probe or sweep_dependency_inventory)()
     python_version = dependencies.get("python", "")
     if not python_version.startswith(f"{config.environment.python_major_minor}."):
         raise ClusterPreflightError(
@@ -43,6 +43,16 @@ def run_sweep_preflight(
         raise ClusterPreflightError(
             f"dependency inventory is incomplete: {missing_dependencies}"
         )
+    expected_versions = {
+        "numpy": config.environment.numpy_version,
+        "torch": config.environment.torch_version,
+        "torch_cuda": config.environment.torch_cuda_version,
+    }
+    for name, expected in expected_versions.items():
+        if dependencies.get(name) != expected:
+            raise ClusterPreflightError(
+                f"{name} runtime must be {expected}, got {dependencies.get(name)!r}"
+            )
     modules = module_probe()
     if modules:
         raise ClusterPreflightError(
@@ -98,6 +108,15 @@ def run_sweep_preflight(
     }
 
 
+def sweep_dependency_inventory() -> dict[str, str]:
+    """Add the Torch CUDA build to the proven non-Isaac dependency inventory."""
+    inventory = dependency_inventory()
+    import torch
+
+    inventory["torch_cuda"] = str(torch.version.cuda or "")
+    return inventory
+
+
 def _torch_checkpoint_probe(path: Path) -> None:
     import torch
 
@@ -123,4 +142,5 @@ __all__ = [
     "atomic_json",
     "probe_cuda_device",
     "run_sweep_preflight",
+    "sweep_dependency_inventory",
 ]
