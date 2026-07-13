@@ -95,6 +95,14 @@ paired A2/A3 master atomically, builds the four shared nested views, and writes
 eight train-only norm files. Official version directories are never silently
 replaced or accumulated.
 
+`verify` independently revalidates the canonical D0-D4 geometry, calibration
+fingerprint, exact disjoint source/overdraw seed inventories, every candidate
+decision and replacement link, selected raw-source content, the common source
+fingerprint, both action-export fingerprints, all four deterministic view
+memberships, and every numerical field of all eight norms recomputed from the
+exact training IDs. A refreshed inner or outer hash cannot make altered
+normalization values pass.
+
 `scripts/verify_dataset_interface.py` is read-only by default. Use
 `--write-artifacts` only when intentionally refreshing official split and
 normalization files after a dataset regeneration.
@@ -151,6 +159,11 @@ The prepared full-sweep workflow is also documented there. Local preparation
 may build and verify its ignored transfer artifacts and render/syntax-check an
 example array script. Transfer, `sbatch`, training, and Phase 4 remain separate
 explicitly authorized actions.
+
+Build the sweep manifest only from a clean committed checkout and immediately
+run its `verify` subcommand. The manifest builder reruns the same transferable
+generation and normalization invariants; do not copy forward an older manifest
+after code, config, pose-plan, calibration, or dataset metadata changes.
 
 ## Change discipline
 

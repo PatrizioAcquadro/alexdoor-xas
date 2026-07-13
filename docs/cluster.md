@@ -274,13 +274,16 @@ binds the clean source commit and live Alex V2 URDF hash but deliberately does
 not transfer the machine-local URDF. Do not continue on a count, identity,
 fingerprint, hash, secret, clean-tree, or asset mismatch.
 
-On Gilbreth, verify the received manifest first, use the persistent Python 3.11
-environment, and render the array with explicit live account/partition/depot
-and scratch values. The renderer defaults to `0-15%2`, requests one GPU per
-cell, invokes `$CONDA_PREFIX/bin/python` directly, forbids Isaac and distributed
-launchers, and keeps all W&B runs offline. Each cell verifies the transfer,
-runs pure and live-CUDA preflight, trains one exact policy/space/view mapping,
-and atomically publishes symlink-free evidence from scratch to:
+On Gilbreth, verify the received manifest first and use the proven persistent
+Python 3.11 prefix `envs/alexdoor-gilbreth-pilot-py311`; the config, transfer
+metadata, preflight, and renderer must all agree on that exact relative prefix.
+Render the array with explicit live account/partition/depot and scratch values.
+The renderer defaults to `0-15%2`, requests one GPU per cell, invokes
+`$CONDA_PREFIX/bin/python` directly even under a polluted host `PATH`, forbids
+Isaac and distributed launchers, and keeps all W&B runs offline. Each cell
+verifies the transfer, runs pure and live-CUDA preflight, trains one exact
+policy/space/view mapping, and atomically publishes symlink-free evidence from
+scratch to:
 
 ```text
 attempts/<SLURM_ARRAY_JOB_ID>/<SLURM_ARRAY_TASK_ID>/<run_id>/
@@ -293,6 +296,12 @@ unexpected files, stale source/view/norm provenance, and hash drift. Ubuntu
 then runs `scripts/verify_returned_cluster_sweep.py`, which verifies the exact
 return inventory and CPU-loads every `best.pt` checkpoint. This verification
 does not start Isaac or closed-loop evaluation.
+
+The remote `return-files.txt` is directly usable with `rsync --files-from` from
+the durable results root. It contains every payload path plus exactly one
+attempt-local `return_manifest.json` and exactly one attempt-local
+`return-files.txt`; both the cluster-side builder and Ubuntu verifier reject a
+missing, duplicated, malformed, or mixed-attempt control path.
 
 Historical pilot attempts `11279452` and `11279800` remain immutable evidence.
 At this documentation state the full sweep has not been transferred or

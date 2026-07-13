@@ -29,12 +29,14 @@ history.
   implemented and locally tested for later jobs.
 - **Full nested-sweep implementation:** strict scale pose/sweep configs,
   resumable candidate generation and atomic paired publication, shared nested
-  views, train-only per-view normalization, view-bound checkpoint provenance,
-  exact transfer/preflight/16-cell Slurm tooling, and exact-attempt return/CPU
-  checkpoint verification are implemented. The real `v3_scale_master` is
-  locally published and verified at 550 episodes (110 per D0–D4), with paired
-  A2/A3 exports, four nested views, and eight train-only norm files. The final
-  clean-tree transfer package remains a local preparation gate.
+  views, exact train-only normalization recomputation, dual source/action
+  fingerprints, exact resolved-cell checkpoint provenance, complete candidate
+  ledger verification, exact transfer/preflight/16-cell Slurm tooling, and
+  directly transferable exact-attempt return controls are implemented. The
+  real `v3_scale_master` is locally published and verified at 550 episodes
+  (110 per D0-D4), with paired A2/A3 exports, four nested views, and eight
+  train-only norm files. Clean-tree manifest build and verification remain
+  local preparation evidence only.
 
 ## Local stabilization evidence
 
@@ -75,8 +77,8 @@ artifact-bound values above against the local evidence.
 ## Current boundaries
 
 - The **Gilbreth N50 compatibility pilot is complete and return-verified**.
-  Its automatic W&B durable-publication fix was merged afterward and still
-  requires one live two-cell canary before full-sweep execution.
+  The persistent Python prefix later used by the canary is the supported
+  full-sweep environment contract; this does not constitute a sweep run.
 - The **full cluster dataset-scale sweep has not started**. Its nested
   N50/N100/N250/N500 implementation is local-only preparation. No sweep package
   has been transferred, no 16-cell array has been submitted, and no full-sweep
@@ -103,11 +105,9 @@ artifact-bound values above against the local evidence.
 
 ## Next development sequence
 
-1. Run and return-verify one two-cell Gilbreth canary using the automatic W&B
-   durable-publication path, without manual return staging.
-2. Build and validate the final clean-tree transfer manifest and 16-cell Slurm
+1. Build and validate the final clean-tree transfer manifest and 16-cell Slurm
    matrix locally from the verified scale master.
-3. Transfer and hash-verify the committed sweep package on Gilbreth only after
+2. Transfer and hash-verify the committed sweep package on Gilbreth only after
    separate authorization.
-4. Launch the full sweep only after every prior gate passes and submission is
+3. Launch the full sweep only after every prior gate passes and submission is
    separately authorized.

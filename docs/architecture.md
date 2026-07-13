@@ -121,9 +121,10 @@ and additive extras. The current container schema is `phase2.v1`:
 Reusable data lives at `datasets/<task>/<action_space>/<version>/`. Models
 consume it only through `EpisodeDataset` or `A4ChunkDataset`, never through raw
 HDF5 keys. Splits are shared across action spaces from the same generation
-pass. Normalization statistics use only the training split and bind the full
-dataset fingerprint, action space, and observation preset. Re-exporting a
-version replaces that generation and requires regenerated splits/statistics.
+pass. Normalization statistics use only the training split and bind both the
+source-master fingerprint and the action-export fingerprint, plus the action
+space and observation preset. Re-exporting a version replaces that generation
+and requires regenerated splits/statistics.
 
 The stabilization Alex dataset is `door_push_alex_v2/v2_pose`: 50 episodes over
 five door poses with a grouped, pose-stratified 38/6/6 split. Dataset generation
@@ -145,10 +146,12 @@ Validation and test are fixed at 25 episodes each, balanced five per pose.
 Training is a balanced, strictly nested prefix of 10, 20, 50, or 100 episodes
 per pose. Views are shared across action spaces and fingerprint the master,
 selection seed, split membership, and content groups. Each action-space/view
-pair owns one train-only normalization artifact, for eight total. A view
-checkpoint binds the master and view fingerprints, exact split IDs, norm file
-hash and semantic fingerprint, action space, observation preset, source
-commit, and resolved training config. Legacy version-only checkpoints and
+pair owns one train-only normalization artifact, for eight total. Scale views
+carry two distinct provenance values: the common source-master fingerprint and
+the action-specific A2 or A3 export fingerprint. A view checkpoint binds both,
+the view fingerprint, exact split IDs, norm file hash and semantic fingerprint,
+action space, observation preset, source commit, and the canonical SHA-256 of
+the complete resolved training config. Legacy version-only checkpoints and
 `v2_pose` loading remain readable through the unchanged path.
 
 ## Artifacts and provenance
@@ -166,6 +169,9 @@ configuration, checkpoint, seed protocol, and evaluation protocol.
 The full-sweep orchestration lives in `cluster_sweep/`. Its versioned config
 defines a stable 16-cell array: ACT then Diffusion across A2/A3 for each nested
 training view, seed 0, normal non-pilot epochs, offline W&B, one visible GPU,
-and no distributed or Isaac runtime. Transfer and return manifests are exact
-SHA-256 inventories. Scratch and durable results are isolated by numeric array
-job ID, task ID, and run ID; only one complete 16-cell attempt can be returned.
+and no distributed or Isaac runtime. One authoritative cell resolver supplies
+the renderer, trainer, checkpoint provenance, and return verifier; every
+returned durable config must equal that exact resolved cell and match its
+checkpoint hash. Transfer and return manifests are exact SHA-256 inventories.
+Scratch and durable results are isolated by numeric array job ID, task ID, and
+run ID; only one complete 16-cell attempt can be returned.
