@@ -8,7 +8,6 @@ import importlib.util
 import json
 import os
 import platform
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -48,17 +47,28 @@ def dependency_inventory() -> dict[str, str]:
             raise ClusterPreflightError(
                 f"required dependency is unavailable: {distribution_name}: {error}"
             ) from error
-    ruff = shutil.which("ruff")
-    if ruff is None:
-        raise ClusterPreflightError("required dependency is unavailable: ruff executable")
-    result = subprocess.run(
-        [ruff, "--version"],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    ruff = Path(sys.executable).parent / "ruff"
+    if not ruff.is_file() or not os.access(ruff, os.X_OK):
+        raise ClusterPreflightError(
+            "required dependency is unavailable: Ruff executable adjacent to the active "
+            f"Python is missing or not executable: {ruff}"
+        )
+    try:
+        result = subprocess.run(
+            [str(ruff), "--version"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except OSError as error:
+        raise ClusterPreflightError(
+            f"failed to execute Ruff adjacent to the active Python: {ruff}: {error}"
+        ) from error
     if result.returncode:
-        raise ClusterPreflightError(f"ruff --version failed: {result.stderr.strip()}")
+        detail = result.stderr.strip() or result.stdout.strip() or "no command output"
+        raise ClusterPreflightError(
+            f"{ruff} --version failed with exit code {result.returncode}: {detail}"
+        )
     inventory["ruff"] = result.stdout.strip()
     return inventory
 
