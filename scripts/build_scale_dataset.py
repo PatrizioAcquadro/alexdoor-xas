@@ -21,6 +21,16 @@ from typing import Any
 import numpy as np
 
 from alexdoor_xas import paths
+from alexdoor_xas.assets.alex_v2_contract import (
+    RobotAssetRef,
+    derive_fixed_base_door_manifest,
+    validate_alex_v2_manifest,
+)
+from alexdoor_xas.assets.alex_v2_manifest import build_alex_v2_manifest
+from alexdoor_xas.calibration.alex_v2_door import (
+    CalibrationError,
+    load_validated_alex_v2_door_calibration,
+)
 from alexdoor_xas.cluster_sweep.config import SweepConfig, load_sweep_config
 from alexdoor_xas.data_engine import export_paired_ee_datasets_atomic
 from alexdoor_xas.dataset import (
@@ -51,6 +61,10 @@ DEFAULT_CONFIG = Path("configs/cluster_sweep.v1.json")
 DEFAULT_PLAN = Path("configs/door_pose_plan_v3_scale.json")
 DEFAULT_EXPERIMENT = "v3_scale_generation"
 LAUNCHER = Path("/home/pacquadr/IsaacLab/isaaclab.sh")
+SCALE_CALIBRATION_RUNTIME_VERSIONS = {
+    "isaac_lab": "3.0.0",
+    "isaac_sim": "6.0.1-rc.7+release.42383.32955d8d.gl",
+}
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -104,8 +118,26 @@ def _load_plan(path: Path, config: SweepConfig) -> dict[str, Any]:
         raise ValueError("scale pose inventory/order mismatch")
     authoritative_path = paths.REPO_ROOT / config.selection.pose_plan
     authoritative = json.loads(authoritative_path.read_text())
-    calibration = json.loads((paths.REPO_ROOT / config.selection.calibration).read_text())
-    if plan["calibration_fingerprint"] != calibration.get("fingerprint"):
+    calibration_path = paths.REPO_ROOT / config.selection.calibration
+    master_path = paths.REPO_ROOT / config.dataset.master_manifest
+    try:
+        if master_path.is_file():
+            master = json.loads(master_path.read_text())
+            master_asset = master.get("robot_asset")
+            if not isinstance(master_asset, dict):
+                raise ValueError("scale master robot asset contract is missing")
+            runtime_asset = RobotAssetRef.from_dict(master_asset)
+        else:
+            runtime_manifest = derive_fixed_base_door_manifest(build_alex_v2_manifest())
+            runtime_asset = validate_alex_v2_manifest(runtime_manifest)
+        calibration = load_validated_alex_v2_door_calibration(
+            calibration_path,
+            runtime_asset=runtime_asset,
+            runtime_versions=SCALE_CALIBRATION_RUNTIME_VERSIONS,
+        )
+    except (CalibrationError, KeyError, TypeError, ValueError) as error:
+        raise ValueError(f"scale calibration validation failed: {error}") from error
+    if plan["calibration_fingerprint"] != calibration.payload["fingerprint"]:
         raise ValueError("scale calibration fingerprint differs from the canonical artifact")
     canonical = json.loads(
         (paths.REPO_ROOT / config.selection.canonical_pose_plan).read_text()
@@ -186,6 +218,20 @@ def _plan_hash(path: Path) -> str:
 
 def _state_path(outputs_root: Path, experiment: str) -> Path:
     return outputs_root / experiment / "generation_state.json"
+
+
+def _validate_generation_state_binding(
+    state: dict[str, Any],
+    *,
+    pose_plan_sha256: str,
+    source_git_commit: str,
+) -> None:
+    if state.get("schema") != STATE_SCHEMA:
+        raise ValueError("scale generation state schema mismatch")
+    if state.get("pose_plan_sha256") != pose_plan_sha256:
+        raise ValueError("scale generation state pose-plan hash mismatch")
+    if state.get("source_git_commit") != source_git_commit:
+        raise ValueError("scale generation state source commit mismatch")
 
 
 def _load_or_create_state(
@@ -344,23 +390,33 @@ def generate(
         _atomic_json(_state_path(outputs_root, experiment), state)
 
 
-def _select_master(
+def _candidate_paths_from_state(
     plan: dict[str, Any], state: dict[str, Any]
+) -> dict[str, list[Path]]:
+    paths_by_pose: dict[str, list[Path]] = {}
+    for pose in plan["poses"]:
+        pose_id = pose["pose_id"]
+        completed = state.get("poses", {}).get(pose_id, {}).get("completed")
+        if completed is None:
+            raise RuntimeError(f"pose {pose_id} has no completed candidate run")
+        run_dir = Path(completed).resolve()
+        _verify_candidate_run(run_dir, pose)
+        paths_by_pose[pose_id] = sorted((run_dir / "episodes").glob("episode_*.hdf5"))
+    return paths_by_pose
+
+
+def _evaluate_candidate_paths(
+    plan: dict[str, Any], paths_by_pose: dict[str, list[Path]]
 ) -> tuple[list[EpisodeBuffer], list[Path], list[dict[str, Any]]]:
+    """Apply the frozen selection algorithm and emit its canonical complete ledger."""
     selected: list[EpisodeBuffer] = []
     selected_paths: list[Path] = []
     provenance: list[dict[str, Any]] = []
     seen_groups: set[str] = set()
     for pose in plan["poses"]:
         pose_id = pose["pose_id"]
-        completed = state["poses"].get(pose_id, {}).get("completed")
-        if completed is None:
-            raise RuntimeError(f"pose {pose_id} has no completed candidate run")
-        run_dir = Path(completed)
-        _verify_candidate_run(run_dir, pose)
-        episode_paths = sorted((run_dir / "episodes").glob("episode_*.hdf5"))
         candidates = sorted(
-            ((read_episode(path), path) for path in episode_paths),
+            ((read_episode(path), path) for path in paths_by_pose[pose_id]),
             key=lambda item: item[0].meta.seed,
         )
         primary_stop = pose["source_seed_stop"]
@@ -428,11 +484,38 @@ def _select_master(
     return selected, selected_paths, provenance
 
 
+def _select_master(
+    plan: dict[str, Any], state: dict[str, Any]
+) -> tuple[list[EpisodeBuffer], list[Path], list[dict[str, Any]]]:
+    return _evaluate_candidate_paths(plan, _candidate_paths_from_state(plan, state))
+
+
 def _source_fingerprint(paths_: list[Path]) -> str:
     digest = hashlib.sha256()
     for path in sorted(paths_):
         digest.update(hashlib.sha256(path.read_bytes()).hexdigest().encode())
     return digest.hexdigest()
+
+
+def _raw_candidate_evidence_fingerprint(
+    plan: dict[str, Any], paths_by_pose: dict[str, list[Path]]
+) -> str:
+    rows: list[dict[str, Any]] = []
+    for pose in plan["poses"]:
+        pose_id = pose["pose_id"]
+        for path in paths_by_pose[pose_id]:
+            episode = read_episode(path)
+            rows.append(
+                {
+                    "pose_id": pose_id,
+                    "seed": episode.meta.seed,
+                    "hdf5_sha256": _sha256_file(path),
+                }
+            )
+    rows.sort(key=lambda row: (row["pose_id"], row["seed"]))
+    return hashlib.sha256(
+        json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def _validate_candidate_provenance(
@@ -442,6 +525,7 @@ def _validate_candidate_provenance(
     selected_episode_ids: list[str],
     expected_source_fingerprint: str,
     require_source_paths: bool,
+    candidate_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Validate the complete candidate ledger and selected-source binding."""
     expected_inventory = {
@@ -470,6 +554,7 @@ def _validate_candidate_provenance(
         "replacement_for_seed",
     }
     rows: dict[tuple[str, int], dict[str, Any]] = {}
+    row_order: list[tuple[str, int]] = []
     for row in provenance:
         if not isinstance(row, dict) or set(row) != required_keys:
             raise ValueError("candidate provenance row keys are invalid")
@@ -479,8 +564,52 @@ def _validate_candidate_provenance(
         if expected_inventory.get(key) != row["namespace"]:
             raise ValueError(f"candidate provenance namespace/seed inventory mismatch: {key}")
         rows[key] = row
+        row_order.append(key)
     if set(rows) != set(expected_inventory):
         raise ValueError("candidate provenance inventory is missing or has extra pose/seed rows")
+    if row_order != list(expected_inventory):
+        raise ValueError("candidate provenance row order differs from the deterministic inventory")
+
+    raw_replay: dict[str, Any] | None = None
+    replay_selected_paths: list[Path] = []
+    if require_source_paths:
+        if candidate_state is None:
+            raise ValueError("candidate raw replay requires the completed generation state")
+        paths_by_pose = _candidate_paths_from_state(plan, candidate_state)
+        replay_selected, replay_selected_paths, replay_provenance = _evaluate_candidate_paths(
+            plan, paths_by_pose
+        )
+        if provenance != replay_provenance:
+            for index, (declared, expected) in enumerate(
+                zip(provenance, replay_provenance, strict=False)
+            ):
+                if declared != expected:
+                    fields = sorted(
+                        key
+                        for key in set(declared) | set(expected)
+                        if declared.get(key) != expected.get(key)
+                    )
+                    field_labels = [field.replace("_", " ") for field in fields]
+                    raise ValueError(
+                        "candidate raw replay mismatch at row "
+                        f"{index} ({expected.get('pose_id')}, {expected.get('seed')}): "
+                        f"fields={field_labels}"
+                    )
+            raise ValueError("candidate raw replay row count mismatch")
+        replay_ids = [episode.meta.episode_id for episode in replay_selected]
+        if sorted(replay_ids) != sorted(selected_episode_ids):
+            raise ValueError("candidate raw replay selected episode inventory mismatch")
+        raw_replay = {
+            "status": "PASS",
+            "candidate_count": len(replay_provenance),
+            "candidate_evidence_sha256": _raw_candidate_evidence_fingerprint(
+                plan, paths_by_pose
+            ),
+        }
+        if candidate_state.get("pose_plan_sha256") is not None:
+            raw_replay["pose_plan_sha256"] = candidate_state["pose_plan_sha256"]
+        if candidate_state.get("source_git_commit") is not None:
+            raw_replay["source_git_commit"] = candidate_state["source_git_commit"]
 
     selected = [row for row in provenance if row["decision"] == "SELECTED"]
     if {str(row["episode_id"]) for row in selected} != set(selected_episode_ids):
@@ -498,7 +627,6 @@ def _validate_candidate_provenance(
     selected_groups: set[str] = set()
     skipped_sources: dict[tuple[str, int], dict[str, Any]] = {}
     replacement_targets: set[tuple[str, int]] = set()
-    selected_paths: list[Path] = []
     allowed = {"SELECTED", "SKIPPED", "NOT_NEEDED_OVERDRAW"}
     for row in provenance:
         decision = row["decision"]
@@ -536,26 +664,12 @@ def _validate_candidate_provenance(
         if group in selected_groups:
             raise ValueError("selected candidate content-group hashes are duplicated")
         selected_groups.add(group)
-        if require_source_paths:
-            source_path = Path(str(row["source_path"]))
-            if not source_path.is_file():
-                raise ValueError(f"selected candidate source path is missing: {source_path}")
-            episode = read_episode(source_path)
-            if (
-                episode.meta.seed != row["seed"]
-                or episode.meta.episode_id != row["episode_id"]
-                or episode.extras.get("door_pose_id") != row["pose_id"]
-            ):
-                raise ValueError("selected candidate raw pose/seed/episode provenance mismatch")
-            if episode_content_key(load_episode_record(source_path)) != group:
-                raise ValueError("selected candidate content-group hash differs from raw source")
-            sanity = check_alex_episode(episode, force_error_n=FORCE_DATASET_LIMIT_N)
-            if sanity.errors or episode.outcome is None or not episode.outcome.success:
-                raise ValueError("selected candidate is not safe and successful")
-            selected_paths.append(source_path)
     if set(skipped_sources) != replacement_targets:
         raise ValueError("candidate replacement linkage does not cover every skipped source")
-    if require_source_paths and _source_fingerprint(selected_paths) != expected_source_fingerprint:
+    if (
+        require_source_paths
+        and _source_fingerprint(replay_selected_paths) != expected_source_fingerprint
+    ):
         raise ValueError("selected-source fingerprint differs from the master manifest")
     canonical_ledger = hashlib.sha256(
         json.dumps(provenance, sort_keys=True, separators=(",", ":")).encode()
@@ -563,7 +677,7 @@ def _validate_candidate_provenance(
     decisions = {
         name: sum(row["decision"] == name for row in provenance) for name in sorted(allowed)
     }
-    return {
+    report = {
         "status": "PASS",
         "candidate_count": len(provenance),
         "selected_count": len(selected),
@@ -571,6 +685,9 @@ def _validate_candidate_provenance(
         "candidate_provenance_sha256": canonical_ledger,
         "source_fingerprint_sha256": expected_source_fingerprint,
     }
+    if raw_replay is not None:
+        report["raw_replay"] = raw_replay
+    return report
 
 
 def publish(
@@ -589,6 +706,11 @@ def publish(
     if not state_path.is_file():
         raise FileNotFoundError(f"generation state is missing: {state_path}")
     state = json.loads(state_path.read_text())
+    _validate_generation_state_binding(
+        state,
+        pose_plan_sha256=_plan_hash(plan_path),
+        source_git_commit=source["commit"],
+    )
     if state.get("source_git_commit") != source["commit"]:
         raise RuntimeError("generation and publication source commits differ")
     if state.get("pose_plan_sha256") != _plan_hash(plan_path):
@@ -601,6 +723,7 @@ def publish(
         selected_episode_ids=[episode.meta.episode_id for episode in selected],
         expected_source_fingerprint=source_fp,
         require_source_paths=True,
+        candidate_state=state,
     )
     robot_asset = dataset_robot_asset_payload(selected)
     per_pose = {
@@ -782,12 +905,22 @@ def verify(config: SweepConfig, plan: dict[str, Any], *, datasets_root: Path) ->
         for episode_id in a2.episode_ids
     ):
         raise RuntimeError("A2/A3 paired masters are numerically identical")
+    state_path = _state_path(paths.OUTPUTS_DIR, DEFAULT_EXPERIMENT)
+    if not state_path.is_file():
+        raise RuntimeError(f"scale generation state is missing: {state_path}")
+    candidate_state = json.loads(state_path.read_text())
+    _validate_generation_state_binding(
+        candidate_state,
+        pose_plan_sha256=manifest["pose_plan_sha256"],
+        source_git_commit=manifest["source_git"]["commit"],
+    )
     ledger_report = _validate_candidate_provenance(
         plan,
         list(manifest.get("candidate_provenance") or ()),
         selected_episode_ids=list(manifest.get("selected_episode_ids") or ()),
         expected_source_fingerprint=str(manifest.get("source_fingerprint_sha256", "")),
         require_source_paths=True,
+        candidate_state=candidate_state,
     )
     if sorted(manifest["selected_episode_ids"]) != sorted(a2.episode_ids):
         raise RuntimeError("candidate ledger selected IDs differ from paired exports")

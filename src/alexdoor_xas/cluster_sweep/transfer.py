@@ -257,14 +257,31 @@ def _collect_contract(
     if master.get("pose_plan_sha256") != sha256_file(pose_plan_path):
         raise SweepTransferError("scale master pose-plan hash is stale")
     from scripts.build_scale_dataset import (
+        DEFAULT_EXPERIMENT,
         _load_plan,
+        _state_path,
         _validate_candidate_provenance,
+        _validate_generation_state_binding,
     )
 
     plan = _load_plan(pose_plan_path, config)
     source_ids = list(master.get("selected_episode_ids") or ())
     if len(source_ids) != 550 or len(source_ids) != len(set(source_ids)):
         raise SweepTransferError("scale master selected episode inventory is invalid")
+    candidate_state = None
+    if require_local_sources:
+        state_path = _state_path(root / "outputs", DEFAULT_EXPERIMENT)
+        if not state_path.is_file():
+            raise SweepTransferError(f"scale generation state is missing: {state_path}")
+        candidate_state = json.loads(state_path.read_text())
+        try:
+            _validate_generation_state_binding(
+                candidate_state,
+                pose_plan_sha256=master["pose_plan_sha256"],
+                source_git_commit=master["source_git"]["commit"],
+            )
+        except ValueError as error:
+            raise SweepTransferError(str(error)) from error
     try:
         ledger_report = _validate_candidate_provenance(
             plan,
@@ -272,6 +289,7 @@ def _collect_contract(
             selected_episode_ids=source_ids,
             expected_source_fingerprint=master["source_fingerprint_sha256"],
             require_source_paths=require_local_sources,
+            candidate_state=candidate_state,
         )
     except ValueError as error:
         raise SweepTransferError(f"candidate provenance ledger failed: {error}") from error
@@ -286,8 +304,23 @@ def _collect_contract(
         "calibration": config.selection.calibration,
         "calibration_fingerprint": plan["calibration_fingerprint"],
     }
-    if verification.get("generation_provenance") != expected_generation:
-        raise SweepTransferError("scale generation verification report is stale")
+    actual_generation = verification.get("generation_provenance")
+    if not isinstance(actual_generation, dict):
+        raise SweepTransferError("scale generation verification report is malformed")
+    for key, value in expected_generation.items():
+        if actual_generation.get(key) != value:
+            raise SweepTransferError("scale generation verification report is stale")
+    raw_replay = actual_generation.get("raw_replay")
+    if (
+        not isinstance(raw_replay, dict)
+        or raw_replay.get("status") != "PASS"
+        or raw_replay.get("candidate_count") != ledger_report["candidate_count"]
+        or not isinstance(raw_replay.get("candidate_evidence_sha256"), str)
+        or len(raw_replay["candidate_evidence_sha256"]) != 64
+        or raw_replay.get("pose_plan_sha256") != master["pose_plan_sha256"]
+        or raw_replay.get("source_git_commit") != master["source_git"]["commit"]
+    ):
+        raise SweepTransferError("scale generation raw replay evidence is stale")
     inventory.append((verification_path, "generation_verification"))
 
     datasets: dict[str, EpisodeDataset] = {}
@@ -430,7 +463,7 @@ def _collect_contract(
             for cell in config.cells
         ],
         "generation_provenance": {
-            **expected_generation,
+            **actual_generation,
             "verification_report": verification_path.relative_to(root).as_posix(),
             "verification_report_sha256": sha256_file(verification_path),
             "calibration_sha256": sha256_file(calibration_path),
