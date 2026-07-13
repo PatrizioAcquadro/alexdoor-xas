@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -36,6 +37,7 @@ from alexdoor_xas.policies.diffusion import load_diffusion_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = REPO_ROOT / "configs" / "cluster_pilot_n50.v1.json"
+ATTEMPT_ID = "424242"
 
 
 @pytest.fixture(scope="module")
@@ -75,6 +77,7 @@ def test_pilot_config_freezes_two_short_cells_and_future_contract(config) -> Non
     assert config.training.val_every == 1
     assert config.training.overfit_episodes == 2
     assert config.training.wandb_mode == "offline"
+    assert config.slurm.gpus_per_node == 1
 
     assert [(cell.policy, cell.space, cell.run_id) for cell in config.cells] == [
         ("act", "A2_ee_delta", "pilot_act_a2_n50_seed0"),
@@ -314,7 +317,8 @@ def test_slurm_renderer_freezes_two_cells_and_durable_fail_closed_flow(
         qos=None,
     )
     assert "#SBATCH --array=0-1%2" in rendered
-    assert "#SBATCH --gres=gpu:1" in rendered
+    assert "#SBATCH --gpus-per-node=1" in rendered
+    assert "#SBATCH --gres" not in rendered
     assert "#SBATCH --cpus-per-task=8" in rendered
     assert "#SBATCH --account=example-account" in rendered
     assert "#SBATCH --partition=example-partition" in rendered
@@ -332,6 +336,15 @@ def test_slurm_renderer_freezes_two_cells_and_durable_fail_closed_flow(
     assert "completion.json" in rendered
     assert "failure.json" in rendered
     assert "DURABLE_RESULTS_ROOT" in rendered
+    assert 'ATTEMPT_ID="${SLURM_ARRAY_JOB_ID:?SLURM_ARRAY_JOB_ID is required}"' in rendered
+    assert 'CELL_ROOT="$SCRATCH_RUNS_ROOT/attempts/$ATTEMPT_ID/$TASK_ID/$RUN_ID"' in rendered
+    assert (
+        'PUBLISH_FINAL="$DURABLE_RESULTS_ROOT/attempts/$ATTEMPT_ID/$TASK_ID/$RUN_ID"'
+        in rendered
+    )
+    assert "alexdoor_xas.cluster_pilot_cell_status.v2" in rendered
+    assert '"slurm_array_job_id":"%s"' in rendered
+    assert '"slurm_array_task_id":"%s"' in rendered
     assert ".tmp" in rendered
     assert "mv" in rendered
     assert "publish_ok" in rendered
@@ -354,6 +367,29 @@ def test_slurm_qos_and_a100_are_only_enabled_explicitly(config) -> None:
     )
     assert "#SBATCH --qos=gpu-qos" in rendered
     assert "--require-a100-80gb" in rendered
+
+
+def test_slurm_scheduler_and_array_resources_remain_configurable(config) -> None:
+    selected = replace(config, slurm=replace(config.slurm, array_max_concurrent=1))
+    rendered = render_slurm_script(
+        selected,
+        source_commit="1" * 40,
+        depot_root=Path("/depot/example"),
+        scratch_root=Path("/scratch/example"),
+        durable_results_root=Path("/depot/example/results"),
+        account="alternate-account",
+        partition="alternate-partition",
+        qos=None,
+        memory="64G",
+        cpus_per_task=12,
+        wall_time="01:15:00",
+    )
+    assert "#SBATCH --account=alternate-account" in rendered
+    assert "#SBATCH --partition=alternate-partition" in rendered
+    assert "#SBATCH --array=0-1%1" in rendered
+    assert "#SBATCH --cpus-per-task=12" in rendered
+    assert "#SBATCH --mem=64G" in rendered
+    assert "#SBATCH --time=01:15:00" in rendered
 
 
 def test_rendered_hydra_contract_resolves_for_both_training_entrypoints(config) -> None:
@@ -447,9 +483,13 @@ def test_pure_preflight_runs_without_cuda_probe(
     assert not any(name.startswith(("isaac", "omni")) for name in sys.modules)
 
 
-def _make_return_tree(root: Path, config) -> None:
+def _attempt_run_root(root: Path, cell, attempt_id: str = ATTEMPT_ID) -> Path:
+    return root / "attempts" / attempt_id / str(cell.index) / cell.run_id
+
+
+def _make_return_tree(root: Path, config, *, attempt_id: str = ATTEMPT_ID) -> None:
     for cell in config.cells:
-        run = root / cell.run_id
+        run = _attempt_run_root(root, cell, attempt_id)
         required = {
             "checkpoints/best.pt": b"best",
             "checkpoints/last.pt": b"last",
@@ -465,13 +505,18 @@ def _make_return_tree(root: Path, config) -> None:
             "slurm/stderr.log": b"",
             "status/completion.json": json.dumps(
                 {
-                    "schema": "alexdoor_xas.cluster_pilot_cell_status.v1",
+                    "schema": "alexdoor_xas.cluster_pilot_cell_status.v2",
                     "status": "COMPLETED",
                     "run_id": cell.run_id,
                     "policy": cell.policy,
                     "space": cell.space,
                     "exit_code": 0,
                     "source_git_commit": "1" * 40,
+                    "attempt": {
+                        "slurm_array_job_id": attempt_id,
+                        "slurm_array_task_id": str(cell.index),
+                        "run_id": cell.run_id,
+                    },
                 }
             ).encode(),
         }
@@ -486,13 +531,18 @@ def test_return_manifest_covers_and_verifies_required_artifacts(
 ) -> None:
     results = tmp_path / "results"
     _make_return_tree(results, config)
-    manifest = build_return_manifest(results, config, transfer_manifest)
-    assert manifest["schema"] == "alexdoor_xas.cluster_pilot_return_manifest.v1"
+    manifest = build_return_manifest(
+        results, config, transfer_manifest, attempt_id=ATTEMPT_ID
+    )
+    assert manifest["schema"] == "alexdoor_xas.cluster_pilot_return_manifest.v2"
     assert manifest["source_git_commit"] == transfer_manifest["source_git"]["commit"]
-    assert verify_return_manifest(manifest, results, config) == []
+    assert manifest["provenance"]["slurm_array_job_id"] == ATTEMPT_ID
+    assert verify_return_manifest(
+        manifest, results, config, attempt_id=ATTEMPT_ID
+    ) == []
     paths = {entry["path"] for entry in manifest["files"]}
     for cell in config.cells:
-        prefix = cell.run_id
+        prefix = f"attempts/{ATTEMPT_ID}/{cell.index}/{cell.run_id}"
         for suffix in (
             "checkpoints/best.pt",
             "checkpoints/last.pt",
@@ -508,10 +558,13 @@ def test_return_manifest_covers_and_verifies_required_artifacts(
             assert f"{prefix}/{suffix}" in paths
         assert any(path.startswith(f"{prefix}/wandb/") for path in paths)
 
-    command = return_rsync_template()
+    command = return_rsync_template(ATTEMPT_ID)
     assert "--partial" in command
     assert "--append-verify" in command
-    assert "--files-from=:<remote_results_root>/.pilot_return/return-files.txt" in command
+    assert (
+        "--files-from=:<remote_results_root>/.pilot_return/attempts/"
+        f"{ATTEMPT_ID}/return-files.txt" in command
+    )
     assert "<user>@<host>:<remote_results_root>/" in command
 
 
@@ -520,26 +573,35 @@ def test_return_manifest_rejects_tampering_and_checkpoint_loader_covers_both_pol
 ) -> None:
     results = tmp_path / "results"
     _make_return_tree(results, config)
-    manifest = build_return_manifest(results, config, transfer_manifest)
-    (results / config.cells[0].run_id / "checkpoints" / "best.pt").write_bytes(b"tampered")
+    manifest = build_return_manifest(
+        results, config, transfer_manifest, attempt_id=ATTEMPT_ID
+    )
+    (_attempt_run_root(results, config.cells[0]) / "checkpoints" / "best.pt").write_bytes(
+        b"tampered"
+    )
     assert any(
         "hash mismatch" in problem
-        for problem in verify_return_manifest(manifest, results, config)
+        for problem in verify_return_manifest(
+            manifest, results, config, attempt_id=ATTEMPT_ID
+        )
     )
 
     _make_return_tree(results, config)
-    status_path = results / config.cells[0].run_id / "status" / "completion.json"
+    status_path = _attempt_run_root(results, config.cells[0]) / "status" / "completion.json"
     status = json.loads(status_path.read_text())
     status["source_git_commit"] = "2" * 40
     status_path.write_text(json.dumps(status))
     with pytest.raises(ReturnManifestError, match="source commit mismatch"):
-        build_return_manifest(results, config, transfer_manifest)
+        build_return_manifest(
+            results, config, transfer_manifest, attempt_id=ATTEMPT_ID
+        )
 
     _make_return_tree(results, config)
     calls: list[tuple[str, Path]] = []
     loaded = verify_return_checkpoints(
         results,
         config,
+        attempt_id=ATTEMPT_ID,
         loaders={
             "act": lambda path: calls.append(("act", path)) or {"ok": True},
             "diffusion": lambda path: calls.append(("diffusion", path)) or {"ok": True},
@@ -550,3 +612,73 @@ def test_return_manifest_rejects_tampering_and_checkpoint_loader_covers_both_pol
         "pilot_diffusion_a3_n50_seed0": "PASS",
     }
     assert [policy for policy, _ in calls] == ["act", "diffusion"]
+
+
+def test_return_manifest_requires_one_explicit_nonstale_attempt(
+    tmp_path, config, transfer_manifest
+) -> None:
+    results = tmp_path / "results"
+    _make_return_tree(results, config, attempt_id="111111")
+
+    with pytest.raises(ReturnManifestError, match="selected durable attempt"):
+        build_return_manifest(
+            results, config, transfer_manifest, attempt_id=ATTEMPT_ID
+        )
+
+    for cell in config.cells:
+        legacy = results / cell.run_id
+        legacy.mkdir(parents=True)
+        (legacy / "stale.txt").write_text("stale\n")
+    with pytest.raises(ReturnManifestError, match="selected durable attempt"):
+        build_return_manifest(
+            results, config, transfer_manifest, attempt_id=ATTEMPT_ID
+        )
+
+
+def test_return_manifest_rejects_mixed_attempt_task_and_run_identity(
+    tmp_path, config, transfer_manifest
+) -> None:
+    results = tmp_path / "results"
+    _make_return_tree(results, config)
+    first = config.cells[0]
+    status_path = _attempt_run_root(results, first) / "status" / "completion.json"
+    status = json.loads(status_path.read_text())
+
+    status["attempt"]["slurm_array_job_id"] = "111111"
+    status_path.write_text(json.dumps(status))
+    with pytest.raises(ReturnManifestError, match="attempt identity mismatch"):
+        build_return_manifest(
+            results, config, transfer_manifest, attempt_id=ATTEMPT_ID
+        )
+
+    _make_return_tree(results, config)
+    status = json.loads(status_path.read_text())
+    status["attempt"]["slurm_array_task_id"] = "1"
+    status_path.write_text(json.dumps(status))
+    with pytest.raises(ReturnManifestError, match="attempt identity mismatch"):
+        build_return_manifest(
+            results, config, transfer_manifest, attempt_id=ATTEMPT_ID
+        )
+
+    _make_return_tree(results, config)
+    status = json.loads(status_path.read_text())
+    status["attempt"]["run_id"] = config.cells[1].run_id
+    status_path.write_text(json.dumps(status))
+    with pytest.raises(ReturnManifestError, match="attempt identity mismatch"):
+        build_return_manifest(
+            results, config, transfer_manifest, attempt_id=ATTEMPT_ID
+        )
+
+
+def test_return_manifest_verification_rejects_wrong_selected_attempt(
+    tmp_path, config, transfer_manifest
+) -> None:
+    results = tmp_path / "results"
+    _make_return_tree(results, config)
+    manifest = build_return_manifest(
+        results, config, transfer_manifest, attempt_id=ATTEMPT_ID
+    )
+    failures = verify_return_manifest(
+        manifest, results, config, attempt_id="111111"
+    )
+    assert any("selected attempt mismatch" in failure for failure in failures)

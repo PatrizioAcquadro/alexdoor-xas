@@ -75,7 +75,7 @@ class SlurmConfig:
     qos: str | None
     memory: str
     cpus_per_task: int
-    gpus_per_task: int
+    gpus_per_node: int
     wall_time: str
     array_max_concurrent: int
     require_a100_80gb: bool
@@ -332,7 +332,7 @@ def _build_slurm(node: dict[str, Any]) -> SlurmConfig:
             "qos",
             "memory",
             "cpus_per_task",
-            "gpus_per_task",
+            "gpus_per_node",
             "wall_time",
             "array_max_concurrent",
             "require_a100_80gb",
@@ -344,10 +344,10 @@ def _build_slurm(node: dict[str, Any]) -> SlurmConfig:
     memory = _required_string("slurm.memory", node["memory"])
     wall_time = _required_string("slurm.wall_time", node["wall_time"])
     cpus = _positive_int("slurm.cpus_per_task", node["cpus_per_task"])
-    gpus = _positive_int("slurm.gpus_per_task", node["gpus_per_task"])
+    gpus = _positive_int("slurm.gpus_per_node", node["gpus_per_node"])
     concurrent = _positive_int("slurm.array_max_concurrent", node["array_max_concurrent"])
     if gpus != 1:
-        raise PilotConfigError("slurm.gpus_per_task must be exactly 1")
+        raise PilotConfigError("slurm.gpus_per_node must be exactly 1")
     if concurrent > 2:
         raise PilotConfigError("slurm.array_max_concurrent must be at most 2")
     if not isinstance(node["require_a100_80gb"], bool):
@@ -358,7 +358,7 @@ def _build_slurm(node: dict[str, Any]) -> SlurmConfig:
         qos=None,
         memory=memory,
         cpus_per_task=cpus,
-        gpus_per_task=gpus,
+        gpus_per_node=gpus,
         wall_time=wall_time,
         array_max_concurrent=concurrent,
         require_a100_80gb=node["require_a100_80gb"],

@@ -135,11 +135,24 @@ cd "$REPO_ROOT"
 bash -n outputs/cluster_pilot_n50/pilot.slurm
 ```
 
-The rendered `0-1%2` array requests one GPU per cell. Each cell verifies the manifest, runs the
-pure plus live-CUDA preflight, invokes `scripts/train_act.py` or `scripts/train_diffusion.py`
-directly, writes atomic completion/failure status, and atomically publishes checkpoints, training
-logs, resolved configs, open-loop metrics, W&B offline data, environment evidence, and cell logs
-from scratch to durable depot storage.
+The rendered `0-1%2` array uses Gilbreth's `#SBATCH --gpus-per-node=1` request. Account,
+partition, optional QOS, memory, CPU, wall-time, and array concurrency remain configurable. Each
+cell verifies the manifest, runs the pure plus live-CUDA preflight, invokes `scripts/train_act.py`
+or `scripts/train_diffusion.py` directly, writes atomic completion/failure status, and atomically
+publishes checkpoints, training logs, resolved configs, open-loop metrics, W&B offline data,
+environment evidence, and cell logs from scratch to durable depot storage.
+
+Scratch execution and durable publication are attempt-specific:
+
+```text
+attempts/<SLURM_ARRAY_JOB_ID>/<SLURM_ARRAY_TASK_ID>/<run_id>/
+```
+
+The nested array job ID, task ID, and run ID are recorded in every cell status. A retry submitted
+as a new array receives a new attempt directory. A requeue or duplicate execution with an already
+used identity fails instead of overwriting or reusing scratch or durable results. Do not delete or
+rename an old attempt to make a retry pass; submit a new array and select its new array job ID for
+the return workflow.
 
 Submission command — **not executed by the local preparation task**:
 
@@ -149,21 +162,29 @@ sbatch outputs/cluster_pilot_n50/pilot.slurm
 
 ## 5. Gilbreth: build the durable return package
 
-After both array cells have durable completion status:
+After both array cells have durable completion status, select exactly one array submission by the
+numeric job ID printed by `sbatch` (the shared `SLURM_ARRAY_JOB_ID`, not a task job ID):
 
 ```bash
+export PILOT_ATTEMPT_ID='<SLURM_ARRAY_JOB_ID>'
 cd "$REPO_ROOT"
 "$CONDA_PREFIX/bin/python" scripts/build_cluster_pilot_return_manifest.py build \
   --results-root "$DURABLE_RESULTS_ROOT" \
+  --attempt-id "$PILOT_ATTEMPT_ID" \
   --config configs/cluster_pilot_n50.v1.json \
   --manifest "$PILOT_MANIFEST"
 ```
+
+The builder requires the selected attempt to contain exactly task `0` with the ACT run and task
+`1` with the Diffusion run. It rejects a missing selection, legacy run-ID-only layouts, mixed job
+or task identities, stale status schemas, and any source-commit mismatch. Other attempt
+directories are never selected implicitly.
 
 The resumable return template uses the remote file list directly:
 
 ```bash
 rsync -avP --partial --append-verify \
-  --files-from=:<remote_results_root>/.pilot_return/return-files.txt \
+  --files-from=:<remote_results_root>/.pilot_return/attempts/<SLURM_ARRAY_JOB_ID>/return-files.txt \
   <user>@<host>:<remote_results_root>/ <local_return_root>/
 ```
 
@@ -177,7 +198,8 @@ cd /home/pacquadr/Desktop/DoorManipulation
 PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p \
   scripts/verify_returned_cluster_pilot.py \
   --results-root '<local_return_root>' \
-  --manifest '<local_return_root>/.pilot_return/return_manifest.json' \
+  --attempt-id '<SLURM_ARRAY_JOB_ID>' \
+  --manifest '<local_return_root>/.pilot_return/attempts/<SLURM_ARRAY_JOB_ID>/return_manifest.json' \
   --config configs/cluster_pilot_n50.v1.json
 ```
 

@@ -23,6 +23,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--results-root", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument(
+        "--attempt-id",
+        required=True,
+        help="Explicit SLURM_ARRAY_JOB_ID selecting one returned attempt.",
+    )
+    parser.add_argument(
         "--config", type=Path, default=Path("configs/cluster_pilot_n50.v1.json")
     )
     return parser
@@ -33,7 +38,12 @@ def main() -> int:
     try:
         config = load_pilot_config(paths.REPO_ROOT / args.config)
         manifest = json.loads(args.manifest.resolve().read_text())
-        failures = verify_return_manifest(manifest, args.results_root, config)
+        failures = verify_return_manifest(
+            manifest,
+            args.results_root,
+            config,
+            attempt_id=args.attempt_id,
+        )
         if failures:
             raise ReturnManifestError("; ".join(failures))
         checkout_commit = subprocess.run(
@@ -47,7 +57,11 @@ def main() -> int:
             raise ReturnManifestError(
                 "Ubuntu checkout commit does not match the returned pilot source commit"
             )
-        statuses = verify_return_checkpoints(args.results_root, config)
+        statuses = verify_return_checkpoints(
+            args.results_root,
+            config,
+            attempt_id=args.attempt_id,
+        )
         print("PASS: returned pilot hashes and CPU checkpoint loads verified")
         for run_id, status in statuses.items():
             print(f"- {run_id}: {status}")

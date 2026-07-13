@@ -26,6 +26,11 @@ def _parser() -> argparse.ArgumentParser:
         command = subparsers.add_parser(name)
         command.add_argument("--results-root", type=Path, required=True)
         command.add_argument(
+            "--attempt-id",
+            required=True,
+            help="Explicit SLURM_ARRAY_JOB_ID selecting one durable attempt.",
+        )
+        command.add_argument(
             "--config", type=Path, default=Path("configs/cluster_pilot_n50.v1.json")
         )
         command.add_argument("--manifest", type=Path, required=True)
@@ -38,17 +43,29 @@ def main() -> int:
         config = load_pilot_config(paths.REPO_ROOT / args.config)
         source_or_return = json.loads(args.manifest.resolve().read_text())
         if args.command == "build":
-            manifest = build_return_manifest(args.results_root, config, source_or_return)
+            manifest = build_return_manifest(
+                args.results_root,
+                config,
+                source_or_return,
+                attempt_id=args.attempt_id,
+            )
             manifest_path, files_path, command_path = write_return_artifacts(
-                args.results_root, manifest
+                args.results_root,
+                manifest,
+                attempt_id=args.attempt_id,
             )
             print("PASS: durable pilot return package built")
             print(f"manifest: {manifest_path}")
             print(f"files: {files_path}")
             print(f"rsync template: {command_path}")
-            print(return_rsync_template())
+            print(return_rsync_template(args.attempt_id))
             return 0
-        failures = verify_return_manifest(source_or_return, args.results_root, config)
+        failures = verify_return_manifest(
+            source_or_return,
+            args.results_root,
+            config,
+            attempt_id=args.attempt_id,
+        )
         if failures:
             print("FAIL: returned pilot manifest verification")
             for failure in failures:

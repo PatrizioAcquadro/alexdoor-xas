@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections import Counter
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -13,10 +14,12 @@ from typing import Any
 from .config import PilotCell, PilotConfig
 from .transfer import TRANSFER_SCHEMA, secret_problems, sha256_file
 
-RETURN_SCHEMA = "alexdoor_xas.cluster_pilot_return_manifest.v1"
+RETURN_SCHEMA = "alexdoor_xas.cluster_pilot_return_manifest.v2"
 RETURN_ARTIFACT_DIR = Path(".pilot_return")
+RETURN_ATTEMPTS_DIR = RETURN_ARTIFACT_DIR / "attempts"
 RETURN_MANIFEST_NAME = "return_manifest.json"
 RETURN_FILE_LIST_NAME = "return-files.txt"
+ATTEMPT_ID_RE = re.compile(r"^[0-9]+$")
 ALLOWED_TOP_LEVEL = {
     "checkpoints",
     "environment",
@@ -38,19 +41,23 @@ def build_return_manifest(
     results_root: str | Path,
     config: PilotConfig,
     transfer_manifest: dict[str, Any],
+    *,
+    attempt_id: str,
 ) -> dict[str, Any]:
-    """Inventory completed or failed durable cell outputs with hashes."""
+    """Inventory one explicitly selected durable Slurm-array attempt with hashes."""
     root = Path(results_root).resolve()
+    selected_attempt = _validate_attempt_id(attempt_id)
     if not root.is_dir():
         raise ReturnManifestError(f"durable results root does not exist: {root}")
     if transfer_manifest.get("schema") != TRANSFER_SCHEMA:
         raise ReturnManifestError("source transfer manifest schema is invalid")
     source_commit = transfer_manifest.get("source_git", {}).get("commit")
-    if not isinstance(source_commit, str) or len(source_commit) != 40:
+    if not isinstance(source_commit, str) or re.fullmatch(r"[0-9a-f]{40}", source_commit) is None:
         raise ReturnManifestError("source transfer commit is invalid")
     files, cells = _collect_return_files(
         root,
         config,
+        attempt_id=selected_attempt,
         expected_source_commit=source_commit,
     )
     entries = [
@@ -70,6 +77,7 @@ def build_return_manifest(
         "created_utc": datetime.now(UTC).isoformat(),
         "source_transfer_schema": transfer_manifest["schema"],
         "source_git_commit": source_commit,
+        "provenance": _return_provenance(selected_attempt, config, source_commit),
         "cells": cells,
         "files": entries,
         "category_counts": dict(
@@ -85,21 +93,45 @@ def verify_return_manifest(
     manifest: dict[str, Any],
     results_root: str | Path,
     config: PilotConfig,
+    *,
+    attempt_id: str,
 ) -> list[str]:
     """Return all missing, extra, status, size, secret, and hash failures."""
     failures: list[str] = []
     root = Path(results_root).resolve()
+    try:
+        selected_attempt = _validate_attempt_id(attempt_id)
+    except ReturnManifestError as error:
+        return [str(error)]
     if manifest.get("schema") != RETURN_SCHEMA:
         failures.append(f"schema must be {RETURN_SCHEMA!r}")
     if manifest.get("pilot_config_schema") != config.schema:
         failures.append("pilot config schema mismatch")
     if manifest.get("pilot_id") != config.pilot_id:
         failures.append("pilot id mismatch")
+    source_commit = manifest.get("source_git_commit")
+    if not isinstance(source_commit, str) or re.fullmatch(r"[0-9a-f]{40}", source_commit) is None:
+        failures.append("source Git commit is invalid")
+        return failures
+    provenance = manifest.get("provenance")
+    declared_attempt = (
+        provenance.get("slurm_array_job_id") if isinstance(provenance, dict) else None
+    )
+    if declared_attempt != selected_attempt:
+        failures.append(
+            "selected attempt mismatch: "
+            f"manifest={declared_attempt!r}, requested={selected_attempt!r}"
+        )
+        return failures
+    expected_provenance = _return_provenance(selected_attempt, config, source_commit)
+    if provenance != expected_provenance:
+        failures.append("return provenance mismatch")
     try:
         expected_files, expected_cells = _collect_return_files(
             root,
             config,
-            expected_source_commit=manifest.get("source_git_commit"),
+            attempt_id=selected_attempt,
+            expected_source_commit=source_commit,
         )
     except ReturnManifestError as error:
         failures.append(str(error))
@@ -170,7 +202,14 @@ def verify_return_manifest(
     return failures
 
 
-def return_file_list(manifest: dict[str, Any]) -> list[str]:
+def return_file_list(manifest: dict[str, Any], attempt_id: str) -> list[str]:
+    selected_attempt = _validate_attempt_id(attempt_id)
+    provenance = manifest.get("provenance")
+    if (
+        not isinstance(provenance, dict)
+        or provenance.get("slurm_array_job_id") != selected_attempt
+    ):
+        raise ReturnManifestError("return manifest does not match the selected attempt")
     entries = manifest.get("files")
     if not isinstance(entries, list):
         raise ReturnManifestError("return manifest files are missing")
@@ -183,16 +222,18 @@ def return_file_list(manifest: dict[str, Any]) -> list[str]:
         raise ReturnManifestError("return manifest paths are malformed or duplicated")
     return [
         *paths,
-        (RETURN_ARTIFACT_DIR / RETURN_MANIFEST_NAME).as_posix(),
-        (RETURN_ARTIFACT_DIR / RETURN_FILE_LIST_NAME).as_posix(),
+        (RETURN_ATTEMPTS_DIR / selected_attempt / RETURN_MANIFEST_NAME).as_posix(),
+        (RETURN_ATTEMPTS_DIR / selected_attempt / RETURN_FILE_LIST_NAME).as_posix(),
     ]
 
 
-def return_rsync_template() -> str:
+def return_rsync_template(attempt_id: str) -> str:
     """Exact resumable remote-to-Ubuntu rsync template using the remote file list."""
+    selected_attempt = _validate_attempt_id(attempt_id)
     return (
         "rsync -avP --partial --append-verify "
-        "--files-from=:<remote_results_root>/.pilot_return/return-files.txt "
+        "--files-from=:<remote_results_root>/.pilot_return/attempts/"
+        f"{selected_attempt}/return-files.txt "
         "<user>@<host>:<remote_results_root>/ <local_return_root>/"
     )
 
@@ -200,16 +241,21 @@ def return_rsync_template() -> str:
 def write_return_artifacts(
     results_root: str | Path,
     manifest: dict[str, Any],
+    *,
+    attempt_id: str,
 ) -> tuple[Path, Path, Path]:
     root = Path(results_root).resolve()
-    directory = root / RETURN_ARTIFACT_DIR
+    selected_attempt = _validate_attempt_id(attempt_id)
+    directory = root / RETURN_ATTEMPTS_DIR / selected_attempt
     directory.mkdir(parents=True, exist_ok=True)
     manifest_path = directory / RETURN_MANIFEST_NAME
     files_path = directory / RETURN_FILE_LIST_NAME
     command_path = directory / "return-rsync-command.txt"
     _atomic_write(manifest_path, json.dumps(manifest, indent=2, sort_keys=True) + "\n")
-    _atomic_write(files_path, "\n".join(return_file_list(manifest)) + "\n")
-    _atomic_write(command_path, return_rsync_template() + "\n")
+    _atomic_write(
+        files_path, "\n".join(return_file_list(manifest, selected_attempt)) + "\n"
+    )
+    _atomic_write(command_path, return_rsync_template(selected_attempt) + "\n")
     return manifest_path, files_path, command_path
 
 
@@ -217,17 +263,19 @@ def verify_return_checkpoints(
     results_root: str | Path,
     config: PilotConfig,
     *,
+    attempt_id: str,
     loaders: dict[str, Callable[[Path], Any]] | None = None,
 ) -> dict[str, str]:
     """Load one best checkpoint per policy on CPU without importing Isaac."""
     root = Path(results_root).resolve()
+    selected_attempt = _validate_attempt_id(attempt_id)
     selected_loaders = loaders or _default_checkpoint_loaders()
     statuses: dict[str, str] = {}
     for cell in config.cells:
         loader = selected_loaders.get(cell.policy)
         if loader is None:
             raise ReturnManifestError(f"no checkpoint loader registered for {cell.policy}")
-        path = root / cell.run_id / "checkpoints" / "best.pt"
+        path = _attempt_run_root(root, selected_attempt, cell) / "checkpoints" / "best.pt"
         if not path.is_file():
             raise ReturnManifestError(f"returned best checkpoint is missing: {path}")
         try:
@@ -254,14 +302,36 @@ def _collect_return_files(
     root: Path,
     config: PilotConfig,
     *,
+    attempt_id: str,
     expected_source_commit: str | None,
 ) -> tuple[list[tuple[Path, str]], dict[str, Any]]:
     files: list[tuple[Path, str]] = []
     cells: dict[str, Any] = {}
+    attempt_root = root / "attempts" / attempt_id
+    if not attempt_root.is_dir() or attempt_root.is_symlink():
+        raise ReturnManifestError(
+            f"selected durable attempt is missing or invalid: {attempt_root}"
+        )
+    expected_tasks = {str(cell.index) for cell in config.cells}
+    actual_tasks = {path.name for path in attempt_root.iterdir()}
+    if actual_tasks != expected_tasks or any(
+        not path.is_dir() or path.is_symlink() for path in attempt_root.iterdir()
+    ):
+        raise ReturnManifestError(
+            "selected durable attempt task inventory mismatch: "
+            f"expected={sorted(expected_tasks)}, actual={sorted(actual_tasks)}"
+        )
     for cell in config.cells:
-        run_root = root / cell.run_id
-        if not run_root.is_dir():
-            raise ReturnManifestError(f"durable result directory is missing: {run_root}")
+        task_root = attempt_root / str(cell.index)
+        actual_runs = {path.name for path in task_root.iterdir()}
+        if actual_runs != {cell.run_id} or any(
+            not path.is_dir() or path.is_symlink() for path in task_root.iterdir()
+        ):
+            raise ReturnManifestError(
+                f"durable result inventory mismatch for task {cell.index}: "
+                f"expected={[cell.run_id]!r}, actual={sorted(actual_runs)!r}"
+            )
+        run_root = _attempt_run_root(root, attempt_id, cell)
         completion = run_root / "status" / "completion.json"
         failure = run_root / "status" / "failure.json"
         if completion.is_file() == failure.is_file():
@@ -272,6 +342,7 @@ def _collect_return_files(
         status_payload = _load_status(
             status_path,
             cell,
+            attempt_id=attempt_id,
             expected_source_commit=expected_source_commit,
         )
         completed = status_path.name == "completion.json"
@@ -336,6 +407,7 @@ def _collect_return_files(
             "space": cell.space,
             "status": status_payload["status"],
             "exit_code": status_payload["exit_code"],
+            "attempt": status_payload["attempt"],
         }
     return files, cells
 
@@ -344,6 +416,7 @@ def _load_status(
     path: Path,
     cell: PilotCell,
     *,
+    attempt_id: str,
     expected_source_commit: str | None,
 ) -> dict[str, Any]:
     try:
@@ -353,7 +426,7 @@ def _load_status(
     expected_status = "COMPLETED" if path.name == "completion.json" else "FAILED"
     if (
         not isinstance(payload, dict)
-        or payload.get("schema") != "alexdoor_xas.cluster_pilot_cell_status.v1"
+        or payload.get("schema") != "alexdoor_xas.cluster_pilot_cell_status.v2"
         or payload.get("run_id") != cell.run_id
         or payload.get("policy") != cell.policy
         or payload.get("space") != cell.space
@@ -361,6 +434,13 @@ def _load_status(
         or not isinstance(payload.get("exit_code"), int)
     ):
         raise ReturnManifestError(f"cell status contract mismatch: {path}")
+    expected_attempt = {
+        "slurm_array_job_id": attempt_id,
+        "slurm_array_task_id": str(cell.index),
+        "run_id": cell.run_id,
+    }
+    if payload.get("attempt") != expected_attempt:
+        raise ReturnManifestError(f"cell attempt identity mismatch: {path}")
     if (
         expected_source_commit is not None
         and payload.get("source_git_commit") != expected_source_commit
@@ -371,6 +451,35 @@ def _load_status(
     if expected_status == "FAILED" and payload["exit_code"] == 0:
         raise ReturnManifestError(f"failure status has zero exit code: {path}")
     return payload
+
+
+def _validate_attempt_id(attempt_id: str) -> str:
+    if not isinstance(attempt_id, str) or ATTEMPT_ID_RE.fullmatch(attempt_id) is None:
+        raise ReturnManifestError("attempt_id must be an explicit numeric Slurm array job ID")
+    return attempt_id
+
+
+def _attempt_run_root(root: Path, attempt_id: str, cell: PilotCell) -> Path:
+    return root / "attempts" / attempt_id / str(cell.index) / cell.run_id
+
+
+def _return_provenance(
+    attempt_id: str,
+    config: PilotConfig,
+    source_commit: str,
+) -> dict[str, Any]:
+    return {
+        "source_git_commit": source_commit,
+        "slurm_array_job_id": attempt_id,
+        "cells": {
+            cell.run_id: {
+                "slurm_array_job_id": attempt_id,
+                "slurm_array_task_id": str(cell.index),
+                "run_id": cell.run_id,
+            }
+            for cell in config.cells
+        },
+    }
 
 
 def _return_category(relative: Path) -> str:
