@@ -23,9 +23,10 @@ history.
   five-pose N50 dataset, pose-aware A2/A3 provenance, terminal force admission,
   learned-policy contact-entry correction, and exhaustive warning evidence are
   integrated on `main`.
-- **Gilbreth compatibility-pilot tooling:** transfer/return manifests,
-  bootstrap, preflight, Slurm rendering, attempt isolation, and returned
-  checkpoint verification are implemented and tested.
+- **Gilbreth compatibility pilot:** ACT-A2 and Diffusion-A3 completed on A100
+  80GB GPUs, the return package passed its hash checks, and Ubuntu loaded both
+  returned checkpoints on CPU. Automatic symlink-free W&B publication is
+  implemented and locally tested for later jobs.
 
 ## Local stabilization evidence
 
@@ -65,9 +66,9 @@ artifact-bound values above against the local evidence.
 
 ## Current boundaries
 
-- The **Gilbreth N50 compatibility pilot has not run**. Its tooling is ready,
-  but live account, partition, depot/scratch, driver, and PyTorch values must be
-  supplied from Gilbreth. Follow [`cluster.md`](cluster.md).
+- The **Gilbreth N50 compatibility pilot is complete and return-verified**.
+  Its automatic W&B durable-publication fix was merged afterward and still
+  requires one live two-cell canary before full-sweep execution.
 - The **full cluster dataset-scale sweep has not started**. The future nested
   N50/N100/N250/N500 contract is recorded only; no new master dataset or
   16-cell matrix is authorized by the compatibility-pilot work.
@@ -93,8 +94,10 @@ artifact-bound values above against the local evidence.
 
 ## Next development sequence
 
-1. Obtain the live Gilbreth values listed in `docs/cluster.md`.
-2. Build the pilot transfer manifest from a clean committed checkout.
-3. Run and return-verify the two-cell compatibility pilot.
-4. Review the pilot evidence before authorizing any full sweep.
-5. Define the scientific cluster dataset and evaluation plan before Phase 4.
+1. Run and return-verify one two-cell Gilbreth canary using the automatic W&B
+   durable-publication path, without manual return staging.
+2. Define and implement the scientific nested dataset-scale sweep on Ubuntu.
+3. Generate and validate the master dataset, fixed holdouts, nested training
+   subsets, transfer manifest, and 16-cell Slurm matrix locally.
+4. Transfer and hash-verify the committed sweep package on Gilbreth.
+5. Launch the full sweep only after every prior gate passes.

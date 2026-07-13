@@ -33,6 +33,10 @@ The ignored Ubuntu evidence is under `outputs/cluster_pilot_n50/returned/1127945
 the non-Isaac training and return path for the compatibility pilot only; it does not authorize or
 validate the later dataset-scale sweep.
 
+The automatic symlink-free W&B publisher was merged after this historical attempt. It is locally
+validated but still requires one live two-cell Gilbreth canary with direct return packaging before
+the full sweep is prepared for execution.
+
 ## Required user-supplied Gilbreth values
 
 Fill these from the live Gilbreth account and allocation documentation:
