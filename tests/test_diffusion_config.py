@@ -47,6 +47,7 @@ def test_default_config_matches_yaml_defaults() -> None:
 
     assert cfg.run.experiment == "diffusion_door_push"
     assert cfg.run.run_id is None
+    assert cfg.run.output_root is None
 
     assert cfg.rollout.checkpoint is None
     assert cfg.rollout.episodes_fixed == 5
@@ -77,6 +78,7 @@ def test_hydra_overrides_flow_through_all_sections() -> None:
             "train.use_ema=false",
             "train.overfit_episodes=2",
             "run.run_id=test_run",
+            "run.output_root=/tmp/diffusion-pilot",
             "rollout.n_action_steps=4",
             "rollout.sampler=ddim",
             "rollout.num_inference_steps=10",
@@ -95,6 +97,7 @@ def test_hydra_overrides_flow_through_all_sections() -> None:
     assert cfg.train.use_ema is False
     assert cfg.train.overfit_episodes == 2
     assert cfg.run.run_id == "test_run"
+    assert cfg.run.output_root == "/tmp/diffusion-pilot"
     assert cfg.resolved_run_id() == "test_run"
     assert cfg.rollout.n_action_steps == 4
     assert cfg.rollout.sampler == "ddim"

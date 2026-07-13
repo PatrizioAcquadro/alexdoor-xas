@@ -84,6 +84,7 @@ class ActRunCfg:
 
     experiment: str = "act_door_push"
     run_id: str | None = None
+    output_root: str | None = None
 
 
 @dataclass(frozen=True)
@@ -294,10 +295,11 @@ def _build_train_cfg(node: dict[str, Any]) -> ActTrainCfg:
 
 
 def _build_run_cfg(node: dict[str, Any]) -> ActRunCfg:
-    _reject_unknown("run", node, {"experiment", "run_id"})
+    _reject_unknown("run", node, {"experiment", "run_id", "output_root"})
     return ActRunCfg(
         experiment=_required_str("run.experiment", node.get("experiment", "act_door_push")),
         run_id=_optional_str("run.run_id", node.get("run_id")),
+        output_root=_optional_str("run.output_root", node.get("output_root")),
     )
 
 

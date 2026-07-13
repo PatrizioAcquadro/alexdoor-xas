@@ -1,0 +1,122 @@
+{
+  "schema": "alexdoor_xas.cluster_pilot_config.v1",
+  "pilot_id": "gilbreth_n50_compatibility_v1",
+  "source_dataset": {
+    "task": "door_push_alex_v2",
+    "version": "v2_pose",
+    "spaces": {
+      "A2_ee_delta": "datasets/door_push_alex_v2/A2_ee_delta/v2_pose",
+      "A3_obj_rel_ee_delta": "datasets/door_push_alex_v2/A3_obj_rel_ee_delta/v2_pose"
+    },
+    "shared_split": "datasets/door_push_alex_v2/splits/v2_pose.json",
+    "expected_counts": {
+      "total": 50,
+      "train": 38,
+      "val": 6,
+      "test": 6
+    },
+    "obs_preset": "core_door_pose"
+  },
+  "training": {
+    "seed": 0,
+    "device": "cuda",
+    "epochs": 2,
+    "val_every": 1,
+    "overfit_episodes": 2,
+    "wandb_mode": "offline"
+  },
+  "cells": [
+    {
+      "index": 0,
+      "policy": "act",
+      "space": "A2_ee_delta",
+      "run_id": "pilot_act_a2_n50_seed0",
+      "entrypoint": "scripts/train_act.py",
+      "overrides": {
+        "model.chunk_size": 40
+      }
+    },
+    {
+      "index": 1,
+      "policy": "diffusion",
+      "space": "A3_obj_rel_ee_delta",
+      "run_id": "pilot_diffusion_a3_n50_seed0",
+      "entrypoint": "scripts/train_diffusion.py",
+      "overrides": {
+        "model.horizon": 16,
+        "train.use_ema": true,
+        "train.val_inference_steps": 5,
+        "rollout.sampler": "ddim",
+        "rollout.num_inference_steps": 5
+      }
+    }
+  ],
+  "storage": {
+    "depot_root": null,
+    "scratch_root": null,
+    "conda_prefix_relative": "envs/alexdoor-gilbreth-pilot-py311",
+    "source_checkout_relative": "alexdoor-xas/source",
+    "durable_results_relative": "alexdoor-xas/cluster_pilot_n50/results",
+    "scratch_runs_relative": "alexdoor-xas/cluster_pilot_n50"
+  },
+  "environment": {
+    "python_major_minor": "3.11",
+    "specification": "environment/gilbreth_pilot_py311.yml",
+    "torch_package_spec": null,
+    "torch_index_url": null,
+    "require_no_isaac": true
+  },
+  "slurm": {
+    "account": null,
+    "partition": null,
+    "qos": null,
+    "memory": "32G",
+    "cpus_per_task": 8,
+    "gpus_per_task": 1,
+    "wall_time": "00:30:00",
+    "array_max_concurrent": 2,
+    "require_a100_80gb": false
+  },
+  "tracked_transfer_files": [
+    "CLUSTER.md",
+    "pyproject.toml",
+    "configs/act.yaml",
+    "configs/diffusion.yaml",
+    "configs/wandb.yaml",
+    "configs/cluster_pilot_n50.v1.json",
+    "environment/gilbreth_pilot_py311.yml",
+    "scripts/bootstrap_gilbreth_pilot.sh",
+    "scripts/build_cluster_pilot_manifest.py",
+    "scripts/preflight_cluster_pilot.py",
+    "scripts/render_cluster_pilot_slurm.py",
+    "scripts/build_cluster_pilot_return_manifest.py",
+    "scripts/verify_returned_cluster_pilot.py",
+    "scripts/train_act.py",
+    "scripts/train_diffusion.py",
+    "src/alexdoor_xas/cluster_pilot/__init__.py",
+    "src/alexdoor_xas/cluster_pilot/config.py",
+    "src/alexdoor_xas/cluster_pilot/preflight.py",
+    "src/alexdoor_xas/cluster_pilot/returns.py",
+    "src/alexdoor_xas/cluster_pilot/slurm.py",
+    "src/alexdoor_xas/cluster_pilot/transfer.py",
+    "src/alexdoor_xas/policies/act/config.py",
+    "src/alexdoor_xas/policies/diffusion/config.py"
+  ],
+  "future_sweep": {
+    "status": "contract_only_do_not_generate_or_launch",
+    "master_pool": "one deterministic master episode pool",
+    "training_episode_counts": [
+      50,
+      100,
+      250,
+      500
+    ],
+    "n_definition": "number of training episodes",
+    "nested_training_subsets": true,
+    "fixed_shared_validation_test": true,
+    "equal_pose_balance": true,
+    "paired_a2_a3_source_episodes": true,
+    "existing_v2_pose_role": "stabilization and compatibility-pilot evidence only",
+    "full_matrix_cells": 16
+  }
+}

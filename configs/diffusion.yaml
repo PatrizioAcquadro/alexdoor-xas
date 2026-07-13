@@ -38,6 +38,7 @@ train:
 run:
   experiment: diffusion_door_push
   run_id: null
+  output_root: null              # optional base override (cluster scratch for pilot jobs)
 
 rollout:
   checkpoint: null

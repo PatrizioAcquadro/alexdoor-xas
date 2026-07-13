@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -89,7 +90,7 @@ def main() -> int:
         return 1
 
     run_id = cfg.resolved_run_id()
-    output_root = (
+    output_root = Path(cfg.run.output_root).expanduser().resolve() if cfg.run.output_root else (
         paths.ALEX_V2_OUTPUTS_DIR
         if cfg.dataset.task == paths.ALEX_V2_TASK
         else paths.OUTPUTS_DIR
@@ -101,6 +102,8 @@ def main() -> int:
         train_ids = train_ids[: cfg.train.overfit_episodes]
 
     config_dict = dataclasses.asdict(cfg)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _write_json_atomic(run_dir / "resolved_config.json", _jsonable(config_dict))
     model = make_seeded_model(
         obs_dim=data.obs_dim,
         action_dim=data.action_dim,
@@ -254,6 +257,15 @@ def _jsonable(value):
     if isinstance(value, Path):
         return str(value)
     return value
+
+
+def _write_json_atomic(path: Path, payload) -> None:
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
