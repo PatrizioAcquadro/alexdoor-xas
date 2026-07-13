@@ -994,6 +994,21 @@ def test_non_finite_all_sample_force_evidence_fails_readiness(valid_run) -> None
     )
 
 
+@pytest.mark.parametrize("field", ["initial_angle_rad", "final_angle_rad"])
+def test_non_finite_rollout_angle_fails_safety(valid_run, field) -> None:
+    _, payloads = valid_run
+    row = payloads["D0"]["rollouts"][0]
+    row[field] = float("nan")
+
+    safety = _module().assess_safety("run_a", [row])
+
+    assert safety["status"] == "FAIL"
+    assert any(
+        "non-finite rollout force/contact evidence" in reason
+        for reason in safety["fail_reasons"]
+    )
+
+
 def _warning_record(family_id: str, **evidence) -> dict:
     return {
         "id": family_id,
@@ -1213,6 +1228,21 @@ def test_rejection_failure_label_fails_safety(valid_run) -> None:
     row["n_rejected"] = 1
     summary = _summarize(tmp_path, payloads)
     assert summary["safety_readiness"] == "FAIL"
+
+
+@pytest.mark.parametrize("field", ["failure_label", "termination_reason"])
+def test_invalid_simulator_state_fails_safety(valid_run, field) -> None:
+    _, payloads = valid_run
+    row = payloads["D0"]["rollouts"][1]
+    row[field] = "invalid_simulator_state"
+
+    safety = _module().assess_safety("run_a", [row])
+
+    assert safety["status"] == "FAIL"
+    assert any(
+        "invalid simulator state" in reason and "101" in reason
+        for reason in safety["fail_reasons"]
+    )
 
 
 def test_stray_rejection_is_review_only(valid_run) -> None:

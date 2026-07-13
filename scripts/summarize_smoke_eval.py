@@ -1157,6 +1157,8 @@ def assess_safety(run_name: str, rows: list[dict]) -> dict[str, Any]:
                 None if all_samples is None else all_samples.get("max"),
                 None if evidence is None else evidence.get("peak_force_n"),
                 row.get("impulse_ns"),
+                row.get("initial_angle_rad"),
+                row.get("final_angle_rad"),
             ]
         )
         if any(
@@ -1168,6 +1170,17 @@ def assess_safety(run_name: str, rows: list[dict]) -> dict[str, Any]:
     if non_finite_rows:
         fail_reasons.append(
             f"non-finite rollout force/contact evidence (seeds {non_finite_rows})"
+        )
+
+    invalid_simulator_state = [
+        row.get("seed")
+        for row in rows
+        if row.get("failure_label") == "invalid_simulator_state"
+        or row.get("termination_reason") == "invalid_simulator_state"
+    ]
+    if invalid_simulator_state:
+        fail_reasons.append(
+            f"rollouts reached invalid simulator state (seeds {invalid_simulator_state})"
         )
 
     n_commands = sum(
