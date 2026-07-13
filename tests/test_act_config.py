@@ -43,6 +43,7 @@ def test_default_config_matches_yaml_defaults() -> None:
 
     assert cfg.run.experiment == "act_door_push"
     assert cfg.run.run_id is None
+    assert cfg.run.output_root is None
 
     assert cfg.rollout.checkpoint is None
     assert cfg.rollout.episodes_fixed == 5
@@ -69,6 +70,7 @@ def test_hydra_overrides_flow_through_all_sections() -> None:
             "train.epochs=3",
             "train.overfit_episodes=2",
             "run.run_id=test_run",
+            "run.output_root=/tmp/act-pilot",
             "rollout.temporal_ensemble=true",
             "rollout.matched_scripted_reference=true",
             "+wandb.mode=offline",
@@ -82,6 +84,7 @@ def test_hydra_overrides_flow_through_all_sections() -> None:
     assert cfg.train.epochs == 3
     assert cfg.train.overfit_episodes == 2
     assert cfg.run.run_id == "test_run"
+    assert cfg.run.output_root == "/tmp/act-pilot"
     assert cfg.resolved_run_id() == "test_run"
     assert cfg.rollout.temporal_ensemble is True
     assert cfg.rollout.matched_scripted_reference is True

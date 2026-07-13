@@ -99,6 +99,7 @@ class DiffusionRunCfg:
 
     experiment: str = "diffusion_door_push"
     run_id: str | None = None
+    output_root: str | None = None
 
 
 @dataclass(frozen=True)
@@ -386,12 +387,13 @@ def _build_train_cfg(node: dict[str, Any]) -> DiffusionTrainCfg:
 
 
 def _build_run_cfg(node: dict[str, Any]) -> DiffusionRunCfg:
-    _reject_unknown("run", node, {"experiment", "run_id"})
+    _reject_unknown("run", node, {"experiment", "run_id", "output_root"})
     return DiffusionRunCfg(
         experiment=_required_str(
             "run.experiment", node.get("experiment", "diffusion_door_push")
         ),
         run_id=_optional_str("run.run_id", node.get("run_id")),
+        output_root=_optional_str("run.output_root", node.get("output_root")),
     )
 
 
