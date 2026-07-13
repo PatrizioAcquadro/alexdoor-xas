@@ -108,24 +108,26 @@ def test_pilot_config_rejects_hardware_or_scientific_drift(tmp_path) -> None:
         load_pilot_config(path)
 
 
-def test_environment_spec_is_pinned_non_isaac_and_leaves_torch_configurable() -> None:
+def test_environment_spec_freezes_python311_numpy_compatibility_boundary() -> None:
     spec = (REPO_ROOT / "environment" / "gilbreth_pilot_py311.yml").read_text()
-    lowered = spec.lower()
-    assert "python=3.11" in spec
-    for name in (
-        "numpy==",
-        "hydra-core==",
-        "omegaconf==",
-        "h5py==",
-        "matplotlib==",
-        "diffusers==",
-        "wandb==",
-        "pytest==",
-        "ruff==",
-    ):
-        assert name in lowered
-    assert "torch==" not in lowered
-    assert "isaac" not in lowered
+    dependency_lines = [line.strip().removeprefix("- ") for line in spec.splitlines()]
+    pip_dependencies = [line for line in dependency_lines if "==" in line]
+
+    assert "python=3.11" in dependency_lines
+    assert pip_dependencies == [
+        "numpy==2.4.6",
+        "hydra-core==1.3.3",
+        "omegaconf==2.3.1",
+        "h5py==3.16.0",
+        "matplotlib==3.10.8",
+        "diffusers==0.39.0",
+        "wandb==0.28.0",
+        "pytest==9.1.1",
+        "ruff==0.15.3",
+    ]
+    assert "numpy==2.5.0" not in dependency_lines
+    assert "torch==" not in spec.lower()
+    assert "isaac" not in spec.lower()
 
 
 def test_bootstrap_requires_cluster_roots_and_explicit_torch_build() -> None:
