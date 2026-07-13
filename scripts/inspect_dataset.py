@@ -70,7 +70,7 @@ def inspect_a4(dataset: A4ChunkDataset, episode_ids: list[str] | None = None) ->
               f"duration={chunk.duration_ticks} ticks")
     features = episode_chunk_features(record)
     print(_stat_line("features", features))
-    print("NOTE: A4 is symbolic per-phase data (docs/dataset_interface.md); "
+    print("NOTE: A4 is symbolic per-phase data (docs/architecture.md); "
           "there is no per-tick batch view.")
     return 0
 

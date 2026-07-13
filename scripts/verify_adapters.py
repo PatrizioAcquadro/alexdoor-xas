@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Phase 3.1 verification gate: adapter-v1 executes A2/A3/A4 on the Alex env.
 
-Proves the adapter layer (``src/alexdoor_xas/adapters/``, docs/adapters.md) on
+Proves the adapter layer (``src/alexdoor_xas/adapters/``, docs/architecture.md) on
 ``AlexDoor-DoorPush-AlexV2-v0``. Fails non-zero unless:
 
 - a fixed-seed scripted reference episode succeeds (door past the success
@@ -181,7 +181,7 @@ def _assert_a4_execution(env, episode, success_angle_rad: float, out_dir):
             f"A4 achieved hinge delta {result.achieved_hinge_delta_rad:.4f} rad is below "
             f"the requested {result.requested_hinge_delta_rad:.4f} rad"
         )
-    # The logged result must carry every required field (docs/adapters.md).
+    # The logged result must carry every required field (docs/architecture.md).
     payload = result.to_dict()
     for key in (
         "requested_hinge_delta_rad",

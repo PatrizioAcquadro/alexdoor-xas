@@ -1,4 +1,4 @@
-"""In-memory episode buffer mirroring docs/episode_schema.md (pure Python/numpy).
+"""In-memory episode buffer mirroring docs/architecture.md (pure Python/numpy).
 
 One episode is ``meta`` (fixed) + ``steps[]`` (one entry per control tick) +
 ``outcome`` (filled at the end). The buffer also carries ``extras`` for

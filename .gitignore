@@ -22,9 +22,6 @@ htmlcov/
 /artifacts/
 
 # ── Generated artifacts (see datasets/README.md, outputs/README.md) ──────────
-# Project docs stay local in this checkout.
-/docs/
-
 # Datasets are tracked via their README.md; generated data stays local by default.
 /datasets/*
 !/datasets/README.md

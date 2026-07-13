@@ -22,7 +22,7 @@ outputs/<experiment>/<run_id>/
     videos/        # rollouts / renders
     checkpoints/   # model weights
     logs/          # stdout, config snapshot, git commit
-    episodes/      # trial captures for this run (docs/episode_schema.md)
+    episodes/      # trial captures for this run (see docs/architecture.md)
 ```
 
 - `<experiment>` — a named comparison, e.g. `A2_vs_A4_door_push`

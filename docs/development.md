@@ -1,0 +1,127 @@
+# Development Guide
+
+## Runtime
+
+The supported workstation runtime is Isaac Sim 6.0.1 at
+`/home/pacquadr/isaacsim` and Isaac Lab `release/3.0.0-beta2` at
+`/home/pacquadr/IsaacLab`. Do not install or upgrade either stack for this
+project.
+
+Run repository Python through the Isaac Lab launcher, including pure tests:
+
+```bash
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p <script-or--m-module>
+```
+
+Do not use bare system `python3` for Isaac code. Scripts that require Kit must
+create `AppLauncher` before importing `isaaclab`, `omni`, or `pxr` modules.
+
+Install the package once in editable mode:
+
+```bash
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p -m pip install -e .
+```
+
+Optional extras are `.[dev]`, `.[tracking]`, and `.[diffusion]`. Isaac Sim,
+Isaac Lab, CUDA, and PyTorch are supplied by the runtime and are not package
+dependencies.
+
+## Standard verification
+
+Run the pure suite and fast environment gate:
+
+```bash
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p -m pytest -q
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/check_env.py
+```
+
+Run simulator and task gates separately:
+
+```bash
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_assets.py --viz none --device cpu --steps 1
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_door_task_scene.py --viz none --device cpu --steps 100
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_door_env.py --viz none --device cpu --steps 100
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_scripted_baseline.py --viz none --device cpu
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_alex_v2_door_baseline.py --viz none --device cpu
+```
+
+Run dataset, adapter, and learned-policy gates as needed:
+
+```bash
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_dataset_interface.py
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_a2_a3_distinct.py --task door_push_alex_v2 --version v2_pose
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_adapters.py --viz none --device cpu
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_act_training.py
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_diffusion_training.py
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_stabilization_doc.py
+```
+
+The ACT and Diffusion rollout gates also require compatible A2 and A3
+checkpoints; inspect `--help` and provide `--checkpoint-a2` and
+`--checkpoint-a3`. Do not substitute old Alex V1 gate names.
+
+## Data generation
+
+Generate proxy or calibrated Alex V2 episodes with the same entry point:
+
+```bash
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/run_scripted_baseline.py \
+  --viz none --device cpu --robot alex_v2 --episodes 5 --randomized 3
+```
+
+Add `--video --enable_cameras` only when video is required. Camera-enabled and
+headless physics traces must be compared within their own mode. Non-default
+door-pose runs cannot export directly; create per-pose no-export runs and merge
+them once with `scripts/export_merged_dataset.py` and a tracked pose plan.
+
+`scripts/verify_dataset_interface.py` is read-only by default. Use
+`--write-artifacts` only when intentionally refreshing official split and
+normalization files after a dataset regeneration.
+
+## Training and evaluation
+
+ACT and Diffusion use Hydra overrides after their script arguments:
+
+```bash
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/train_act.py \
+  dataset.space=A2_ee_delta dataset.version=v2_pose
+
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/train_diffusion.py \
+  dataset.space=A3_obj_rel_ee_delta dataset.version=v2_pose
+```
+
+Diffusion training is CUDA-first and fails rather than silently falling back
+to CPU. Simulator evaluation remains on CPU under the validated calibration
+contract. Evaluation commands are `scripts/eval_act.py` and
+`scripts/eval_diffusion.py`; the checkpoint action space, observation preset,
+dataset fingerprint, and split provenance must match the live dataset.
+
+## Experiment tracking
+
+W&B is optional and disabled by default through `configs/wandb.yaml`.
+Use `wandb.mode=offline` for durable local/cluster capture or
+`wandb.mode=online` only after authentication. Never store API keys or other
+credentials in the repository, configs, manifests, rendered jobs, or logs.
+
+## Local and cluster boundary
+
+Ubuntu is authoritative for Isaac simulation, dataset generation, calibration,
+and closed-loop evaluation. Gilbreth is a non-Isaac training environment.
+
+The compatibility-pilot workflow is documented in [`cluster.md`](cluster.md).
+It transfers only the existing N50 dataset and two short training cells. It is
+not the full scientific dataset-scale sweep. Do not build a transfer manifest
+from a dirty tree, guess Gilbreth account/runtime values, submit `sbatch`, or
+start the later sweep without explicit authorization.
+
+## Change discipline
+
+- Preserve action, frame, timing, calibration, dataset, and provenance
+  contracts unless a reviewed spec explicitly changes them.
+- Keep generated datasets, checkpoints, logs, videos, and raw outputs out of
+  Git.
+- Use explicit verification scripts instead of manual simulator state.
+- Treat restricted-shell GPU/display failures as inconclusive until rerun in a
+  host-visible shell.
+- Keep project status current in [`status.md`](status.md); do not create a new
+  phase report for every implementation increment.

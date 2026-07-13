@@ -1,4 +1,4 @@
-# Gilbreth N50 compatibility pilot
+# Gilbreth N50 Compatibility Pilot
 
 Gilbreth is a **non-Isaac training environment**. Do not install, import, or run Isaac Sim or
 Isaac Lab there. Ubuntu remains the authority for dataset generation and all closed-loop

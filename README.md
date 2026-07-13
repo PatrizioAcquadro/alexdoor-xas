@@ -1,223 +1,73 @@
 # AlexDoor-XAS
 
-AlexDoor-XAS is a research codebase for humanoid articulated-object manipulation
-in NVIDIA Isaac Sim and Isaac Lab. It focuses on door interaction with the IHMC
-Alex humanoid torso and provides environment scaffolds, scripted control tools,
-recording utilities, dataset export code, and evaluation helpers for comparing
-manipulation action representations.
+AlexDoor-XAS is a research codebase for comparing action representations in
+humanoid articulated-object manipulation. Its first benchmark is door pushing
+with the fixed-base IHMC Alex V2 torso in NVIDIA Isaac Sim and Isaac Lab.
 
-The project is intentionally organized as a lightweight Python package. Isaac
-Sim, Isaac Lab, CUDA, and PyTorch are supplied by the local simulator
-installation rather than installed as package dependencies.
+The main research variable is the action interface: joint deltas (A1),
+end-effector deltas (A2), object-relative deltas (A3), and object-centric
+chunks (A4). Policies execute through a shared adapter and produce explicit
+safety and provenance evidence.
 
-## Overview
+## Current state
 
-The repository provides a controlled door-manipulation benchmark around three
-core concerns:
+Phases 1–3 are implemented through local post-Phase 3.3 stabilization:
 
-- loading local Alex and door scene assets through a stable path registry
-- running Isaac Lab door-task environments for proxy and Alex-based execution
-- generating, recording, exporting, and evaluating door-push rollouts
+- deterministic proxy and calibrated Alex V2 door-push environments;
+- scripted generation and A1–A4 dataset export;
+- fail-closed dataset, split, normalization, and provenance contracts;
+- A2/A3/A4 adapter execution;
+- state-only ACT and Diffusion Policy training and evaluation;
+- a validated five-pose, 50-episode Alex V2 smoke dataset;
+- tooling for a two-cell Gilbreth compatibility pilot.
 
-Generated datasets, videos, checkpoints, logs, and simulator outputs are kept
-out of git by default. Only source code, tests, verification scripts, packaging
-metadata, and placeholder README files for artifact directories are tracked.
+The Gilbreth pilot has not run, the full cluster sweep has not started, and
+Phase 4 VLA work has not started. See [project status](docs/status.md) for the
+evidence and boundaries.
 
-## Capabilities
+## Documentation
 
-- Local asset discovery for the Alex model and door scenes.
-- Single-door task fixture generation from machine-local USD assets.
-- Isaac Lab environments for reset, step, scripted interaction, and Alex-based
-  execution.
-- Action-space utilities for end-effector, object-relative, and object-centric
-  representations.
-- Deterministic scripted baseline controller for door-push rollouts.
-- Episode recording and dataset export utilities for HDF5, JSON, and JSONL
-  outputs.
-- Phase 3.0 dataset/model-interface utilities for fail-closed validation,
-  matched action-space checks, deterministic splits, normalization stats, and
-  chunk batching.
-- Evaluation utilities for metrics, failure labels, plots, reports, and sanity
-  checks.
-- Verification scripts for environment readiness, asset loading, door-task
-  setup, scripted rollout export, IK probing, and Alex door interaction.
+- [Project guidelines](docs/PROJECT_GUIDELINES.md) — research intent, phases,
+  evaluation principles, and hardware boundary.
+- [System architecture](docs/architecture.md) — implemented components and
+  technical contracts.
+- [Development guide](docs/development.md) — runtime, workflows, and exact
+  verification commands.
+- [Project status](docs/status.md) — completed work, evidence, limitations, and
+  next steps.
+- [Gilbreth pilot runbook](docs/cluster.md) — contract-bound transfer, execution,
+  and return procedure.
 
-## Repository Structure
+## Quick start
 
-```text
-.
-|-- README.md
-|-- pyproject.toml
-|-- .gitignore
-|-- src/alexdoor_xas/
-|   |-- paths.py
-|   |-- assets/
-|   |-- action/
-|   |-- envs/
-|   |-- policies/
-|   |-- recording/
-|   |-- data_engine/
-|   |-- dataset/
-|   `-- eval/
-|-- scripts/
-|   |-- check_env.py
-|   |-- verify_assets.py
-|   |-- verify_door_task_scene.py
-|   |-- verify_door_env.py
-|   |-- verify_scripted_baseline.py
-|   |-- verify_alex_ik_probe.py
-|   |-- verify_alex_door_baseline.py
-|   `-- run_scripted_baseline.py
-|-- tests/
-|-- datasets/
-|   `-- README.md
-`-- outputs/
-    `-- README.md
-```
-
-The tracked source tree is divided by responsibility:
-
-- `src/alexdoor_xas/paths.py` defines canonical local paths and environment
-  overrides.
-- `src/alexdoor_xas/assets/` contains Alex, scene, and door-task asset helpers.
-- `src/alexdoor_xas/action/` contains action tags, structures, and frame
-  conversion utilities.
-- `src/alexdoor_xas/envs/` contains Isaac Lab door-task environments.
-- `src/alexdoor_xas/policies/` contains scripted controllers.
-- `src/alexdoor_xas/recording/` contains episode buffers and writers.
-- `src/alexdoor_xas/data_engine/` contains generation, export, and run
-  orchestration.
-- `src/alexdoor_xas/dataset/` contains the Phase 3.0 hardened dataset/model
-  interface for loading, validation, splits, normalization, and batching.
-- `src/alexdoor_xas/eval/` contains metrics, plots, reports, and sanity checks.
-- `scripts/` contains executable verification and data-generation entrypoints.
-- `tests/` contains pure-Python regression and contract tests.
-- `datasets/README.md` and `outputs/README.md` document local artifact
-  conventions while generated contents remain ignored.
-
-## Requirements
-
-- Python 3.11 or newer.
-- NVIDIA Isaac Sim and Isaac Lab installed locally.
-- A Python environment supplied by Isaac Lab for simulator-backed commands.
-- Local Alex and scene assets available on the workstation:
-  - `~/Desktop/Alex-robot/alex_models/`
-  - `~/Desktop/CombinedScene/`
-- Python package dependencies declared in `pyproject.toml`.
-
-Set `ALEXDOOR_ASSETS_ROOT` if the local asset root is different from the default
-desktop layout.
-
-## Installation
-
-From the repository root:
+Isaac Sim and Isaac Lab are supplied by the workstation runtime; they are not
+installed as Python package dependencies. From the repository root:
 
 ```bash
 PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p -m pip install -e .
-```
-
-For development tools:
-
-```bash
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p -m pip install -e ".[dev]"
-```
-
-Isaac-backed commands should be run through the Isaac Lab launcher. System
-`python3` is not expected to import Isaac Sim, Isaac Lab, Omniverse, or USD
-runtime modules in this project.
-
-## Verification
-
-Run the pure-Python test suite:
-
-```bash
 PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p -m pytest -q
-```
-
-Run fast environment checks:
-
-```bash
 PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/check_env.py
 ```
 
-Run Isaac-backed smoke and task checks:
+Do not use bare system `python3` for Isaac code. The complete gate list and
+data/training workflows are in the [development guide](docs/development.md).
 
-```bash
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_assets.py --viz none --device cpu --steps 1
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_door_task_scene.py --viz none --device cpu --steps 100
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_door_env.py --viz none --device cpu --steps 100
+## Repository layout
+
+```text
+src/alexdoor_xas/   package: assets, envs, actions, adapters, policies, data, eval
+scripts/            verification, generation, training, evaluation, cluster tools
+configs/            calibration, data, policy, tracking, and pilot contracts
+tests/              pure-Python regression and contract tests
+docs/               four canonical project docs plus the cluster runbook
+datasets/           reusable generated datasets (ignored except README)
+outputs/            per-run artifacts (ignored except README/curated evidence)
 ```
 
-Run scripted rollout and Alex-specific verification:
-
-```bash
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_scripted_baseline.py --viz none --device cpu
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_alex_ik_probe.py --viz none --device cpu --contact
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_alex_door_baseline.py --viz none --device cpu
-```
-
-Run the Phase 3.0 dataset/model-interface gate:
-
-```bash
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_dataset_interface.py
-```
-
-By default this gate validates into temporary split/stat files and does not
-rewrite official dataset artifacts. Use `--write-artifacts` only when you
-intend to refresh `datasets/<task>/splits/<version>.json` and each
-`norm_stats.json`.
-
-## Usage
-
-Generate scripted door-push rollouts with the proxy end-effector backend:
-
-```bash
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/run_scripted_baseline.py \
-    --viz none --device cpu --robot proxy --episodes 5 --randomized 3
-```
-
-Generate scripted door-push rollouts with the Alex V2 backend:
-
-```bash
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/run_scripted_baseline.py \
-    --viz none --device cpu --robot alex_v2 --episodes 5 --randomized 3 --video --enable_cameras
-```
-
-Use `--help` on any script to inspect supported flags:
-
-```bash
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/run_scripted_baseline.py --help
-```
-
-## Data and Artifacts
-
-`datasets/` is reserved for reusable exported episode datasets. `outputs/` is
-reserved for per-run artifacts such as metrics, plots, reports, videos,
-checkpoints, logs, and temporary episode captures.
-
-Phase 3.0 datasets are considered hardened and consumable only after the
-dataset-interface gate passes on the relevant proxy/Alex exports. That wording
-does not imply Phase 3.1 training readiness unless the current gate commands
-have passed without corrupt, stale, or mismatched dataset artifacts.
-
-Both directories are ignored by default except for their README files. This
-keeps large generated files and machine-specific simulator artifacts out of the
-repository while preserving the expected local layout.
-
-Small, deliberately curated review artifacts may be placed under
-`outputs/curated/` according to the repository ignore rules.
-
-## Development Notes
-
-- Keep simulator dependencies out of `pyproject.toml`; they are provided by the
-  Isaac installation.
-- Prefer repository-local path helpers instead of hard-coded absolute paths in
-  source modules.
-- Keep generated data, videos, logs, and binary simulator artifacts out of git.
-- Use explicit script entrypoints for verification rather than relying on manual
-  simulator state.
-- Treat asset-load checks, environment checks, scripted rollout checks, and
-  Alex-specific checks as separate validation layers.
+Machine-local assets are referenced in place. The sole robot lineage is
+`~/Desktop/Alex/urdf/alex_v2.urdf`; generated door assets derive from the local
+CombinedScene checkout. Generated datasets, checkpoints, videos, logs, and raw
+simulator outputs stay out of Git.
 
 ## License
 

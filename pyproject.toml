@@ -1,7 +1,7 @@
-# AlexDoor-XAS — packaging for the Phase-1 scaffold.
+# AlexDoor-XAS package metadata.
 #
 # Isaac Sim / Isaac Lab / PyTorch are provided by the official local installs
-# (see docs/environment.md) and are intentionally NOT listed as dependencies
+# (see docs/development.md) and are intentionally NOT listed as dependencies
 # here -- this package installs light and never pulls the sim stack.
 
 [build-system]
@@ -11,7 +11,7 @@ build-backend = "hatchling.build"
 [project]
 name = "alexdoor-xas"
 version = "0.1.0"
-description = "Cross-Action-Space VLA/WAM learning for humanoid articulated-object manipulation (AlexDoor-XAS) — Phase 1 scaffold."
+description = "Cross-action-space learning for humanoid articulated-object manipulation."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }

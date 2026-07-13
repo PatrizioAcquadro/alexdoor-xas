@@ -1,4 +1,4 @@
-"""Artifact-consistency checks for the human stabilization document."""
+"""Artifact-consistency checks for stabilization evidence in the project status."""
 
 from __future__ import annotations
 

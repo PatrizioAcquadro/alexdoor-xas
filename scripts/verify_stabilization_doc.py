@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Verify the human Phase 3.3 stabilization document against final artifacts."""
+"""Verify the stabilization evidence in the project status against final artifacts."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ A3_TRAIN = Path(
     "outputs/door_push_alex_v2/act_door_push/"
     "local_smoke_act_a3_n50_seed0/logs/train_log.json"
 )
-DOCUMENT = Path("docs/phase3_4_local_stabilization.md")
+DOCUMENT = Path("docs/status.md")
 
 
 def _load_json(root: Path, relative: Path) -> dict:
@@ -97,7 +97,7 @@ def main() -> int:
     if failures:
         print("FAIL: " + "; ".join(failures))
         return 1
-    print("PASS: stabilization document matches final artifacts.")
+    print("PASS: project status stabilization evidence matches final artifacts.")
     return 0
 
 

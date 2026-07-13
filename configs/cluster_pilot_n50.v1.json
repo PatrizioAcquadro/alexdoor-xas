@@ -78,7 +78,7 @@
     "require_a100_80gb": false
   },
   "tracked_transfer_files": [
-    "CLUSTER.md",
+    "docs/cluster.md",
     "pyproject.toml",
     "configs/act.yaml",
     "configs/diffusion.yaml",

@@ -138,7 +138,7 @@ def limits_for_robot(
 
 @dataclass(frozen=True)
 class DoorPanelGeometry:
-    """Measured door-panel geometry in the panel frame (docs/phase2_report.md).
+    """Measured door-panel geometry in the panel frame (docs/architecture.md).
 
     The panel occupies ``x in [0, thickness]``, ``y in [0, width]``,
     ``z in [-height/2, height/2]`` (the hinge origin sits at panel mid-height).

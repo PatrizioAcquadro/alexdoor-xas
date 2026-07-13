@@ -5,7 +5,7 @@ targets with no knowledge of joint limits: when the commanded EE path leaves
 the reachable workspace the solved targets march past the physical limits
 while the drives saturate at them — integrator windup, seen in the Phase 3.2
 dataset scale-up as 0.17-0.41 rad target overshoot on RIGHT_ELBOW_Y /
-RIGHT_WRIST_X (docs/act.md scale blocker). Clamping the *targets* to the
+RIGHT_WRIST_X (see the adapter limits in docs/architecture.md). Clamping the *targets* to the
 Isaac-reported position limits each tick removes the windup without touching
 the frozen per-tick EE-delta clamps or any sanity threshold; because the IK
 compute consumes live joint positions (not the previous target), the clamp

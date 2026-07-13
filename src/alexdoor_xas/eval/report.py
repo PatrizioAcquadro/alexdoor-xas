@@ -117,11 +117,11 @@ def _a1_status_note(
         return (
             f"- `{A1_JOINT_DELTA}`: **not exported in this run** — episodes record per-tick "
             "joint positions/velocities/targets, so A1 is relabelable "
-            "(see docs/action_spaces.md)."
+            "(see docs/architecture.md)."
         )
     return (
         f"- `{A1_JOINT_DELTA}`: **not exported** — the proxy end-effector has no joints "
-        "(see docs/action_spaces.md)."
+        "(see docs/architecture.md)."
     )
 
 
