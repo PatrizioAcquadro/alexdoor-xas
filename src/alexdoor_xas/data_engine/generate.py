@@ -106,6 +106,25 @@ def plan_episodes(
     return items
 
 
+def plan_randomized_seeds(
+    seeds: list[int] | tuple[int, ...],
+    bounds: VariationBounds | None = None,
+) -> list[EpisodePlanItem]:
+    """Build randomized plan items from an explicit deterministic seed list."""
+    normalized = [int(seed) for seed in seeds]
+    if len(normalized) != len(set(normalized)):
+        raise ValueError("explicit randomized seed plan contains duplicates")
+    if any(seed < 0 for seed in normalized):
+        raise ValueError("explicit randomized seeds must be non-negative")
+    return [
+        EpisodePlanItem(
+            seed=seed,
+            variation=sample_variation(np.random.default_rng(seed), bounds),
+        )
+        for seed in normalized
+    ]
+
+
 def _validated_robot_asset_provenance(
     env: Any,
 ) -> tuple[RobotAssetRef | None, dict[str, Any] | None]:
@@ -496,6 +515,7 @@ __all__ = [
     "DataEngineCfg",
     "EpisodePlanItem",
     "plan_episodes",
+    "plan_randomized_seeds",
     "run_episode",
     "traces_equal",
 ]

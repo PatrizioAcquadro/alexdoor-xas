@@ -8,6 +8,9 @@ payload so ``torch.load(weights_only=True)`` stays safe).
 
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -32,6 +35,7 @@ class LoadedCheckpoint:
     stats: DatasetNormStats
     meta: dict[str, Any]
     split_episode_ids: dict[str, tuple[str, ...]]
+    provenance: dict[str, Any]
     robot_asset: RobotAssetRef | None = None
 
     @property
@@ -55,9 +59,11 @@ def save_checkpoint(
     meta: dict[str, Any] | None = None,
     robot_asset: RobotAssetRef | None = None,
     split_episode_ids: dict[str, list[str] | tuple[str, ...]] | None = None,
+    provenance: dict[str, Any] | None = None,
 ) -> Path:
     """Write a self-contained checkpoint; returns the written path."""
     _validate_dataset_binding(config, stats)
+    _validate_training_provenance(config, stats, split_episode_ids, provenance)
     if _is_v2_config(config) and robot_asset is None:
         raise ValueError("Alex V2 checkpoints require robot asset provenance")
     path = Path(path)
@@ -71,6 +77,7 @@ def save_checkpoint(
         "config": config,
         "norm_stats": _stats_payload(stats),
         "split_episode_ids": _split_payload(split_episode_ids),
+        "provenance": dict(provenance or {}),
         "robot_asset": robot_asset.to_dict() if robot_asset is not None else None,
         "meta": {**(meta or {}), "torch_version": str(torch.__version__)},
     }
@@ -96,12 +103,17 @@ def load_checkpoint(path: str | Path, map_location: str = "cpu") -> LoadedCheckp
     robot_asset = _asset_from_payload(payload.get("robot_asset"))
     if _is_v2_config(config) and robot_asset is None:
         raise ValueError("Alex V2 checkpoint is missing robot asset provenance")
+    stats = _stats_from_payload(payload["norm_stats"])
+    split_ids = _split_from_payload(payload.get("split_episode_ids"))
+    provenance = dict(payload.get("provenance") or {})
+    _validate_training_provenance(config, stats, split_ids, provenance)
     return LoadedCheckpoint(
         model=model,
         config=config,
-        stats=_stats_from_payload(payload["norm_stats"]),
+        stats=stats,
         meta=dict(payload["meta"]),
-        split_episode_ids=_split_from_payload(payload.get("split_episode_ids")),
+        split_episode_ids=split_ids,
+        provenance=provenance,
         robot_asset=robot_asset,
     )
 
@@ -145,6 +157,59 @@ def _validate_dataset_binding(config: dict[str, Any], stats: DatasetNormStats) -
         raise ValueError("checkpoint dataset observation preset does not match norm stats")
 
 
+def _validate_training_provenance(
+    config: dict[str, Any],
+    stats: DatasetNormStats,
+    split_episode_ids: dict[str, Any] | None,
+    provenance: dict[str, Any] | None,
+) -> None:
+    dataset = config.get("dataset") or {}
+    view_id = dataset.get("view_id") if isinstance(dataset, dict) else None
+    if view_id is None:
+        return
+    if (
+        not isinstance(provenance, dict)
+        or provenance.get("schema") != "alexdoor_xas.training_provenance.v1"
+    ):
+        raise ValueError("view checkpoint requires training provenance")
+    expected_splits = _split_payload(split_episode_ids) or {}
+    required = {
+        "master_dataset_fingerprint_sha256": stats.dataset_fingerprint,
+        "view_id": view_id,
+        "view_fingerprint_sha256": stats.view_fingerprint,
+        "split_episode_ids": expected_splits,
+        "split_counts": {
+            name: len(expected_splits.get(name, ()))
+            for name in ("train", "val", "test")
+        },
+        "normalization_fingerprint_sha256": stats.normalization_fingerprint,
+        "normalization_sha256": stats.normalization_sha256,
+        "action_space": stats.action_space,
+        "obs_preset": stats.obs_preset,
+    }
+    for key, value in required.items():
+        if provenance.get(key) != value:
+            raise ValueError(f"checkpoint training provenance mismatch: {key}")
+    split_digest = hashlib.sha256(
+        json.dumps(expected_splits, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    if provenance.get("split_fingerprint_sha256") != split_digest:
+        raise ValueError("checkpoint training provenance mismatch: split fingerprint")
+    config_digest = hashlib.sha256(
+        json.dumps(config, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    if provenance.get("resolved_training_config_sha256") != config_digest:
+        raise ValueError("checkpoint training provenance mismatch: resolved config")
+    for key, pattern in (
+        ("normalization_sha256", r"[0-9a-f]{64}"),
+        ("source_git_commit", r"[0-9a-f]{40}"),
+    ):
+        if re.fullmatch(pattern, str(provenance.get(key, ""))) is None:
+            raise ValueError(f"checkpoint training provenance has invalid {key}")
+    if provenance.get("normalization_sha256") != stats.normalization_sha256:
+        raise ValueError("checkpoint training provenance mismatch: normalization_sha256")
+
+
 def _stats_payload(stats: DatasetNormStats) -> dict[str, Any]:
     # Mirrors dataset.normalize.save_norm_stats so the embedded copy stays
     # byte-compatible with the on-disk norm_stats.json layout.
@@ -157,6 +222,10 @@ def _stats_payload(stats: DatasetNormStats) -> dict[str, Any]:
         "action_space": stats.action_space,
         "dataset_fingerprint": stats.dataset_fingerprint,
         "split_name": stats.split_name,
+        "view_id": stats.view_id,
+        "view_fingerprint_sha256": stats.view_fingerprint,
+        "normalization_fingerprint_sha256": stats.normalization_fingerprint,
+        "normalization_sha256": stats.normalization_sha256,
     }
 
 
@@ -170,6 +239,12 @@ def _stats_from_payload(payload: dict[str, Any]) -> DatasetNormStats:
         action_space=str(payload["action_space"]),
         dataset_fingerprint=str(payload["dataset_fingerprint"]),
         split_name=str(payload["split_name"]),
+        view_id=str(payload["view_id"]) if payload.get("view_id") is not None else None,
+        view_fingerprint=str(payload.get("view_fingerprint_sha256", "")),
+        normalization_fingerprint=str(
+            payload.get("normalization_fingerprint_sha256", "")
+        ),
+        normalization_sha256=str(payload.get("normalization_sha256", "")),
     )
 
 

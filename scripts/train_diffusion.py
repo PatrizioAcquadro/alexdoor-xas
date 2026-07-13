@@ -20,6 +20,7 @@ import argparse
 import dataclasses
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -67,7 +68,7 @@ def main() -> int:
     # Heavy imports after config resolution (config layer stays torch-free).
     import torch
 
-    from alexdoor_xas.policies.common.data import PolicyDataError
+    from alexdoor_xas.policies.common.data import PolicyDataError, checkpoint_provenance
     from alexdoor_xas.policies.common.inspect import open_loop_report
     from alexdoor_xas.policies.diffusion.checkpoint import save_checkpoint
     from alexdoor_xas.policies.diffusion.data import (
@@ -115,6 +116,10 @@ def main() -> int:
         train_ids = train_ids[: cfg.train.overfit_episodes]
 
     config_dict = dataclasses.asdict(cfg)
+    source_git_commit = _git_commit()
+    provenance = checkpoint_provenance(
+        data, config_dict, source_git_commit=source_git_commit
+    )
     run_dir.mkdir(parents=True, exist_ok=True)
     _write_json_atomic(run_dir / "resolved_config.json", _jsonable(config_dict))
     model = make_seeded_model(
@@ -200,6 +205,7 @@ def main() -> int:
                         "val": data.val_ids,
                         "test": data.test_ids,
                     },
+                    provenance=provenance,
                 )
 
         history = train_diffusion(
@@ -224,6 +230,7 @@ def main() -> int:
             },
             robot_asset=data.robot_asset,
             split_episode_ids={"train": train_ids, "val": data.val_ids, "test": data.test_ids},
+            provenance=provenance,
         )
         if not best_path.is_file():  # no val improvement recorded (degenerate run)
             save_checkpoint(
@@ -238,6 +245,7 @@ def main() -> int:
                     "val": data.val_ids,
                     "test": data.test_ids,
                 },
+                provenance=provenance,
             )
 
         # Open-loop inspection with the DDIM validation sampler (fast, seeded)
@@ -275,6 +283,7 @@ def main() -> int:
                 "run_id": run_id,
                 "n_parameters": model.n_parameters,
                 "stats_source": data.stats_source,
+                "training_provenance": provenance,
                 "robot_asset": data.robot_asset.to_dict() if data.robot_asset else None,
                 "device_info": device_info,
                 "ema": ema is not None,
@@ -316,6 +325,20 @@ def _write_json_atomic(path: Path, payload) -> None:
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _git_commit() -> str:
+    try:
+        return subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=paths.REPO_ROOT,
+            text=True,
+            capture_output=True,
+            check=True,
+            timeout=10,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError) as error:
+        raise RuntimeError(f"cannot resolve source Git commit: {error}") from error
 
 
 if __name__ == "__main__":

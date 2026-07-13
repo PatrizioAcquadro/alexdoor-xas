@@ -376,6 +376,7 @@ def main() -> int:
                 provenance,
                 paths.DATASETS_DIR,
                 checkpoint_split_episode_ids=policy.checkpoint_split_episode_ids,
+                checkpoint_provenance=policy.checkpoint_provenance,
             )
         )
         if args.determinism_replay:

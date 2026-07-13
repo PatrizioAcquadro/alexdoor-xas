@@ -26,6 +26,7 @@ import os
 import sys
 import traceback
 from datetime import UTC, datetime
+from pathlib import Path
 
 # -- AppLauncher must be configured before any other Isaac import.
 from isaaclab.app import AppLauncher
@@ -42,6 +43,20 @@ parser.add_argument(
     choices=("proxy", "alex_v2"),
     default=None,
     help="Executor: the proxy sphere (default) or calibrated fixed-base Alex V2.",
+)
+parser.add_argument(
+    "--randomized-seed-plan",
+    type=Path,
+    default=None,
+    help="JSON list of explicit randomized seeds (scale candidate generation only).",
+)
+parser.add_argument(
+    "--candidate-pool",
+    action="store_true",
+    help=(
+        "Preserve failed candidate evidence for later fail-closed selection; "
+        "requires --no-export."
+    ),
 )
 parser.add_argument("--episodes", type=int, default=None, help="Fixed-start episodes.")
 parser.add_argument("--randomized", type=int, default=None, help="Seeded randomized episodes.")
@@ -139,7 +154,11 @@ import gymnasium as gym  # noqa: E402
 
 import alexdoor_xas.envs.door_task as door_task  # noqa: E402
 from alexdoor_xas import paths  # noqa: E402
-from alexdoor_xas.data_engine import DataEngineCfg, run_baseline  # noqa: E402
+from alexdoor_xas.data_engine import (  # noqa: E402
+    DataEngineCfg,
+    plan_randomized_seeds,
+    run_baseline,
+)
 from alexdoor_xas.envs.door_task.alex_v2_runtime import ALEX_V2_LIMITATIONS  # noqa: E402
 from alexdoor_xas.envs.door_task.door_push_alex_v2_env_cfg import (  # noqa: E402
     ALEX_V2_ROBOT_TAG,
@@ -216,6 +235,14 @@ def main() -> int:
                 else None
             )
             variation_bounds = None
+        explicit_plan = None
+        if args.randomized_seed_plan is not None:
+            import json
+
+            seed_payload = json.loads(args.randomized_seed_plan.read_text())
+            if not isinstance(seed_payload, list):
+                raise ValueError("--randomized-seed-plan must contain a JSON list")
+            explicit_plan = plan_randomized_seeds(seed_payload, variation_bounds)
         artifacts = run_baseline(
             env,
             outputs_root=paths.OUTPUTS_DIR,
@@ -230,6 +257,8 @@ def main() -> int:
             variation_bounds=variation_bounds,
             video=run_config.run.video,
             export=run_config.run.export,
+            episode_plan=explicit_plan,
+            preserve_candidate_failures=args.candidate_pool,
         )
 
         print(f"[run] dir={artifacts.run_dir}", flush=True)

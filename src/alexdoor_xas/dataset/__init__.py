@@ -32,8 +32,10 @@ from .normalize import (
     dataset_fingerprint,
     load_norm_stats,
     norm_stats_path,
+    normalization_fingerprint,
     save_norm_stats,
     validate_norm_stats,
+    view_norm_stats_path,
 )
 from .sampling import (
     A4_FEATURE_DIM,
@@ -71,6 +73,16 @@ from .validate import (
     validate_episode,
     validate_matched_action_space_datasets,
 )
+from .views import (
+    SELECTION_ALGORITHM,
+    VIEW_SCHEMA,
+    build_nested_views,
+    load_view_payload,
+    save_view_payload,
+    validate_nested_views,
+    view_fingerprint,
+    view_path,
+)
 
 __all__ = [
     "A4_FEATURE_DIM",
@@ -107,6 +119,7 @@ __all__ = [
     "expected_action_space",
     "load_episode_record",
     "load_norm_stats",
+    "normalization_fingerprint",
     "load_split_payload",
     "load_splits",
     "make_grouped_splits",
@@ -127,4 +140,13 @@ __all__ = [
     "validate_episode",
     "validate_matched_action_space_datasets",
     "validate_norm_stats",
+    "view_norm_stats_path",
+    "SELECTION_ALGORITHM",
+    "VIEW_SCHEMA",
+    "build_nested_views",
+    "load_view_payload",
+    "save_view_payload",
+    "validate_nested_views",
+    "view_fingerprint",
+    "view_path",
 ]

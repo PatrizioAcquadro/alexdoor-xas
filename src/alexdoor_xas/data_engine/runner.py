@@ -65,6 +65,8 @@ def run_baseline(
     variation_bounds: VariationBounds | None = None,
     video: bool = False,
     export: bool = True,
+    episode_plan: list[EpisodePlanItem] | None = None,
+    preserve_candidate_failures: bool = False,
 ) -> RunArtifacts:
     """Generate, record, export, evaluate, and report one baseline run.
 
@@ -106,7 +108,19 @@ def run_baseline(
     _fresh_run_dir(run_dir)
     # Config provenance is written up front so an aborted run (sanity error)
     # still records what produced it.
-    _write_run_config(run_dir, engine_cfg, controller_cfg, n_fixed, n_randomized, base_seed)
+    active_plan = episode_plan or plan_episodes(
+        n_fixed, n_randomized, base_seed, bounds=variation_bounds
+    )
+    _write_run_config(
+        run_dir,
+        engine_cfg,
+        controller_cfg,
+        n_fixed,
+        n_randomized,
+        base_seed,
+        active_plan,
+        preserve_candidate_failures,
+    )
     env_tick_limit = getattr(env, "max_episode_length", None)
     if env_tick_limit is not None and engine_cfg.max_ticks > int(env_tick_limit):
         # max_ticks == env budget is the frozen contract (both 600); running
@@ -125,7 +139,7 @@ def run_baseline(
     }
 
     episodes: list[EpisodeBuffer] = []
-    for item in plan_episodes(n_fixed, n_randomized, base_seed, bounds=variation_bounds):
+    for item in active_plan:
         frames: list[Any] = []
         render_hook = _make_render_hook(env, frames, videos_state) if video else None
         episode = run_episode(
@@ -151,7 +165,7 @@ def run_baseline(
             f"Sanity warnings on {sanity['n_episodes_with_warnings']} episode(s) "
             f"(see metrics/sanity.json)"
         )
-    if sanity is not None and sanity["n_episodes_with_errors"]:
+    if sanity is not None and sanity["n_episodes_with_errors"] and not preserve_candidate_failures:
         failing = [
             entry["seed"] for entry in sanity["episodes"] if entry["errors"]
         ]
@@ -160,6 +174,8 @@ def run_baseline(
             f"(seeds {failing}); run aborted before export — see "
             f"{metrics_dir / 'sanity.json'}"
         )
+    if preserve_candidate_failures and export:
+        raise RuntimeError("candidate-pool failure preservation requires export=false")
 
     exports = export_datasets(episodes, datasets_root) if export else {}
     plots = {
@@ -303,6 +319,8 @@ def _write_run_config(
     n_fixed: int,
     n_randomized: int,
     base_seed: int,
+    episode_plan: list[EpisodePlanItem],
+    preserve_candidate_failures: bool,
 ) -> None:
     import dataclasses
 
@@ -318,6 +336,14 @@ def _write_run_config(
                 "n_fixed": n_fixed,
                 "n_randomized": n_randomized,
                 "base_seed": base_seed,
+                "explicit_episode_plan": [
+                    {
+                        "seed": item.seed,
+                        "randomized": item.variation is not None,
+                    }
+                    for item in episode_plan
+                ],
+                "preserve_candidate_failures": preserve_candidate_failures,
             },
             indent=2,
         )

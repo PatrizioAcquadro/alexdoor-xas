@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -66,6 +67,103 @@ def export_datasets(
             a1_episodes, root / task / A1_JOINT_DELTA / version, robot_asset
         )
     return exported
+
+
+def export_paired_ee_datasets_atomic(
+    episodes: list[EpisodeBuffer],
+    datasets_root: str | Path,
+    *,
+    version: str,
+    manifest: dict,
+) -> dict[str, Path]:
+    """Atomically publish only paired A2/A3 masters from one selected episode set.
+
+    Both payloads are fully written and validated in a task-local staging tree
+    before either official version directory is created. A publication marker
+    is written last; consumers must require it, so a process interruption can
+    never make a partial pair official.
+    """
+    if not episodes:
+        raise ValueError("cannot export an empty paired master")
+    robot_asset = dataset_robot_asset_payload(episodes)
+    task = episodes[0].meta.task
+    root = Path(datasets_root)
+    task_root = root / task
+    staging = task_root / f".{version}.{os.getpid()}.tmp"
+    if staging.exists():
+        raise FileExistsError(f"paired export staging path already exists: {staging}")
+    final_a2 = task_root / A2_EE_DELTA / version
+    final_a3 = task_root / A3_OBJ_REL_EE_DELTA / version
+    marker = task_root / "publications" / f"{version}.json"
+    master_manifest = task_root / f"{version}_manifest.json"
+    for path in (final_a2, final_a3, marker, master_manifest):
+        if path.exists():
+            raise FileExistsError(f"refusing to overwrite official paired export: {path}")
+
+    staged_a2 = staging / A2_EE_DELTA / version
+    staged_a3 = staging / A3_OBJ_REL_EE_DELTA / version
+    _export_hdf5(episodes, staged_a2, robot_asset)
+    relabeled = [_relabel_to_door_frame(episode) for episode in episodes]
+    _export_hdf5(relabeled, staged_a3, robot_asset)
+    for directory in (staged_a2, staged_a3):
+        (directory / "manifest.json").write_text(
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+        )
+    a2_ids = [episode.meta.episode_id for episode in episodes]
+    a3_ids = [episode.meta.episode_id for episode in relabeled]
+    if a2_ids != a3_ids or len(a2_ids) != len(set(a2_ids)):
+        raise ValueError("paired A2/A3 export episode identities are inconsistent")
+    if not any(
+        not np.allclose(first.steps[index].action, second.steps[index].action, atol=1e-12)
+        for first, second in zip(episodes, relabeled, strict=True)
+        for index in range(first.n_steps)
+    ):
+        raise ValueError("paired A2/A3 exports are numerically identical")
+
+    moved: list[tuple[Path, Path]] = []
+    try:
+        final_a2.parent.mkdir(parents=True, exist_ok=True)
+        final_a3.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(staged_a2, final_a2)
+        moved.append((final_a2, staged_a2))
+        os.replace(staged_a3, final_a3)
+        moved.append((final_a3, staged_a3))
+        _atomic_json(master_manifest, manifest)
+        _atomic_json(
+            marker,
+            {
+                "schema": "alexdoor_xas.paired_dataset_publication.v1",
+                "task": task,
+                "version": version,
+                "action_spaces": [A2_EE_DELTA, A3_OBJ_REL_EE_DELTA],
+                "episode_ids": a2_ids,
+                "source_fingerprint_sha256": manifest["source_fingerprint_sha256"],
+                "status": "PAIRED_PAYLOADS_ONLY",
+            },
+        )
+    except Exception:
+        for final, staged in reversed(moved):
+            if final.exists() and not staged.exists():
+                staged.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(final, staged)
+        raise
+    for directory in sorted(
+        staging.rglob("*"), key=lambda path: len(path.parts), reverse=True
+    ):
+        if directory.is_dir():
+            directory.rmdir()
+    staging.rmdir()
+    return {A2_EE_DELTA: final_a2, A3_OBJ_REL_EE_DELTA: final_a3}
+
+
+def _atomic_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _export_hdf5(
@@ -207,4 +305,4 @@ def _git_commit() -> str:
         return "unknown"
 
 
-__all__ = ["export_datasets"]
+__all__ = ["export_datasets", "export_paired_ee_datasets_atomic"]

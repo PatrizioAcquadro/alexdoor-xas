@@ -2,6 +2,7 @@ dataset:
   task: door_push_alex_v2
   space: A2_ee_delta
   version: v2_pose
+  view_id: null                   # optional split/stat view over one physical version
   obs_preset: core
 
 model:

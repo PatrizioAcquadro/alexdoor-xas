@@ -77,6 +77,7 @@ def dataset_provenance(
     task = dataset.get("task")
     space = dataset.get("space")
     version = dataset.get("version")
+    view_id = dataset.get("view_id")
     if task and space and version:
         manifest_path = datasets_root / task / space / version / "manifest.json"
         if manifest_path.is_file():
@@ -87,7 +88,8 @@ def dataset_provenance(
             out["manifest_path"] = str(manifest_path)
         else:
             notes.append(f"dataset version has no manifest.json ({manifest_path})")
-        splits_path = datasets_root / task / "splits" / f"{version}.json"
+        split_identity = view_id or version
+        splits_path = datasets_root / task / "splits" / f"{split_identity}.json"
         if splits_path.is_file():
             splits = load_split_payload(splits_path)
             out["splits_path"] = str(splits_path)
@@ -95,6 +97,10 @@ def dataset_provenance(
             out["split_fingerprint_sha256"] = splits.get(
                 "split_fingerprint_sha256"
             ) or split_fingerprint({name: list(ids) for name, ids in split_ids.items()})
+            out["view_id"] = view_id
+            out["view_fingerprint_sha256"] = splits.get(
+                "view_fingerprint_sha256"
+            )
             out["split_summary"] = {
                 "n_episodes": splits.get("n_episodes"),
                 "fractions": splits.get("fractions"),
@@ -124,6 +130,7 @@ def verify_checkpoint_dataset_binding(
     datasets_root: Path,
     *,
     checkpoint_split_episode_ids: dict[str, list[str] | tuple[str, ...]] | None = None,
+    checkpoint_provenance: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Bind an eval to the exact dataset the checkpoint was trained on.
 
@@ -199,9 +206,14 @@ def verify_checkpoint_dataset_binding(
     all_split_ids = [episode_id for ids in live_splits.values() for episode_id in ids]
     if len(all_split_ids) != len(set(all_split_ids)):
         raise EvalProvenanceError("live split contract has overlapping memberships")
-    if set(all_split_ids) != set(dataset.episode_ids):
+    view_id = dataset_cfg.get("view_id")
+    if view_id is None and set(all_split_ids) != set(dataset.episode_ids):
         raise EvalProvenanceError(
             "live split contract is not exhaustive over the exact dataset episodes"
+        )
+    if view_id is not None and not set(all_split_ids).issubset(dataset.episode_ids):
+        raise EvalProvenanceError(
+            "live dataset view references episodes absent from the master dataset"
         )
     computed_split_fp = split_fingerprint(live_splits)
     if provenance.get("split_fingerprint_sha256") != computed_split_fp:
@@ -231,6 +243,22 @@ def verify_checkpoint_dataset_binding(
             raise EvalProvenanceError(
                 f"checkpoint {name} split does not match the live split contract"
             )
+    if view_id is not None:
+        if checkpoint_stats.view_id != view_id:
+            raise EvalProvenanceError("checkpoint norm stats view ID mismatch")
+        live_view_fp = provenance.get("view_fingerprint_sha256")
+        if checkpoint_stats.view_fingerprint != live_view_fp:
+            raise EvalProvenanceError("checkpoint norm stats view fingerprint mismatch")
+        training = checkpoint_provenance or {}
+        if training.get("view_id") != view_id:
+            raise EvalProvenanceError("checkpoint carries no matching view provenance")
+        if training.get("view_fingerprint_sha256") != live_view_fp:
+            raise EvalProvenanceError("checkpoint view provenance is stale")
+        norm_path = dataset_dir / "views" / view_id / "norm_stats.json"
+        if not norm_path.is_file():
+            raise EvalProvenanceError(f"view normalization artifact is missing: {norm_path}")
+        if training.get("normalization_sha256") != file_sha256(norm_path):
+            raise EvalProvenanceError("checkpoint normalization file hash mismatch")
 
     # The train log is corroborating evidence only. A missing log cannot
     # weaken the checkpoint-owned split binding; if present, disagreement is
@@ -262,6 +290,11 @@ def verify_checkpoint_dataset_binding(
         "val_split_match": True,
         "val_split_checked": True,
         "n_live_episodes": len(dataset),
+        "view_id": view_id,
+        "view_fingerprint_sha256": provenance.get("view_fingerprint_sha256"),
+        "normalization_sha256": (checkpoint_provenance or {}).get(
+            "normalization_sha256"
+        ),
     }
 
 

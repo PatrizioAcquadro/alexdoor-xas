@@ -10,6 +10,9 @@ is duck-typed: anything with ``task`` / ``space`` / ``version`` /
 
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,9 +28,13 @@ from alexdoor_xas.dataset import (
     compute_norm_stats,
     load_norm_stats,
     load_splits,
+    load_view_payload,
     norm_stats_path,
+    split_fingerprint,
     splits_path,
     validate_norm_stats,
+    view_norm_stats_path,
+    view_path,
 )
 from alexdoor_xas.dataset.robot_asset import (
     load_dataset_robot_asset,
@@ -59,6 +66,11 @@ class PolicyData:
     stats_source: str  # "official" (norm_stats.json) | "computed" (non-default preset)
     robot_asset: RobotAssetRef | None
     robot_asset_manifest: dict[str, Any] | None
+    view_id: str | None = None
+    view_fingerprint: str = ""
+    split_fingerprint: str = ""
+    stats_path: Path | None = None
+    stats_sha256: str = ""
 
     @property
     def obs_dim(self) -> int:
@@ -93,19 +105,65 @@ def load_policy_data(cfg, datasets_root: str | Path = paths.DATASETS_DIR) -> Pol
     except AlexV2ContractError as error:
         raise PolicyDataError(f"invalid robot asset provenance: {error}") from error
 
-    split_file = splits_path(datasets_root, cfg.task, cfg.version)
+    selected_view = getattr(cfg, "view_id", None)
+    view_fingerprint_value = ""
+    if selected_view is None:
+        split_file = splits_path(datasets_root, cfg.task, cfg.version)
+    else:
+        split_file = view_path(datasets_root, cfg.task, selected_view)
     if not split_file.is_file():
         raise PolicyDataError(
             f"splits file missing: {split_file} "
             "(run scripts/verify_dataset_interface.py --write-artifacts)"
         )
     try:
-        splits = load_splits(split_file, episode_ids=dataset.episode_ids)
-    except ValueError as error:
+        if selected_view is None:
+            splits = load_splits(split_file, episode_ids=dataset.episode_ids)
+        else:
+            view_payload = load_view_payload(split_file)
+            publication_path = (
+                Path(datasets_root)
+                / cfg.task
+                / "publications"
+                / f"{cfg.version}.json"
+            )
+            if not publication_path.is_file():
+                raise ValueError("view-selected master has no publication marker")
+            publication = json.loads(publication_path.read_text())
+            if publication.get("status") != "COMPLETE":
+                raise ValueError("view-selected master publication is incomplete")
+            if view_payload.get("view_id") != selected_view:
+                raise ValueError("dataset view ID does not match its path")
+            if view_payload.get("master_version") != cfg.version:
+                raise ValueError("dataset view master version does not match dataset.version")
+            splits = {
+                name: list(view_payload["splits"][name])
+                for name in ("train", "val", "test")
+            }
+            selected_ids = [episode_id for ids in splits.values() for episode_id in ids]
+            if len(selected_ids) != len(set(selected_ids)):
+                raise ValueError("dataset view has overlapping split memberships")
+            if not set(selected_ids).issubset(dataset.episode_ids):
+                raise ValueError("dataset view references episodes absent from the master")
+            manifest_path = dataset_dir / "manifest.json"
+            if not manifest_path.is_file():
+                raise ValueError("view-selected master dataset has no manifest.json")
+            manifest = json.loads(manifest_path.read_text())
+            if (
+                view_payload.get("master_dataset_fingerprint_sha256")
+                != manifest.get("source_fingerprint_sha256")
+            ):
+                raise ValueError("dataset view master source fingerprint is stale")
+            view_fingerprint_value = str(view_payload["view_fingerprint_sha256"])
+    except (OSError, KeyError, TypeError, ValueError) as error:
         raise PolicyDataError(f"stale or invalid splits file {split_file}: {error}") from error
     train_ids = list(splits["train"])
 
-    stats_file = norm_stats_path(dataset_dir)
+    stats_file = (
+        norm_stats_path(dataset_dir)
+        if selected_view is None
+        else view_norm_stats_path(dataset_dir, selected_view)
+    )
     if not stats_file.is_file():
         raise PolicyDataError(
             f"norm stats missing: {stats_file} "
@@ -113,7 +171,12 @@ def load_policy_data(cfg, datasets_root: str | Path = paths.DATASETS_DIR) -> Pol
         )
     official = load_norm_stats(stats_file)
     official_errors = validate_norm_stats(
-        official, dataset, train_ids, obs_preset=official.obs_preset
+        official,
+        dataset,
+        train_ids,
+        obs_preset=official.obs_preset,
+        view_id=selected_view,
+        view_fingerprint=view_fingerprint_value,
     )
     if official_errors:
         raise PolicyDataError(
@@ -122,6 +185,12 @@ def load_policy_data(cfg, datasets_root: str | Path = paths.DATASETS_DIR) -> Pol
         )
     if official.obs_preset == cfg.obs_preset:
         stats, stats_source = official, "official"
+    elif selected_view is not None:
+        raise PolicyDataError(
+            f"view normalization {stats_file} uses {official.obs_preset!r}, not "
+            f"requested preset {cfg.obs_preset!r}; view runs must use their committed "
+            "train-only normalization artifact"
+        )
     else:
         # Same train split, same code path as the official file — only the obs
         # preset differs, so the recomputed stats are equally deterministic.
@@ -137,7 +206,57 @@ def load_policy_data(cfg, datasets_root: str | Path = paths.DATASETS_DIR) -> Pol
         stats_source=stats_source,
         robot_asset=robot_asset,
         robot_asset_manifest=robot_asset_manifest,
+        view_id=selected_view,
+        view_fingerprint=view_fingerprint_value,
+        split_fingerprint=split_fingerprint(splits),
+        stats_path=stats_file,
+        stats_sha256=_sha256_file(stats_file),
     )
+
+
+def checkpoint_provenance(
+    data: PolicyData,
+    resolved_config: dict[str, Any],
+    *,
+    source_git_commit: str,
+) -> dict[str, Any]:
+    """Build the fail-closed training provenance embedded in scale checkpoints."""
+    if data.view_id is None:
+        return {}
+    if re.fullmatch(r"[0-9a-f]{40}", source_git_commit) is None:
+        raise PolicyDataError("source Git commit must be a full 40-character SHA-1")
+    split_ids = {
+        "train": list(data.train_ids),
+        "val": list(data.val_ids),
+        "test": list(data.test_ids),
+    }
+    canonical_config = json.dumps(
+        resolved_config, sort_keys=True, separators=(",", ":")
+    ).encode()
+    return {
+        "schema": "alexdoor_xas.training_provenance.v1",
+        "master_dataset_fingerprint_sha256": data.stats.dataset_fingerprint,
+        "view_id": data.view_id,
+        "view_fingerprint_sha256": data.view_fingerprint,
+        "split_fingerprint_sha256": data.split_fingerprint,
+        "split_episode_ids": split_ids,
+        "split_counts": {name: len(ids) for name, ids in split_ids.items()},
+        "normalization_path": str(data.stats_path),
+        "normalization_sha256": data.stats_sha256,
+        "normalization_fingerprint_sha256": data.stats.normalization_fingerprint,
+        "action_space": data.dataset.action_space,
+        "obs_preset": data.stats.obs_preset,
+        "source_git_commit": source_git_commit,
+        "resolved_training_config_sha256": hashlib.sha256(canonical_config).hexdigest(),
+    }
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def normalize_batch(batch: dict[str, Any], stats: DatasetNormStats) -> dict[str, Any]:
@@ -200,6 +319,7 @@ __all__ = [
     "BatchNormalizer",
     "PolicyData",
     "PolicyDataError",
+    "checkpoint_provenance",
     "load_policy_data",
     "make_eval_factory",
     "make_train_factory",

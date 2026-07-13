@@ -47,6 +47,7 @@ class DiffusionDatasetCfg:
     task: str = "door_push_alex_v2"
     space: str = A2_EE_DELTA
     version: str = "v2_pose"
+    view_id: str | None = None
     obs_preset: str = "core"
 
     @property
@@ -220,7 +221,9 @@ def _compose_config(overrides: list[str]) -> dict[str, Any]:
 
 
 def _build_dataset_cfg(node: dict[str, Any]) -> DiffusionDatasetCfg:
-    _reject_unknown("dataset", node, {"task", "space", "version", "obs_preset"})
+    _reject_unknown(
+        "dataset", node, {"task", "space", "version", "view_id", "obs_preset"}
+    )
 
     space = str(node.get("space", A2_EE_DELTA))
     if space not in VALID_SPACES:
@@ -236,7 +239,14 @@ def _build_dataset_cfg(node: dict[str, Any]) -> DiffusionDatasetCfg:
 
     task = _required_str("dataset.task", node.get("task", "door_push_alex_v2"))
     version = _required_str("dataset.version", node.get("version", "v2_pose"))
-    return DiffusionDatasetCfg(task=task, space=space, version=version, obs_preset=obs_preset)
+    view_id = _optional_str("dataset.view_id", node.get("view_id"))
+    return DiffusionDatasetCfg(
+        task=task,
+        space=space,
+        version=version,
+        view_id=view_id,
+        obs_preset=obs_preset,
+    )
 
 
 def _build_model_cfg(node: dict[str, Any]) -> DiffusionModelCfg:

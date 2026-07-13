@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -93,12 +94,19 @@ class DatasetNormStats:
     action_space: str = ""
     dataset_fingerprint: str = ""
     split_name: str = "train"
+    view_id: str | None = None
+    view_fingerprint: str = ""
+    normalization_fingerprint: str = ""
+    normalization_sha256: str = ""
 
 
 def compute_norm_stats(
     dataset: EpisodeDataset,
     train_episode_ids: list[str],
     obs_preset: str = DEFAULT_OBS_PRESET,
+    *,
+    view_id: str | None = None,
+    view_fingerprint: str = "",
 ) -> DatasetNormStats:
     """Compute action + observation stats over the train-split episodes."""
     records = [dataset.by_id(episode_id) for episode_id in train_episode_ids]
@@ -112,6 +120,8 @@ def compute_norm_stats(
         dataset_episode_ids=tuple(dataset.episode_ids),
         action_space=dataset.action_space,
         dataset_fingerprint=dataset_fingerprint(dataset, obs_preset),
+        view_id=view_id,
+        view_fingerprint=view_fingerprint,
     )
 
 
@@ -119,25 +129,30 @@ def norm_stats_path(dataset_dir: str | Path) -> Path:
     return Path(dataset_dir) / NORM_STATS_FILENAME
 
 
+def view_norm_stats_path(dataset_dir: str | Path, view_id: str) -> Path:
+    """Canonical per-action-space normalization artifact for one dataset view."""
+    if not isinstance(view_id, str) or not view_id or "/" in view_id or ".." in view_id:
+        raise ValueError("view_id must be a safe single path component")
+    return Path(dataset_dir) / "views" / view_id / NORM_STATS_FILENAME
+
+
 def save_norm_stats(path: str | Path, stats: DatasetNormStats) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "action": stats.action.to_dict(),
-        "obs": stats.obs.to_dict(),
-        "obs_preset": stats.obs_preset,
-        "train_episode_ids": list(stats.train_episode_ids),
-        "dataset_episode_ids": list(stats.dataset_episode_ids),
-        "action_space": stats.action_space,
-        "dataset_fingerprint": stats.dataset_fingerprint,
-        "split_name": stats.split_name,
-    }
-    path.write_text(json.dumps(payload, indent=2) + "\n")
+    payload = _stats_payload(stats)
+    payload["normalization_fingerprint_sha256"] = normalization_fingerprint(payload)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
     return path
 
 
 def load_norm_stats(path: str | Path) -> DatasetNormStats:
-    payload = json.loads(Path(path).read_text())
+    source = Path(path)
+    payload = json.loads(source.read_text())
     return DatasetNormStats(
         action=NormStats.from_dict(payload["action"]),
         obs=NormStats.from_dict(payload["obs"]),
@@ -147,7 +162,26 @@ def load_norm_stats(path: str | Path) -> DatasetNormStats:
         action_space=str(payload.get("action_space", "")),
         dataset_fingerprint=str(payload.get("dataset_fingerprint", "")),
         split_name=str(payload.get("split_name", "train")),
+        view_id=str(payload["view_id"]) if payload.get("view_id") is not None else None,
+        view_fingerprint=str(payload.get("view_fingerprint_sha256", "")),
+        normalization_fingerprint=str(
+            payload.get("normalization_fingerprint_sha256", "")
+        ),
+        normalization_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
     )
+
+
+def normalization_fingerprint(stats_or_payload: DatasetNormStats | dict[str, Any]) -> str:
+    """Canonical hash of normalization content, excluding its embedded digest."""
+    payload = (
+        _stats_payload(stats_or_payload)
+        if isinstance(stats_or_payload, DatasetNormStats)
+        else dict(stats_or_payload)
+    )
+    payload.pop("normalization_fingerprint_sha256", None)
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def dataset_fingerprint(dataset: EpisodeDataset, obs_preset: str = DEFAULT_OBS_PRESET) -> str:
@@ -195,6 +229,8 @@ def validate_norm_stats(
     train_episode_ids: list[str],
     obs_preset: str = DEFAULT_OBS_PRESET,
     split_name: str = "train",
+    view_id: str | None = None,
+    view_fingerprint: str = "",
 ) -> list[str]:
     """Return compatibility errors for loaded normalization stats."""
     errors: list[str] = []
@@ -215,6 +251,17 @@ def validate_norm_stats(
         errors.append("norm stats train_episode_ids do not match the requested train split")
     if stats.split_name != split_name:
         errors.append(f"norm stats split_name {stats.split_name!r} != {split_name!r}")
+    if stats.view_id != view_id:
+        errors.append(f"norm stats view_id {stats.view_id!r} != {view_id!r}")
+    if view_id is not None:
+        if not view_fingerprint:
+            errors.append("requested dataset view has no view fingerprint")
+        if stats.view_fingerprint != view_fingerprint:
+            errors.append("norm stats view fingerprint does not match the requested view")
+        if not stats.normalization_fingerprint:
+            errors.append("view norm stats carry no normalization fingerprint")
+        elif stats.normalization_fingerprint != normalization_fingerprint(stats):
+            errors.append("view norm stats normalization fingerprint is stale")
     if stats.obs_preset != obs_preset:
         errors.append(f"norm stats obs_preset {stats.obs_preset!r} != {obs_preset!r}")
     expected_fingerprint = dataset_fingerprint(dataset, obs_preset)
@@ -243,6 +290,21 @@ def validate_norm_stats(
     return errors
 
 
+def _stats_payload(stats: DatasetNormStats) -> dict[str, Any]:
+    return {
+        "action": stats.action.to_dict(),
+        "obs": stats.obs.to_dict(),
+        "obs_preset": stats.obs_preset,
+        "train_episode_ids": list(stats.train_episode_ids),
+        "dataset_episode_ids": list(stats.dataset_episode_ids),
+        "action_space": stats.action_space,
+        "dataset_fingerprint": stats.dataset_fingerprint,
+        "split_name": stats.split_name,
+        "view_id": stats.view_id,
+        "view_fingerprint_sha256": stats.view_fingerprint,
+    }
+
+
 __all__ = [
     "DATASET_FINGERPRINT_CONTRACT",
     "NORM_STATS_FILENAME",
@@ -252,7 +314,9 @@ __all__ = [
     "compute_norm_stats",
     "dataset_fingerprint",
     "load_norm_stats",
+    "normalization_fingerprint",
     "norm_stats_path",
     "save_norm_stats",
     "validate_norm_stats",
+    "view_norm_stats_path",
 ]
