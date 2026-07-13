@@ -266,6 +266,45 @@ def test_view_normalization_is_train_only_and_hash_bound(tmp_path) -> None:
     )
 
 
+def test_view_normalization_recomputes_values_even_after_hash_refresh(tmp_path) -> None:
+    dataset = _tiny_view_dataset(tmp_path)
+    train_ids = dataset.episode_ids[:2]
+    path = save_norm_stats(
+        tmp_path / "norm_stats.json",
+        compute_norm_stats(
+            dataset,
+            train_ids,
+            "core_door_pose",
+            view_id="view_n2",
+            view_fingerprint="f" * 64,
+        ),
+    )
+    payload = json.loads(path.read_text())
+    payload["action"]["mean"][0] += 123.0
+    payload["normalization_fingerprint_sha256"] = hashlib.sha256(
+        json.dumps(
+            {
+                key: value
+                for key, value in payload.items()
+                if key != "normalization_fingerprint_sha256"
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+    failures = validate_norm_stats(
+        load_norm_stats(path),
+        dataset,
+        train_ids,
+        "core_door_pose",
+        view_id="view_n2",
+        view_fingerprint="f" * 64,
+    )
+    assert any("recomputed action mean" in failure for failure in failures)
+
+
 def test_view_checkpoint_requires_and_round_trips_full_training_provenance(tmp_path) -> None:
     dataset = _tiny_view_dataset(tmp_path)
     train_ids = tuple(dataset.episode_ids[:2])
@@ -300,6 +339,8 @@ def test_view_checkpoint_requires_and_round_trips_full_training_provenance(tmp_p
         ),
         stats_path=stats_path,
         stats_sha256=hashlib.sha256(stats_path.read_bytes()).hexdigest(),
+        master_dataset_fingerprint="f" * 64,
+        action_dataset_fingerprint=stats.dataset_fingerprint,
     )
     config = {
         "dataset": {
@@ -312,6 +353,12 @@ def test_view_checkpoint_requires_and_round_trips_full_training_provenance(tmp_p
         "train": {"seed": 0},
     }
     provenance = checkpoint_provenance(data, config, source_git_commit="1" * 40)
+    assert provenance["master_dataset_fingerprint_sha256"] == "f" * 64
+    assert provenance["action_dataset_fingerprint_sha256"] == stats.dataset_fingerprint
+    assert (
+        provenance["master_dataset_fingerprint_sha256"]
+        != provenance["action_dataset_fingerprint_sha256"]
+    )
     model = ACTModel(
         obs_dim=stats.obs.dim,
         action_dim=stats.action.dim,
@@ -356,4 +403,13 @@ def test_view_checkpoint_requires_and_round_trips_full_training_provenance(tmp_p
             stats,
             split_episode_ids=split_ids,
             provenance={**provenance, "normalization_sha256": "0" * 64},
+        )
+    with pytest.raises(ValueError, match="action_dataset_fingerprint_sha256"):
+        save_checkpoint(
+            tmp_path / "tampered-action-fingerprint.pt",
+            model,
+            config,
+            stats,
+            split_episode_ids=split_ids,
+            provenance={**provenance, "action_dataset_fingerprint_sha256": "0" * 64},
         )

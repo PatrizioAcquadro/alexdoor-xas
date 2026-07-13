@@ -71,6 +71,8 @@ class PolicyData:
     split_fingerprint: str = ""
     stats_path: Path | None = None
     stats_sha256: str = ""
+    master_dataset_fingerprint: str = ""
+    action_dataset_fingerprint: str = ""
 
     @property
     def obs_dim(self) -> int:
@@ -107,6 +109,7 @@ def load_policy_data(cfg, datasets_root: str | Path = paths.DATASETS_DIR) -> Pol
 
     selected_view = getattr(cfg, "view_id", None)
     view_fingerprint_value = ""
+    master_dataset_fingerprint = ""
     if selected_view is None:
         split_file = splits_path(datasets_root, cfg.task, cfg.version)
     else:
@@ -154,6 +157,7 @@ def load_policy_data(cfg, datasets_root: str | Path = paths.DATASETS_DIR) -> Pol
                 != manifest.get("source_fingerprint_sha256")
             ):
                 raise ValueError("dataset view master source fingerprint is stale")
+            master_dataset_fingerprint = str(manifest["source_fingerprint_sha256"])
             view_fingerprint_value = str(view_payload["view_fingerprint_sha256"])
     except (OSError, KeyError, TypeError, ValueError) as error:
         raise PolicyDataError(f"stale or invalid splits file {split_file}: {error}") from error
@@ -211,6 +215,8 @@ def load_policy_data(cfg, datasets_root: str | Path = paths.DATASETS_DIR) -> Pol
         split_fingerprint=split_fingerprint(splits),
         stats_path=stats_file,
         stats_sha256=_sha256_file(stats_file),
+        master_dataset_fingerprint=master_dataset_fingerprint,
+        action_dataset_fingerprint=stats.dataset_fingerprint if selected_view is not None else "",
     )
 
 
@@ -219,6 +225,7 @@ def checkpoint_provenance(
     resolved_config: dict[str, Any],
     *,
     source_git_commit: str,
+    policy: str | None = None,
 ) -> dict[str, Any]:
     """Build the fail-closed training provenance embedded in scale checkpoints."""
     if data.view_id is None:
@@ -230,12 +237,38 @@ def checkpoint_provenance(
         "val": list(data.val_ids),
         "test": list(data.test_ids),
     }
-    canonical_config = json.dumps(
-        resolved_config, sort_keys=True, separators=(",", ":")
-    ).encode()
+    from alexdoor_xas.cluster_sweep.config import canonical_resolved_config_sha256
+
+    if not data.master_dataset_fingerprint or not data.action_dataset_fingerprint:
+        raise PolicyDataError("view-selected training requires dual dataset fingerprints")
+    if data.action_dataset_fingerprint != data.stats.dataset_fingerprint:
+        raise PolicyDataError("action dataset fingerprint does not match normalization dataset")
+    if data.view_id.startswith("v3_scale_n"):
+        from alexdoor_xas.cluster_sweep.config import (
+            load_sweep_config,
+            validate_resolved_sweep_cell_config,
+        )
+
+        sweep = load_sweep_config(paths.REPO_ROOT / "configs/cluster_sweep.v1.json")
+        run_id = ((resolved_config.get("run") or {}).get("run_id"))
+        matches = [
+            cell
+            for cell in sweep.cells
+            if cell.run_id == run_id
+            and cell.policy == policy
+            and cell.space == data.dataset.action_space
+            and cell.view_id == data.view_id
+        ]
+        if len(matches) != 1:
+            raise PolicyDataError("resolved config does not identify one configured sweep cell")
+        try:
+            validate_resolved_sweep_cell_config(sweep, matches[0], resolved_config)
+        except ValueError as error:
+            raise PolicyDataError(str(error)) from error
     return {
-        "schema": "alexdoor_xas.training_provenance.v1",
-        "master_dataset_fingerprint_sha256": data.stats.dataset_fingerprint,
+        "schema": "alexdoor_xas.training_provenance.v2",
+        "master_dataset_fingerprint_sha256": data.master_dataset_fingerprint,
+        "action_dataset_fingerprint_sha256": data.action_dataset_fingerprint,
         "view_id": data.view_id,
         "view_fingerprint_sha256": data.view_fingerprint,
         "split_fingerprint_sha256": data.split_fingerprint,
@@ -247,7 +280,7 @@ def checkpoint_provenance(
         "action_space": data.dataset.action_space,
         "obs_preset": data.stats.obs_preset,
         "source_git_commit": source_git_commit,
-        "resolved_training_config_sha256": hashlib.sha256(canonical_config).hexdigest(),
+        "resolved_training_config_sha256": canonical_resolved_config_sha256(resolved_config),
     }
 
 

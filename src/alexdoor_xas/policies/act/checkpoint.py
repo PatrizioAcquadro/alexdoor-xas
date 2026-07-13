@@ -8,8 +8,6 @@ payload so ``torch.load(weights_only=True)`` stays safe).
 
 from __future__ import annotations
 
-import hashlib
-import json
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -167,14 +165,16 @@ def _validate_training_provenance(
     view_id = dataset.get("view_id") if isinstance(dataset, dict) else None
     if view_id is None:
         return
-    if (
-        not isinstance(provenance, dict)
-        or provenance.get("schema") != "alexdoor_xas.training_provenance.v1"
-    ):
+    if not isinstance(provenance, dict) or provenance.get("schema") not in {
+        "alexdoor_xas.training_provenance.v1",
+        "alexdoor_xas.training_provenance.v2",
+    }:
         raise ValueError("view checkpoint requires training provenance")
+    schema = provenance["schema"]
+    if str(view_id).startswith("v3_scale_n") and schema != "alexdoor_xas.training_provenance.v2":
+        raise ValueError("scale view checkpoint requires dual-fingerprint provenance v2")
     expected_splits = _split_payload(split_episode_ids) or {}
     required = {
-        "master_dataset_fingerprint_sha256": stats.dataset_fingerprint,
         "view_id": view_id,
         "view_fingerprint_sha256": stats.view_fingerprint,
         "split_episode_ids": expected_splits,
@@ -190,14 +190,12 @@ def _validate_training_provenance(
     for key, value in required.items():
         if provenance.get(key) != value:
             raise ValueError(f"checkpoint training provenance mismatch: {key}")
-    split_digest = hashlib.sha256(
-        json.dumps(expected_splits, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    from alexdoor_xas.cluster_sweep.config import canonical_resolved_config_sha256
+
+    split_digest = canonical_resolved_config_sha256(expected_splits)
     if provenance.get("split_fingerprint_sha256") != split_digest:
         raise ValueError("checkpoint training provenance mismatch: split fingerprint")
-    config_digest = hashlib.sha256(
-        json.dumps(config, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    config_digest = canonical_resolved_config_sha256(config)
     if provenance.get("resolved_training_config_sha256") != config_digest:
         raise ValueError("checkpoint training provenance mismatch: resolved config")
     for key, pattern in (
@@ -208,6 +206,22 @@ def _validate_training_provenance(
             raise ValueError(f"checkpoint training provenance has invalid {key}")
     if provenance.get("normalization_sha256") != stats.normalization_sha256:
         raise ValueError("checkpoint training provenance mismatch: normalization_sha256")
+    if schema == "alexdoor_xas.training_provenance.v2":
+        master = str(provenance.get("master_dataset_fingerprint_sha256", ""))
+        if re.fullmatch(r"[0-9a-f]{64}", master) is None:
+            raise ValueError(
+                "checkpoint training provenance mismatch: "
+                "master_dataset_fingerprint_sha256"
+            )
+        if provenance.get("action_dataset_fingerprint_sha256") != stats.dataset_fingerprint:
+            raise ValueError(
+                "checkpoint training provenance mismatch: "
+                "action_dataset_fingerprint_sha256"
+            )
+    elif provenance.get("master_dataset_fingerprint_sha256") != stats.dataset_fingerprint:
+        raise ValueError(
+            "checkpoint training provenance mismatch: master_dataset_fingerprint_sha256"
+        )
 
 
 def _stats_payload(stats: DatasetNormStats) -> dict[str, Any]:

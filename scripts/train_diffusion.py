@@ -118,7 +118,7 @@ def main() -> int:
     config_dict = dataclasses.asdict(cfg)
     source_git_commit = _git_commit()
     provenance = checkpoint_provenance(
-        data, config_dict, source_git_commit=source_git_commit
+        data, config_dict, source_git_commit=source_git_commit, policy="diffusion"
     )
     run_dir.mkdir(parents=True, exist_ok=True)
     _write_json_atomic(run_dir / "resolved_config.json", _jsonable(config_dict))

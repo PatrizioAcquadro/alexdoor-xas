@@ -41,7 +41,15 @@ class NormStats:
         """Aggregate a list of ``(N_i, D)`` arrays into one stats record."""
         if not arrays:
             raise ValueError("cannot compute stats from an empty list")
-        stacked = np.concatenate([np.asarray(a, dtype=np.float64) for a in arrays])
+        normalized = [np.asarray(array, dtype=np.float64) for array in arrays]
+        if any(array.ndim != 2 or array.shape[0] == 0 for array in normalized):
+            raise ValueError("normalization inputs must all be non-empty (N, D) arrays")
+        dimensions = {array.shape[1] for array in normalized}
+        if len(dimensions) != 1:
+            raise ValueError("normalization inputs have inconsistent feature dimensions")
+        if not all(np.isfinite(array).all() for array in normalized):
+            raise ValueError("normalization inputs must be finite")
+        stacked = np.concatenate(normalized)
         if stacked.ndim != 2 or stacked.shape[0] == 0:
             raise ValueError(f"expected non-empty (N, D) rows, got shape {stacked.shape}")
         return cls(
@@ -287,6 +295,30 @@ def validate_norm_stats(
             errors.append(f"norm stats {name} std is below STD_FLOOR")
         if block.count <= 0:
             errors.append(f"norm stats {name} count must be positive")
+    try:
+        recomputed = compute_norm_stats(
+            dataset,
+            train_episode_ids,
+            obs_preset,
+            view_id=view_id,
+            view_fingerprint=view_fingerprint,
+        )
+    except (IndexError, KeyError, TypeError, ValueError) as error:
+        errors.append(f"normalization numerical recomputation failed: {error}")
+    else:
+        for name in ("action", "obs"):
+            stored_block = getattr(stats, name)
+            expected_block = getattr(recomputed, name)
+            if stored_block.count != expected_block.count:
+                errors.append(
+                    f"norm stats recomputed {name} count mismatch: "
+                    f"stored={stored_block.count}, expected={expected_block.count}"
+                )
+            for field in ("mean", "std", "min", "max"):
+                stored_value = getattr(stored_block, field)
+                expected_value = getattr(expected_block, field)
+                if not np.array_equal(stored_value, expected_value):
+                    errors.append(f"norm stats recomputed {name} {field} mismatch")
     return errors
 
 

@@ -259,6 +259,14 @@ def verify_checkpoint_dataset_binding(
             raise EvalProvenanceError(f"view normalization artifact is missing: {norm_path}")
         if training.get("normalization_sha256") != file_sha256(norm_path):
             raise EvalProvenanceError("checkpoint normalization file hash mismatch")
+        if str(view_id).startswith("v3_scale_n"):
+            source_fingerprint = provenance.get("source_fingerprint_sha256")
+            if not source_fingerprint:
+                raise EvalProvenanceError("live scale dataset has no source-master fingerprint")
+            if training.get("master_dataset_fingerprint_sha256") != source_fingerprint:
+                raise EvalProvenanceError("checkpoint source-master fingerprint mismatch")
+            if training.get("action_dataset_fingerprint_sha256") != live_fp:
+                raise EvalProvenanceError("checkpoint action-export fingerprint mismatch")
 
     # The train log is corroborating evidence only. A missing log cannot
     # weaken the checkpoint-owned split binding; if present, disagreement is
@@ -283,6 +291,12 @@ def verify_checkpoint_dataset_binding(
     return {
         "checkpoint_dataset_fingerprint_sha256": checkpoint_fp,
         "live_dataset_fingerprint_sha256": live_fp,
+        "master_dataset_fingerprint_sha256": (checkpoint_provenance or {}).get(
+            "master_dataset_fingerprint_sha256"
+        ),
+        "action_dataset_fingerprint_sha256": (checkpoint_provenance or {}).get(
+            "action_dataset_fingerprint_sha256"
+        ),
         "dataset_fingerprint_match": True,
         "checkpoint_split_fingerprint_sha256": checkpoint_split_fp,
         "split_fingerprint_match": checkpoint_split_fp == computed_split_fp,
