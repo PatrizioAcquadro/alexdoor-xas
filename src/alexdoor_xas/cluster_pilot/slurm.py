@@ -103,6 +103,7 @@ def render_slurm_script(
             '[[ -d "$SCRATCH_ROOT" ]] || { echo "missing scratch root: $SCRATCH_ROOT" >&2; exit 21; }',
             '[[ -d "$REPO_ROOT/.git" ]] || { echo "missing source checkout: $REPO_ROOT" >&2; exit 22; }',
             '[[ -x "$CONDA_PREFIX/bin/python" ]] || { echo "missing pilot Conda env: $CONDA_PREFIX" >&2; exit 23; }',
+            'export PATH="$CONDA_PREFIX/bin:$PATH"',
             '[[ -f "$MANIFEST" ]] || { echo "missing pilot transfer manifest: $MANIFEST" >&2; exit 24; }',
             'mkdir -p "$SCRATCH_RUNS_ROOT" "$DURABLE_RESULTS_ROOT"',
             'cd "$REPO_ROOT"',

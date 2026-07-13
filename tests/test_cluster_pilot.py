@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import copy
 import json
+import os
+import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from alexdoor_xas.cluster_pilot import preflight as cluster_preflight
 from alexdoor_xas.cluster_pilot.config import PilotConfigError, load_pilot_config
 from alexdoor_xas.cluster_pilot.preflight import (
     ClusterPreflightError,
@@ -38,6 +41,12 @@ from alexdoor_xas.policies.diffusion import load_diffusion_config
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = REPO_ROOT / "configs" / "cluster_pilot_n50.v1.json"
 ATTEMPT_ID = "424242"
+
+
+def _write_executable(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+    path.chmod(0o755)
 
 
 @pytest.fixture(scope="module")
@@ -354,6 +363,11 @@ def test_slurm_renderer_freezes_two_cells_and_durable_fail_closed_flow(
     assert "find \"$CELL_RUNTIME/wandb\" -type f" in rendered
     assert "set -Eeuo pipefail" in rendered
     assert "#SBATCH --qos" not in rendered
+    assert 'export PATH="$CONDA_PREFIX/bin:$PATH"' in rendered
+    python_validation = rendered.index('[[ -x "$CONDA_PREFIX/bin/python" ]]')
+    path_prepend = rendered.index('export PATH="$CONDA_PREFIX/bin:$PATH"')
+    manifest_check = rendered.index('[[ -f "$MANIFEST" ]]')
+    assert python_validation < path_prepend < manifest_check
     assert "bin/activate" not in rendered
     assert "conda activate" not in rendered.lower()
     prefix_python = '"$CONDA_PREFIX/bin/python"'
@@ -365,6 +379,128 @@ def test_slurm_renderer_freezes_two_cells_and_durable_fail_closed_flow(
     assert "ENTRYPOINT=scripts/train_act.py" in rendered
     assert "ENTRYPOINT=scripts/train_diffusion.py" in rendered
     assert f'{prefix_python} "$ENTRYPOINT"' in rendered
+
+
+def test_rendered_slurm_polluted_path_smoke_preserves_durable_failure(
+    tmp_path, config
+) -> None:
+    depot_root = tmp_path / "depot"
+    scratch_root = tmp_path / "scratch"
+    durable_root = depot_root / "durable-results"
+    repo_root = depot_root / config.storage.source_checkout_relative
+    conda_prefix = depot_root / config.storage.conda_prefix_relative
+    polluted_bin = tmp_path / "pyenv-shims"
+    source_commit = "1" * 40
+    attempt_id = "11279999"
+
+    (repo_root / ".git").mkdir(parents=True)
+    manifest_path = repo_root / "outputs/cluster_pilot_n50/pilot_transfer_manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text("{}\n")
+    scratch_root.mkdir()
+
+    path_log = tmp_path / "observed-path.txt"
+    ruff_log = tmp_path / "resolved-ruff.txt"
+    polluted_ruff_marker = tmp_path / "polluted-ruff-ran.txt"
+    _write_executable(
+        conda_prefix / "bin/python",
+        """#!/bin/sh
+printf '%s\\n' "$PATH" >> "$SMOKE_PATH_LOG"
+case "$1" in
+  scripts/build_cluster_pilot_manifest.py)
+    exit 0
+    ;;
+  scripts/preflight_cluster_pilot.py)
+    command -v ruff >> "$SMOKE_RUFF_LOG"
+    ruff --version
+    exit 41
+    ;;
+  *)
+    exit 99
+    ;;
+esac
+""",
+    )
+    _write_executable(
+        conda_prefix / "bin/ruff",
+        "#!/bin/sh\necho 'ruff active-prefix 0.15.3'\n",
+    )
+    _write_executable(
+        polluted_bin / "ruff",
+        "#!/bin/sh\necho ran > \"$SMOKE_POLLUTED_RUFF_MARKER\"\nexit 97\n",
+    )
+    _write_executable(
+        polluted_bin / "git",
+        f"""#!/bin/sh
+case "$1:$2" in
+  rev-parse:HEAD)
+    echo {source_commit}
+    exit 0
+    ;;
+  status:--porcelain)
+    exit 0
+    ;;
+  *)
+    exit 98
+    ;;
+esac
+""",
+    )
+
+    rendered = render_slurm_script(
+        config,
+        source_commit=source_commit,
+        depot_root=depot_root,
+        scratch_root=scratch_root,
+        durable_results_root=durable_root,
+        account="example-account",
+        partition="example-partition",
+        qos=None,
+    )
+    script = tmp_path / "pilot.slurm"
+    _write_executable(script, rendered)
+    environment = {
+        **os.environ,
+        "PATH": f"{polluted_bin}:/usr/bin:/bin",
+        "SLURM_ARRAY_JOB_ID": attempt_id,
+        "SLURM_ARRAY_TASK_ID": "0",
+        "SLURM_JOB_ID": f"{attempt_id}_0",
+        "SMOKE_PATH_LOG": str(path_log),
+        "SMOKE_RUFF_LOG": str(ruff_log),
+        "SMOKE_POLLUTED_RUFF_MARKER": str(polluted_ruff_marker),
+    }
+    result = subprocess.run(
+        ["/bin/bash", str(script)],
+        cwd=repo_root,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 41, result.stderr
+    expected_path_prefix = f"{conda_prefix}/bin:"
+    assert path_log.read_text().splitlines()
+    assert all(line.startswith(expected_path_prefix) for line in path_log.read_text().splitlines())
+    assert ruff_log.read_text().strip() == str(conda_prefix / "bin/ruff")
+    assert not polluted_ruff_marker.exists()
+
+    failure_path = (
+        durable_root
+        / "attempts"
+        / attempt_id
+        / "0"
+        / config.cells[0].run_id
+        / "status/failure.json"
+    )
+    failure = json.loads(failure_path.read_text())
+    assert failure["status"] == "FAILED"
+    assert failure["exit_code"] == 41
+    assert failure["attempt"] == {
+        "slurm_array_job_id": attempt_id,
+        "slurm_array_task_id": "0",
+        "run_id": config.cells[0].run_id,
+    }
 
 
 def test_slurm_qos_and_a100_are_only_enabled_explicitly(config) -> None:
@@ -463,6 +599,56 @@ class _NoCuda:
 def test_live_cuda_probe_cannot_false_pass_without_cuda() -> None:
     with pytest.raises(ClusterPreflightError, match="CUDA"):
         probe_cuda_device(_NoCuda, expected_device_count=1, require_a100_80gb=False)
+
+
+def test_dependency_inventory_uses_ruff_adjacent_to_active_python(
+    tmp_path, monkeypatch
+) -> None:
+    active_bin = tmp_path / "active-env/bin"
+    polluted_bin = tmp_path / "pyenv-shims"
+    polluted_marker = tmp_path / "polluted-ruff-ran.txt"
+    active_python = active_bin / "python"
+    active_python.parent.mkdir(parents=True)
+    active_python.touch()
+    _write_executable(active_bin / "ruff", "#!/bin/sh\necho 'ruff active-env 0.15.3'\n")
+    _write_executable(
+        polluted_bin / "ruff",
+        f"#!/bin/sh\necho ran > {polluted_marker}\nexit 97\n",
+    )
+    monkeypatch.setattr(sys, "executable", str(active_python))
+    monkeypatch.setattr(cluster_preflight, "REQUIRED_IMPORTS", {})
+    monkeypatch.setenv("PATH", str(polluted_bin))
+
+    inventory = cluster_preflight.dependency_inventory()
+
+    assert inventory["ruff"] == "ruff active-env 0.15.3"
+    assert not polluted_marker.exists()
+
+
+@pytest.mark.parametrize("mode", ["missing", "non_executable", "error"])
+def test_dependency_inventory_fails_closed_for_invalid_adjacent_ruff(
+    tmp_path, monkeypatch, mode
+) -> None:
+    active_bin = tmp_path / "active-env/bin"
+    polluted_bin = tmp_path / "pyenv-shims"
+    active_python = active_bin / "python"
+    active_python.parent.mkdir(parents=True)
+    active_python.touch()
+    _write_executable(polluted_bin / "ruff", "#!/bin/sh\necho 'ruff inherited-path'\n")
+    adjacent_ruff = active_bin / "ruff"
+    if mode == "non_executable":
+        adjacent_ruff.write_text("#!/bin/sh\necho should-not-run\n")
+    elif mode == "error":
+        _write_executable(
+            adjacent_ruff,
+            "#!/bin/sh\necho 'adjacent ruff failed' >&2\nexit 7\n",
+        )
+    monkeypatch.setattr(sys, "executable", str(active_python))
+    monkeypatch.setattr(cluster_preflight, "REQUIRED_IMPORTS", {})
+    monkeypatch.setenv("PATH", str(polluted_bin))
+
+    with pytest.raises(ClusterPreflightError, match="ruff"):
+        cluster_preflight.dependency_inventory()
 
 
 def test_pure_preflight_runs_without_cuda_probe(
