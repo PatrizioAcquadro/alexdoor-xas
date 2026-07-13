@@ -1099,6 +1099,47 @@ def test_sustained_velocity_warnings_cannot_pass(valid_run) -> None:
     assert safety["warning_families"]["a2.joint_velocity_limit"]["status"] != "PASS"
 
 
+def test_velocity_warning_count_above_per_joint_envelope_requires_review(valid_run) -> None:
+    tmp_path, payloads = valid_run
+    row = payloads["D0"]["rollouts"][0]
+    _set_warning_records(row, [_velocity_warning(count=5)])
+    summary = _summarize(tmp_path, payloads)
+    family = summary["runs"]["run_a"]["safety_readiness"]["warning_families"]
+    assert family["a2.joint_velocity_limit"]["status"] == "REVIEW_REQUIRED"
+
+
+def test_velocity_warning_total_above_rollout_envelope_requires_review(valid_run) -> None:
+    tmp_path, payloads = valid_run
+    joint_specs = (
+        (13, "LEFT_KNEE_Y", 9.3),
+        (14, "RIGHT_KNEE_Y", 9.3),
+        (17, "LEFT_ANKLE_Y", 9.72),
+        (21, "LEFT_ANKLE_X", 9.72),
+    )
+    records = []
+    for count in range(1, 4):
+        for joint_index, joint_name, limit in joint_specs:
+            warning = _velocity_warning(tick=count - 1, count=count)
+            warning["evidence"].update(
+                joint_index=joint_index,
+                joint_name=joint_name,
+                measured_velocity_rad_s=limit + 0.5,
+                configured_limit_rad_s=limit,
+            )
+            records.append(warning)
+    row = payloads["D0"]["rollouts"][0]
+    _set_warning_records(row, records)
+
+    summary = _summarize(tmp_path, payloads)
+
+    family = summary["runs"]["run_a"]["safety_readiness"]["warning_families"]
+    assert family["a2.joint_velocity_limit"]["status"] == "REVIEW_REQUIRED"
+    assert any(
+        "12 velocity events" in reason
+        for reason in family["a2.joint_velocity_limit"]["reasons"]
+    )
+
+
 def test_bounded_settle_velocity_transient_with_latched_contact_passes(valid_run) -> None:
     tmp_path, payloads = valid_run
     row = payloads["D0"]["rollouts"][0]
@@ -1111,6 +1152,28 @@ def test_bounded_settle_velocity_transient_with_latched_contact_passes(valid_run
     family = safety["warning_families"]["a2.joint_velocity_limit"]
     assert family["status"] == "PASS"
     assert family["count"] == 1
+
+
+def test_disallowed_secondary_velocity_violation_cannot_be_masked(valid_run) -> None:
+    tmp_path, payloads = valid_run
+    allowed_worst = _velocity_warning(exceedance=2.0)
+    disallowed_secondary = _velocity_warning(exceedance=0.5)
+    disallowed_secondary["evidence"].update(
+        joint_index=5,
+        joint_name="RIGHT_SHOULDER_Y",
+        measured_velocity_rad_s=5.5,
+        configured_limit_rad_s=5.0,
+    )
+    row = payloads["D0"]["rollouts"][0]
+    _set_warning_records(row, [allowed_worst, disallowed_secondary])
+
+    summary = _summarize(tmp_path, payloads)
+
+    safety = summary["runs"]["run_a"]["safety_readiness"]
+    assert safety["status"] == "REVIEW_REQUIRED"
+    family = safety["warning_families"]["a2.joint_velocity_limit"]
+    assert family["status"] == "REVIEW_REQUIRED"
+    assert any("RIGHT_SHOULDER_Y" in reason for reason in family["reasons"])
 
 
 @pytest.mark.parametrize("phase", ["pre_contact", "contact"])

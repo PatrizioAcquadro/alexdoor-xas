@@ -205,15 +205,16 @@ POLICY_CONSISTENT_FIELDS = {
 }
 
 # Machine-readable policy, deliberately embedded in every summary. The velocity
-# bounds narrowly envelope the 2026-07-12 local-smoke evidence: 640 lower-body
-# warning records at ticks 0--14, maximum exceedance 2.328 rad/s (23.95% of the
-# configured limit), at most two consecutive ticks, and at most seven events
-# per rollout. The transient was identical across all four policy/action-space
-# cells. Sensed contact can latch during this reset-settle window, so tick index
-# rather than phase defines the envelope. The bounds do not alter actuator or
-# safety limits; anything outside this measured envelope is review-required.
+# bounds narrowly envelope the 2026-07-12 per-joint local-smoke evidence: 876
+# lower-body warning records (219 in each policy/action-space cell) at ticks
+# 0--14, maximum exceedance 2.328 rad/s (23.95% of the configured limit), at
+# most two consecutive ticks, at most four events for one joint per rollout,
+# and at most 11 total joint-warning records per rollout. Sensed contact can
+# latch during this reset-settle window, so tick index rather than phase defines
+# the envelope. The bounds do not alter actuator or safety limits; anything
+# outside this measured envelope is review-required.
 WARNING_ADJUDICATION_POLICY: dict[str, Any] = {
-    "version": "alexdoor.warning-adjudication.v2",
+    "version": "alexdoor.warning-adjudication.v3",
     "default_unknown_status": "REVIEW_REQUIRED",
     "unsafe_family_ids": ["adapter.invalid_frame", "adapter.non_finite_state"],
     "review_family_ids": [
@@ -251,19 +252,31 @@ WARNING_ADJUDICATION_POLICY: dict[str, Any] = {
         "max_exceedance_fraction_of_limit": 0.25,
         "max_consecutive_ticks": 2,
         "max_duration_ticks": 2,
-        "max_count_per_rollout": 7,
+        "max_count_per_joint_per_rollout": 4,
+        "max_warning_records_per_rollout": 11,
         "evidence_basis": {
-            "artifact_warning_events": 640,
+            "emission_semantics": "one_record_per_over_limit_joint_per_tick",
+            "artifact_warning_events": 876,
+            "artifact_warning_events_per_cell": 219,
+            "artifact_rollouts": 144,
+            "observed_joint_event_counts": {
+                "LEFT_KNEE_Y": 304,
+                "RIGHT_KNEE_Y": 128,
+                "LEFT_ANKLE_Y": 144,
+                "LEFT_ANKLE_X": 216,
+                "RIGHT_ANKLE_X": 84,
+            },
+            "observed_phase_event_counts": {"pre_contact": 661, "contact": 215},
             "observed_tick_index_range": [0, 14],
-            "max_observed_exceedance_rad_s": 2.328,
-            "max_observed_exceedance_fraction_of_limit": 0.2395,
+            "max_observed_exceedance_rad_s": 2.328293800354004,
+            "max_observed_exceedance_fraction_of_limit": 0.23953639263280724,
             "max_observed_consecutive_ticks": 2,
             "max_observed_duration_ticks": 2,
-            "observed_events_per_rollout_range": [3, 7],
-            "max_observed_events_per_rollout": 7,
-            "observed_rollout_phase_counts": {"pre_contact": 473, "contact": 167},
+            "observed_warning_records_per_rollout_range": [2, 11],
+            "max_observed_count_per_joint_per_rollout": 4,
+            "max_observed_warning_records_per_rollout": 11,
             "matrix_cells": ["ACT/A2", "ACT/A3", "Diffusion/A2", "Diffusion/A3"],
-            "warning_events_per_matrix_cell": 160,
+            "warning_events_per_matrix_cell": 219,
             "policy_independent_across_matrix_cells": True,
             "settle_window_rationale": (
                 "The passive lower-body reset transient is defined by its early tick index; "
@@ -1106,17 +1119,18 @@ def _adjudicate_warning_records(rows: list[dict]) -> tuple[dict[str, dict], list
                     )
                 if (
                     isinstance(evidence["count"], int)
-                    and evidence["count"] > velocity_policy["max_count_per_rollout"]
+                    and evidence["count"]
+                    > velocity_policy["max_count_per_joint_per_rollout"]
                 ):
                     reasons.append(
-                        f"event count={evidence['count']} exceeds "
-                        f"{velocity_policy['max_count_per_rollout']}"
+                        f"per-joint event count={evidence['count']} exceeds "
+                        f"{velocity_policy['max_count_per_joint_per_rollout']}"
                     )
             for row_index, count in per_rollout_counts.items():
-                if count > velocity_policy["max_count_per_rollout"]:
+                if count > velocity_policy["max_warning_records_per_rollout"]:
                     reasons.append(
                         f"row {row_index} has {count} velocity events, exceeding "
-                        f"{velocity_policy['max_count_per_rollout']}"
+                        f"{velocity_policy['max_warning_records_per_rollout']}"
                     )
             if reasons:
                 status = "REVIEW_REQUIRED"

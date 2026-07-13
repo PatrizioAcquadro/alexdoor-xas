@@ -251,6 +251,82 @@ def test_a2_flags_joint_limit_excess_as_warning():
     }
 
 
+def test_a2_emits_one_warning_per_simultaneous_joint_limit_violation() -> None:
+    adapter = A2Adapter(PROXY_LIMITS)
+    joint_limits = {
+        "joint_pos_limits": np.array([[-2.5, 2.5], [-2.5, 2.5], [-2.5, 2.5]]),
+        "joint_vel_limits": np.array([10.0, 10.0, 10.0]),
+    }
+
+    _, decision = adapter.process(
+        np.zeros(6),
+        _ctx(
+            joint_state={
+                "joint_pos": np.zeros(3),
+                "joint_vel": np.array([15.0, -12.0, 0.0]),
+                "joint_pos_target": np.array([2.7, -2.8, 0.0]),
+            },
+            joint_limits=joint_limits,
+            joint_names=("J0", "J1", "J2"),
+            tick_index=4,
+            rollout_phase="pre_contact",
+        ),
+    )
+
+    position_records = [
+        warning
+        for warning in decision.warning_records
+        if warning.id == "a2.joint_position_limit"
+    ]
+    velocity_records = [
+        warning
+        for warning in decision.warning_records
+        if warning.id == "a2.joint_velocity_limit"
+    ]
+    assert [warning.evidence["joint_index"] for warning in position_records] == [0, 1]
+    assert [warning.evidence["joint_index"] for warning in velocity_records] == [0, 1]
+    assert [warning.evidence["exceedance_rad_s"] for warning in velocity_records] == [5.0, 2.0]
+
+
+def test_a2_tracks_secondary_velocity_violation_per_joint_across_ticks() -> None:
+    adapter = A2Adapter(PROXY_LIMITS)
+    joint_limits = {
+        "joint_pos_limits": np.array([[-2.5, 2.5], [-2.5, 2.5]]),
+        "joint_vel_limits": np.array([10.0, 10.0]),
+    }
+
+    decisions = []
+    for tick, velocities in enumerate(([15.0, 12.0], [0.0, 12.0])):
+        _, decision = adapter.process(
+            np.zeros(6),
+            _ctx(
+                joint_state={
+                    "joint_pos": np.zeros(2),
+                    "joint_vel": np.asarray(velocities),
+                    "joint_pos_target": np.zeros(2),
+                },
+                joint_limits=joint_limits,
+                joint_names=("WORST_ON_FIRST_TICK", "SECONDARY_ON_FIRST_TICK"),
+                tick_index=tick,
+                rollout_phase="pre_contact",
+            ),
+        )
+        decisions.append(decision)
+
+    secondary_records = [
+        next(
+            warning
+            for warning in decision.warning_records
+            if warning.id == "a2.joint_velocity_limit"
+            and warning.evidence["joint_name"] == "SECONDARY_ON_FIRST_TICK"
+        )
+        for decision in decisions
+    ]
+    assert [warning.evidence["consecutive_ticks"] for warning in secondary_records] == [1, 2]
+    assert [warning.evidence["duration_ticks"] for warning in secondary_records] == [1, 2]
+    assert [warning.evidence["count"] for warning in secondary_records] == [1, 2]
+
+
 def test_a2_chunk_is_cut_at_first_rejection():
     workspace = WorkspaceSphere(center_w=(0.0, 0.0, 0.0), min_reach_m=0.0, max_reach_m=0.05)
     limits = RobotLimitsCfg(robot="test", workspace=workspace, reach_margin_m=0.0)

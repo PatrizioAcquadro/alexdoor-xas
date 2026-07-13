@@ -248,12 +248,16 @@ class A2Adapter:
         names = ctx.joint_names or tuple(f"joint_{index}" for index in range(targets.size))
         if targets.ndim == 1 and pos_limits.shape == (targets.shape[0], 2):
             excess = np.maximum(pos_limits[:, 0] - targets, targets - pos_limits[:, 1])
-            worst = float(np.max(excess))
-            if worst > JOINT_LIMIT_IGNORE_RAD:
-                joint = int(np.argmax(excess))
+            for joint in np.flatnonzero(excess > JOINT_LIMIT_IGNORE_RAD):
+                joint = int(joint)
+                joint_excess = float(excess[joint])
                 message = (
-                    f"joint target {joint} exceeds its position limit by {worst:.4f} rad"
-                    + ("" if worst <= JOINT_LIMIT_WARN_RAD else " (beyond the known IK-drift band)")
+                    f"joint target {joint} exceeds its position limit by {joint_excess:.4f} rad"
+                    + (
+                        ""
+                        if joint_excess <= JOINT_LIMIT_WARN_RAD
+                        else " (beyond the known IK-drift band)"
+                    )
                 )
                 warnings.append(
                     AdapterWarning(
@@ -264,7 +268,7 @@ class A2Adapter:
                             "joint_name": names[joint],
                             "tick_index": ctx.tick_index,
                             "rollout_phase": ctx.rollout_phase,
-                            "exceedance_rad": worst,
+                            "exceedance_rad": joint_excess,
                             "configured_lower_limit_rad": float(pos_limits[joint, 0]),
                             "configured_upper_limit_rad": float(pos_limits[joint, 1]),
                             "target_rad": float(targets[joint]),
@@ -280,16 +284,16 @@ class A2Adapter:
                     self._velocity_consecutive_ticks[index] = (
                         self._velocity_consecutive_ticks.get(index, 0) + 1
                     )
+                    self._velocity_warning_counts[index] = (
+                        self._velocity_warning_counts.get(index, 0) + 1
+                    )
                 else:
                     self._velocity_consecutive_ticks[index] = 0
-            worst_vel = float(np.max(over))
-            if worst_vel > 0.0:
-                joint = int(np.argmax(over))
-                self._velocity_warning_counts[joint] = (
-                    self._velocity_warning_counts.get(joint, 0) + 1
-                )
+            for joint in np.flatnonzero(over > 0.0):
+                joint = int(joint)
+                joint_excess = float(over[joint])
                 message = (
-                    f"joint {joint} velocity exceeds its limit by {worst_vel:.3f} rad/s"
+                    f"joint {joint} velocity exceeds its limit by {joint_excess:.3f} rad/s"
                 )
                 warnings.append(
                     AdapterWarning(
@@ -302,7 +306,7 @@ class A2Adapter:
                             "rollout_phase": ctx.rollout_phase,
                             "measured_velocity_rad_s": float(abs(velocities[joint])),
                             "configured_limit_rad_s": float(vel_limits[joint]),
-                            "exceedance_rad_s": worst_vel,
+                            "exceedance_rad_s": joint_excess,
                             "consecutive_ticks": self._velocity_consecutive_ticks[joint],
                             "duration_ticks": self._velocity_consecutive_ticks[joint],
                             "count": self._velocity_warning_counts[joint],

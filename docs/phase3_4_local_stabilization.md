@@ -6,8 +6,9 @@
 
 **Status: COMPLETE; SAFETY READINESS PASS.** Phase 3.3 software and local
 protocol validation pass. The primary matrix was regenerated after the
-calibrated learned-policy contact-entry correction; schema, protocol, and safety
-readiness now all pass. All results are **pipeline
+calibrated learned-policy contact-entry correction and again after joint-limit
+telemetry was made exhaustive per joint; schema, protocol, and safety readiness
+now all pass. All results are **pipeline
 validation on a 50-episode smoke dataset — not performance evidence**. No ACT-vs-Diffusion or
 A2-vs-A3 claims are made or implied; `v2_pose` is the definitive local
 stabilization contract (schema + generation protocol) that cluster/VLA/WAM
@@ -55,8 +56,8 @@ sizes match with zero fraction deviation. Split fingerprint:
 The shared source fingerprint remains
 `8278dbcacd9af372451ccd9940541e3fbbc422b9e65d82793062596eef7ccdb0`,
 while exact action-space dataset fingerprints are deliberately distinct:
-A2 `ba658fed2b49311373685c20c6a40045f6955bcccf11e6e5490cfbb753192ff3`
-and A3 `00149827e4bd5e66446701ea92cddf7fdf3857a04a00ac55df3ea22ee5ebcfbb`.
+A2 `b703af983a4bef98b73219f28b81046e564400a3a0368aeb746433b8191c29e6`
+and A3 `01172f9a266c86d5bddd0b03e87f2835eb597e18abf5dc5b2ea6668dffb136f2`.
 
 `scripts/verify_a2_a3_distinct.py --task door_push_alex_v2 --version v2_pose`:
 **PASS** — D0 exports identical; yawed poses differ by 7.5e-4 (±0.05 rad) /
@@ -97,8 +98,8 @@ Training (`dataset.version=v2_pose`, `dataset.obs_preset=core_door_pose`
 `local_smoke_act_a3_n50_seed0`, `local_smoke_diffusion_a2_n50_seed0`,
 `local_smoke_diffusion_a3_n50_seed0` under
 `outputs/door_push_alex_v2/{act,diffusion}_door_push/`. ACT val L1 ≈
-0.038/0.035 (A2/A3); a repeated ACT-A3 run reproduced bit-identical metrics
-(seeded-training determinism).
+0.03083649/0.03229217 (A2/A3); a repeated ACT-A3 run reproduced bit-identical
+metrics (seeded-training determinism).
 
 Evaluation (matched protocol for all four checkpoints; success ≥45°, 600 max
 ticks, per-tick success-stop, adapter-v1; D0 = 5 fixed + 15 randomized @ seed
@@ -111,10 +112,10 @@ different or easier protocol.
 
 | run | success | corrected commands/rejected | warnings | peak force | readiness |
 |---|---|---|---|---|---|
-| ACT-A2 | 36/36 | 296/0 | 160 | 135.8 N | PASS |
-| ACT-A3 | 36/36 | 233/0 | 160 | 129.4 N | PASS |
-| DP-A2 (DDIM-10) | 36/36 | 195/0 | 160 | 145.5 N | PASS |
-| DP-A3 (DDIM-10) | 36/36 | 210/0 | 160 | 143.7 N | PASS |
+| ACT-A2 | 36/36 | 296/0 | 219 | 135.8 N | PASS |
+| ACT-A3 | 36/36 | 233/0 | 219 | 129.4 N | PASS |
+| DP-A2 (DDIM-10) | 36/36 | 195/0 | 219 | 145.5 N | PASS |
+| DP-A3 (DDIM-10) | 36/36 | 210/0 | 219 | 143.7 N | PASS |
 
 The final corrected matrix has no 200 N dataset-admission-bound exceedance in
 any cell. The two formerly blocking seed-112 Diffusion entries now peak at
@@ -123,20 +124,23 @@ any cell. The two formerly blocking seed-112 Diffusion entries now peak at
 to the calibrated 5 mm approach step. The bound remains unchanged. The pre-fix
 local artifact set contained peaks of 230.7 N, 201.9 N, and an older observed
 maximum of approximately 272.2 N; those artifacts are superseded, not hidden.
-All 640 warnings are warn-level lower-body joint-velocity flags from the
-welded-pelvis passive-body reset transient: 160 in each ACT/Diffusion × A2/A3
-cell, at ticks 0–14, with maximum exceedance 2.328 rad/s, maximum ratio 0.2395,
-and at most two consecutive control ticks. The structured adjudication envelope
-accepts only the existing five lower-body joints, tick index ≤20, exceedance
-≤2.5 rad/s and ≤0.25 of the configured limit, streak/duration ≤2 ticks, and
-≤7 records per rollout. Expected knee/ankle limits remain exactly 9.3/9.72
-rad/s and are compared with relative tolerance 1e-6 for float32 serialization.
-Phase remains recorded evidence but is not an acceptance criterion: 167 records
-are labeled `contact` because sensed contact can latch inside the settle window;
-any warning after tick 20 requires review regardless of phase. Warnings remain
-reported verbatim in every eval JSON, none suppressed. Across-seed fixed-reset
-output spread is reported separately (maximum 0.01014 rad); it is not
-determinism evidence.
+All 876 warnings are warn-level lower-body joint-velocity flags from the
+welded-pelvis passive-body reset transient: 219 in each ACT/Diffusion × A2/A3
+cell. The exhaustive one-record-per-over-limit-joint-per-tick totals are
+LEFT_KNEE_Y 304, RIGHT_KNEE_Y 128, LEFT_ANKLE_Y 144, LEFT_ANKLE_X 216, and
+RIGHT_ANKLE_X 84. They occur at ticks 0–14, with maximum exceedance
+2.328294 rad/s, maximum ratio 0.239537, and at most two consecutive control
+ticks. The structured v3 adjudication envelope accepts only those five joints,
+tick index ≤20, exceedance ≤2.5 rad/s and ≤0.25 of the configured limit,
+streak/duration ≤2 ticks, ≤4 events for one joint per rollout, and ≤11 total
+joint-warning records per rollout. Expected knee/ankle limits remain exactly
+9.3/9.72 rad/s and are compared with relative tolerance 1e-6 for float32
+serialization. Phase remains recorded evidence but is not an acceptance
+criterion: 215 records are labeled `contact` because sensed contact can latch
+inside the settle window; any warning after tick 20 requires review regardless
+of phase. Warnings remain reported verbatim in every eval JSON, none suppressed.
+Across-seed fixed-reset output spread is reported separately (maximum
+0.01014 rad); it is not determinism evidence.
 
 Genuine same-seed evidence is a fresh-process replay of the first fixed rollout
 for each policy/pose file with identical reset seed, policy sampling seed,
@@ -156,11 +160,12 @@ primary rollouts. Diagnostics remain separate from primary aggregates.
 
 ## 5. Validation battery (all PASS)
 
-Fresh post-review-fix validation: ruff, `git diff --check`, pytest (537),
+Fresh post-review-fix validation: ruff, `git diff --check`, pytest (632),
 `verify_dataset_interface` (`v2_pose`, 50 episodes, 46 groups, D0–D4 in
 validation and test), `verify_a2_a3_distinct`, `verify_act_training`,
 `verify_diffusion_training`, `verify_act_rollout`, `verify_diffusion_rollout`,
-and `verify_adapters`. The earlier stabilization battery also passed `check_env`,
+`verify_adapters`, and `verify_stabilization_doc`. The earlier stabilization
+battery also passed `check_env`,
 `verify_assets`,
 `verify_door_task_scene`, `verify_door_env`, `verify_scripted_baseline`,
 `verify_alex_v2_door_baseline` (re-certified after the runner changes),
