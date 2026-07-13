@@ -344,16 +344,7 @@ def _collect_contract(
     if not urdf.is_file():
         raise SweepTransferError(f"Alex V2 URDF is missing: {urdf}")
     asset = master.get("robot_asset") or {}
-    expected_asset_sha = asset.get("sha256")
-    if sha256_file(urdf) != expected_asset_sha:
-        raise SweepTransferError("live Alex V2 URDF hash differs from master provenance")
-    robot_asset = {
-        "id": asset.get("id"),
-        "sha256": expected_asset_sha,
-        "manifest_fingerprint": asset.get("manifest_fingerprint"),
-        "required_cluster_path": "/home/pacquadr/Desktop/Alex/urdf/alex_v2.urdf",
-        "transferred": False,
-    }
+    robot_asset = _robot_asset_contract(asset, urdf)
     dataset_contract = {
         "task": config.dataset.task,
         "master_version": config.dataset.master_version,
@@ -387,6 +378,32 @@ def _collect_contract(
     if len({path.resolve() for path, _ in inventory}) != len(inventory):
         raise SweepTransferError("transfer inventory contains duplicate files")
     return inventory, dataset_contract, robot_asset
+
+
+def _robot_asset_contract(asset: dict[str, Any], urdf: Path) -> dict[str, Any]:
+    """Bind both the runtime-variant fingerprint and the underlying URDF bytes."""
+    manifest = asset.get("manifest")
+    if not isinstance(manifest, dict):
+        raise SweepTransferError("scale master robot asset manifest is missing")
+    runtime_fingerprint = asset.get("sha256")
+    if (
+        not isinstance(runtime_fingerprint, str)
+        or manifest.get("fingerprint") != runtime_fingerprint
+        or asset.get("manifest_fingerprint") != runtime_fingerprint
+    ):
+        raise SweepTransferError("scale master runtime asset fingerprint is inconsistent")
+    urdf_sha256 = manifest.get("urdf_sha256")
+    if not isinstance(urdf_sha256, str) or len(urdf_sha256) != 64:
+        raise SweepTransferError("scale master URDF provenance is missing")
+    if sha256_file(urdf) != urdf_sha256:
+        raise SweepTransferError("live Alex V2 URDF hash differs from master provenance")
+    return {
+        "runtime_asset_id": asset.get("id"),
+        "runtime_asset_fingerprint_sha256": runtime_fingerprint,
+        "urdf_sha256": urdf_sha256,
+        "required_cluster_path": "/home/pacquadr/Desktop/Alex/urdf/alex_v2.urdf",
+        "transferred": False,
+    }
 
 
 def sweep_rsync_file_list(manifest: dict[str, Any]) -> list[str]:

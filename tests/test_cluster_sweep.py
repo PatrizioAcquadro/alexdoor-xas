@@ -258,6 +258,31 @@ def test_transfer_manifest_is_exact_hash_bound_and_clean_tree_gated(
         )
 
 
+def test_transfer_robot_asset_distinguishes_runtime_fingerprint_from_urdf_hash(
+    tmp_path,
+) -> None:
+    import alexdoor_xas.cluster_sweep.transfer as transfer
+
+    urdf = tmp_path / "alex_v2.urdf"
+    urdf.write_bytes(b"<robot name='alex_v2'/>\n")
+    urdf_sha = __import__("hashlib").sha256(urdf.read_bytes()).hexdigest()
+    runtime_sha = "b" * 64
+    asset = {
+        "id": f"runtime:{runtime_sha}",
+        "sha256": runtime_sha,
+        "manifest_fingerprint": runtime_sha,
+        "manifest": {"fingerprint": runtime_sha, "urdf_sha256": urdf_sha},
+    }
+    contract = transfer._robot_asset_contract(asset, urdf)
+    assert contract["runtime_asset_fingerprint_sha256"] == runtime_sha
+    assert contract["urdf_sha256"] == urdf_sha
+    assert contract["transferred"] is False
+
+    urdf.write_bytes(b"drift")
+    with pytest.raises(SweepTransferError, match="URDF hash"):
+        transfer._robot_asset_contract(asset, urdf)
+
+
 def _transfer_manifest(config) -> dict[str, object]:
     splits = {"train": ["train"], "val": ["val"], "test": ["test"]}
     views = {
