@@ -57,10 +57,10 @@ Generated ignored artifacts:
 - `outputs/cluster_pilot_n50/rsync-files.txt`;
 - `outputs/cluster_pilot_n50/rsync-command.txt`.
 
-The resumable outbound command template is:
+The resumable outbound command uses checksum comparison instead of append semantics:
 
 ```bash
-rsync -avP --partial --append-verify \
+rsync -avP --partial --checksum \
   --files-from=outputs/cluster_pilot_n50/rsync-files.txt \
   ./ <user>@<host>:<remote_root>/
 ```
@@ -180,10 +180,10 @@ The builder requires the selected attempt to contain exactly task `0` with the A
 or task identities, stale status schemas, and any source-commit mismatch. Other attempt
 directories are never selected implicitly.
 
-The resumable return template uses the remote file list directly:
+The resumable checksum-based return template uses the remote file list directly:
 
 ```bash
-rsync -avP --partial --append-verify \
+rsync -avP --partial --checksum \
   --files-from=:<remote_results_root>/.pilot_return/attempts/<SLURM_ARRAY_JOB_ID>/return-files.txt \
   <user>@<host>:<remote_results_root>/ <local_return_root>/
 ```

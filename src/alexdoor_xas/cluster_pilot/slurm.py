@@ -108,7 +108,6 @@ def render_slurm_script(
             'cd "$REPO_ROOT"',
             '[[ "$(git rev-parse HEAD)" == "$SOURCE_COMMIT" ]] || { echo "source commit mismatch" >&2; exit 25; }',
             '[[ -z "$(git status --porcelain --untracked-files=all)" ]] || { echo "source tree is dirty" >&2; exit 26; }',
-            'source "$CONDA_PREFIX/bin/activate"',
             "",
             "case \"$TASK_ID\" in",
             *_render_cells(config.cells),

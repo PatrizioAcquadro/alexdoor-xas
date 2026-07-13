@@ -292,7 +292,8 @@ def test_transfer_manifest_and_rsync_list_are_deterministic(
     ]
     command = pilot_rsync_template()
     assert "--partial" in command
-    assert "--append-verify" in command
+    assert "--checksum" in command
+    assert "--append-verify" not in command
     assert "--files-from=outputs/cluster_pilot_n50/rsync-files.txt" in command
     assert "<user>@<host>:<remote_root>/" in command
 
@@ -353,6 +354,17 @@ def test_slurm_renderer_freezes_two_cells_and_durable_fail_closed_flow(
     assert "find \"$CELL_RUNTIME/wandb\" -type f" in rendered
     assert "set -Eeuo pipefail" in rendered
     assert "#SBATCH --qos" not in rendered
+    assert "bin/activate" not in rendered
+    assert "conda activate" not in rendered.lower()
+    prefix_python = '"$CONDA_PREFIX/bin/python"'
+    assert (
+        f"{prefix_python} scripts/build_cluster_pilot_manifest.py verify \\\n"
+        in rendered
+    )
+    assert f"{prefix_python} scripts/preflight_cluster_pilot.py" in rendered
+    assert "ENTRYPOINT=scripts/train_act.py" in rendered
+    assert "ENTRYPOINT=scripts/train_diffusion.py" in rendered
+    assert f'{prefix_python} "$ENTRYPOINT"' in rendered
 
 
 def test_slurm_qos_and_a100_are_only_enabled_explicitly(config) -> None:
@@ -562,7 +574,8 @@ def test_return_manifest_covers_and_verifies_required_artifacts(
 
     command = return_rsync_template(ATTEMPT_ID)
     assert "--partial" in command
-    assert "--append-verify" in command
+    assert "--checksum" in command
+    assert "--append-verify" not in command
     assert (
         "--files-from=:<remote_results_root>/.pilot_return/attempts/"
         f"{ATTEMPT_ID}/return-files.txt" in command

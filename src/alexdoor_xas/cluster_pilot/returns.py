@@ -228,10 +228,10 @@ def return_file_list(manifest: dict[str, Any], attempt_id: str) -> list[str]:
 
 
 def return_rsync_template(attempt_id: str) -> str:
-    """Exact resumable remote-to-Ubuntu rsync template using the remote file list."""
+    """Exact checksum-based return rsync template using the remote file list."""
     selected_attempt = _validate_attempt_id(attempt_id)
     return (
-        "rsync -avP --partial --append-verify "
+        "rsync -avP --partial --checksum "
         "--files-from=:<remote_results_root>/.pilot_return/attempts/"
         f"{selected_attempt}/return-files.txt "
         "<user>@<host>:<remote_results_root>/ <local_return_root>/"

@@ -274,9 +274,9 @@ def pilot_rsync_file_list(manifest: dict[str, Any]) -> list[str]:
 
 
 def pilot_rsync_template() -> str:
-    """Exact resumable outbound rsync template; placeholders are intentionally literal."""
+    """Exact checksum-based outbound rsync template; placeholders remain literal."""
     return (
-        "rsync -avP --partial --append-verify "
+        "rsync -avP --partial --checksum "
         f"--files-from={DEFAULT_FILE_LIST_PATH.as_posix()} "
         "./ <user>@<host>:<remote_root>/"
     )
