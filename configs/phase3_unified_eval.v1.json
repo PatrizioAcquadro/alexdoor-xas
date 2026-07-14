@@ -1,0 +1,126 @@
+{
+  "schema": "alexdoor_xas.phase3_unified_eval_plan.v1",
+  "protocol_id": "phase3_unified_primary_v1",
+  "description": "Matched Ubuntu closed-loop evaluation of the 16 verified Gilbreth nested-scale checkpoints. Preflight is separate and never enters the primary matrix.",
+  "source_git_commit": "efa39434a123dab4d029f5f4ffdb122844892a6d",
+  "attempt_id": "11281591",
+  "transfer_manifest": "outputs/cluster_sweep/sweep_transfer_manifest.json",
+  "return_root": "outputs/cluster_sweep/returned/11281591",
+  "workspace_root": "outputs/phase3_unified_evaluation/workspace",
+  "curated_root": "outputs/curated/phase3_unified_evaluation",
+  "immutable_inventory": "outputs/phase3_unified_evaluation/workspace/provenance/returned_package.sha256",
+  "runtime": {
+    "isaaclab_launcher": "/home/pacquadr/IsaacLab/isaaclab.sh",
+    "visualization": "none",
+    "simulation_device": "cpu",
+    "policy_device": "cuda",
+    "observation_preset": "core_door_pose",
+    "wandb_mode": "disabled"
+  },
+  "rollout": {
+    "success_angle_deg": 45.0,
+    "max_ticks": 600,
+    "success_semantics": "per_tick_first_crossing_stop",
+    "adapter_version": "adapter-v1",
+    "contact_entry_shaping": true,
+    "force_admission_watch_bound_n": 200.0,
+    "warning_adjudication": "alexdoor.warning-adjudication.v3",
+    "poses": [
+      {
+        "pose_id": "D0",
+        "door_yaw_deg": 0.0,
+        "door_offset_x_m": 0.0,
+        "door_offset_y_m": 0.0,
+        "base_seed": 100,
+        "episodes_fixed": 5,
+        "episodes_randomized": 15
+      },
+      {
+        "pose_id": "D1",
+        "door_yaw_deg": 2.8648,
+        "door_offset_x_m": 0.02,
+        "door_offset_y_m": 0.0,
+        "base_seed": 200,
+        "episodes_fixed": 1,
+        "episodes_randomized": 3
+      },
+      {
+        "pose_id": "D2",
+        "door_yaw_deg": -2.8648,
+        "door_offset_x_m": 0.0,
+        "door_offset_y_m": -0.02,
+        "base_seed": 210,
+        "episodes_fixed": 1,
+        "episodes_randomized": 3
+      },
+      {
+        "pose_id": "D3",
+        "door_yaw_deg": 5.7296,
+        "door_offset_x_m": 0.02,
+        "door_offset_y_m": 0.02,
+        "base_seed": 220,
+        "episodes_fixed": 1,
+        "episodes_randomized": 3
+      },
+      {
+        "pose_id": "D4",
+        "door_yaw_deg": -5.7296,
+        "door_offset_x_m": 0.02,
+        "door_offset_y_m": -0.02,
+        "base_seed": 230,
+        "episodes_fixed": 1,
+        "episodes_randomized": 3
+      }
+    ]
+  },
+  "policies": {
+    "act": {
+      "checkpoint_horizon": 40,
+      "temporal_ensemble": false,
+      "ensemble_m": 0.01,
+      "execution_mode": "chunk_execution"
+    },
+    "diffusion": {
+      "sampler": "ddim",
+      "num_inference_steps": 10,
+      "checkpoint_horizon": 16,
+      "model_horizon": 16,
+      "n_action_steps": 8,
+      "execution_mode": "receding_horizon"
+    }
+  },
+  "preflight": {
+    "pose_id": "D0",
+    "episodes_fixed": 1,
+    "episodes_randomized": 0,
+    "cells": [
+      "sweep_act_a2_n50_seed0",
+      "sweep_diffusion_a3_n50_seed0"
+    ]
+  },
+  "statistics": {
+    "confidence_level": 0.95,
+    "bootstrap_seed": 3407,
+    "bootstrap_resamples": 10000,
+    "success_interval": "wilson",
+    "paired_key": ["door_pose_id", "seed", "fixed_or_randomized"]
+  },
+  "cells": [
+    {"index": 0, "run_id": "sweep_act_a2_n50_seed0", "policy": "act", "action_space": "A2_ee_delta", "dataset_size": 50, "view_id": "v3_scale_n50", "returned_checkpoint": "outputs/cluster_sweep/returned/11281591/attempts/11281591/0/sweep_act_a2_n50_seed0/checkpoints/best.pt", "workspace_checkpoint": "outputs/phase3_unified_evaluation/workspace/runs/sweep_act_a2_n50_seed0/checkpoints/best.pt", "checkpoint_sha256": "8fe31f8fca9048f67e40244b0696b0050347f358fa448b6023cbfa05b01437cf"},
+    {"index": 1, "run_id": "sweep_act_a3_n50_seed0", "policy": "act", "action_space": "A3_obj_rel_ee_delta", "dataset_size": 50, "view_id": "v3_scale_n50", "returned_checkpoint": "outputs/cluster_sweep/returned/11281591/attempts/11281591/1/sweep_act_a3_n50_seed0/checkpoints/best.pt", "workspace_checkpoint": "outputs/phase3_unified_evaluation/workspace/runs/sweep_act_a3_n50_seed0/checkpoints/best.pt", "checkpoint_sha256": "1b6fade66d107c28139f47adca93f6f07d47bf6d5917cc3c10bd7b2506f55de8"},
+    {"index": 2, "run_id": "sweep_diffusion_a2_n50_seed0", "policy": "diffusion", "action_space": "A2_ee_delta", "dataset_size": 50, "view_id": "v3_scale_n50", "returned_checkpoint": "outputs/cluster_sweep/returned/11281591/attempts/11281591/2/sweep_diffusion_a2_n50_seed0/checkpoints/best.pt", "workspace_checkpoint": "outputs/phase3_unified_evaluation/workspace/runs/sweep_diffusion_a2_n50_seed0/checkpoints/best.pt", "checkpoint_sha256": "9283c40620c3b452b5ffb91823516572b622fec9c73930c2a0c493da3f6ae4d6"},
+    {"index": 3, "run_id": "sweep_diffusion_a3_n50_seed0", "policy": "diffusion", "action_space": "A3_obj_rel_ee_delta", "dataset_size": 50, "view_id": "v3_scale_n50", "returned_checkpoint": "outputs/cluster_sweep/returned/11281591/attempts/11281591/3/sweep_diffusion_a3_n50_seed0/checkpoints/best.pt", "workspace_checkpoint": "outputs/phase3_unified_evaluation/workspace/runs/sweep_diffusion_a3_n50_seed0/checkpoints/best.pt", "checkpoint_sha256": "c5b3bf4f3257dc18209f46404eba25c20d702b4fa61b2efaec4d65387055579b"},
+    {"index": 4, "run_id": "sweep_act_a2_n100_seed0", "policy": "act", "action_space": "A2_ee_delta", "dataset_size": 100, "view_id": "v3_scale_n100", "returned_checkpoint": "outputs/cluster_sweep/returned/11281591/attempts/11281591/4/sweep_act_a2_n100_seed0/checkpoints/best.pt", "workspace_checkpoint": "outputs/phase3_unified_evaluation/workspace/runs/sweep_act_a2_n100_seed0/checkpoints/best.pt", "checkpoint_sha256": "bfc14ae93cf9244ff8bab4a8fa941a5b72d9df1ebb4998cda4257252937a1c4e"},
+    {"index": 5, "run_id": "sweep_act_a3_n100_seed0", "policy": "act", "action_space": "A3_obj_rel_ee_delta", "dataset_size": 100, "view_id": "v3_scale_n100", "returned_checkpoint": "outputs/cluster_sweep/returned/11281591/attempts/11281591/5/sweep_act_a3_n100_seed0/checkpoints/best.pt", "workspace_checkpoint": "outputs/phase3_unified_evaluation/workspace/runs/sweep_act_a3_n100_seed0/checkpoints/best.pt", "checkpoint_sha256": "0aa28c4cce700b3c3ea77b27ed272217335af8d23cc8ed549813209f0e7003ef"},
+    {"index": 6, "run_id": "sweep_diffusion_a2_n100_seed0", "policy": "diffusion", "action_space": "A2_ee_delta", "dataset_size": 100, "view_id": "v3_scale_n100", "returned_checkpoint": "outputs/cluster_sweep/returned/11281591/attempts/11281591/6/sweep_diffusion_a2_n100_seed0/checkpoints/best.pt", "workspace_checkpoint": "outputs/phase3_unified_evaluation/workspace/runs/sweep_diffusion_a2_n100_seed0/checkpoints/best.pt", "checkpoint_sha256": "96f707b76cfd5cd368c5f00d1c2e4760f423d68b2ee96b6662dd1c69edb361b4"},
+    {"index": 7, "run_id": "sweep_diffusion_a3_n100_seed0", "policy": "diffusion", "action_space": "A3_obj_rel_ee_delta", "dataset_size": 100, "view_id": "v3_scale_n100", "returned_checkpoint": "outputs/cluster_sweep/returned/11281591/attempts/11281591/7/sweep_diffusion_a3_n100_seed0/checkpoints/best.pt", "workspace_checkpoint": "outputs/phase3_unified_evaluation/workspace/runs/sweep_diffusion_a3_n100_seed0/checkpoints/best.pt", "checkpoint_sha256": "c5542e61006d2f7cb3c422c09702714e263a1a01499f73940a426da05ec32a0f"},
+    {"index": 8, "run_id": "sweep_act_a2_n250_seed0", "policy": "act", "action_space": "A2_ee_delta", "dataset_size": 250, "view_id": "v3_scale_n250", "returned_checkpoint": "outputs/cluster_sweep/returned/11281591/attempts/11281591/8/sweep_act_a2_n250_seed0/checkpoints/best.pt", "workspace_checkpoint": "outputs/phase3_unified_evaluation/workspace/runs/sweep_act_a2_n250_seed0/checkpoints/best.pt", "checkpoint_sha256": "fa79d6727393dbaabd7fdfa996f2398c3ec3a421aa7a7d2b60f64d7d358e1f41"},
+    {"index": 9, "run_id": "sweep_act_a3_n250_seed0", "policy": "act", "action_space": "A3_obj_rel_ee_delta", "dataset_size": 250, "view_id": "v3_scale_n250", "returned_checkpoint": "outputs/cluster_sweep/returned/11281591/attempts/11281591/9/sweep_act_a3_n250_seed0/checkpoints/best.pt", "workspace_checkpoint": "outputs/phase3_unified_evaluation/workspace/runs/sweep_act_a3_n250_seed0/checkpoints/best.pt", "checkpoint_sha256": "dfba1100856b651c74c884fb025be9f870756c2d431958316756c5a08a29d14a"},
+    {"index": 10, "run_id": "sweep_diffusion_a2_n250_seed0", "policy": "diffusion", "action_space": "A2_ee_delta", "dataset_size": 250, "view_id": "v3_scale_n250", "returned_checkpoint": "outputs/cluster_sweep/returned/11281591/attempts/11281591/10/sweep_diffusion_a2_n250_seed0/checkpoints/best.pt", "workspace_checkpoint": "outputs/phase3_unified_evaluation/workspace/runs/sweep_diffusion_a2_n250_seed0/checkpoints/best.pt", "checkpoint_sha256": "d87d1884f6bb13a123724046a86e503e3fbd9887b33f44c2acfd1de4f97a9baa"},
+    {"index": 11, "run_id": "sweep_diffusion_a3_n250_seed0", "policy": "diffusion", "action_space": "A3_obj_rel_ee_delta", "dataset_size": 250, "view_id": "v3_scale_n250", "returned_checkpoint": "outputs/cluster_sweep/returned/11281591/attempts/11281591/11/sweep_diffusion_a3_n250_seed0/checkpoints/best.pt", "workspace_checkpoint": "outputs/phase3_unified_evaluation/workspace/runs/sweep_diffusion_a3_n250_seed0/checkpoints/best.pt", "checkpoint_sha256": "0233f37f2ab142a531f99b3ce8ed26dc4dbddffd00e6f82f1720269cbd3b28a9"},
+    {"index": 12, "run_id": "sweep_act_a2_n500_seed0", "policy": "act", "action_space": "A2_ee_delta", "dataset_size": 500, "view_id": "v3_scale_n500", "returned_checkpoint": "outputs/cluster_sweep/returned/11281591/attempts/11281591/12/sweep_act_a2_n500_seed0/checkpoints/best.pt", "workspace_checkpoint": "outputs/phase3_unified_evaluation/workspace/runs/sweep_act_a2_n500_seed0/checkpoints/best.pt", "checkpoint_sha256": "843ec5c7a5919d25f4acd3d0752ccd451f6f6e27547577915515d1046ab1fda2"},
+    {"index": 13, "run_id": "sweep_act_a3_n500_seed0", "policy": "act", "action_space": "A3_obj_rel_ee_delta", "dataset_size": 500, "view_id": "v3_scale_n500", "returned_checkpoint": "outputs/cluster_sweep/returned/11281591/attempts/11281591/13/sweep_act_a3_n500_seed0/checkpoints/best.pt", "workspace_checkpoint": "outputs/phase3_unified_evaluation/workspace/runs/sweep_act_a3_n500_seed0/checkpoints/best.pt", "checkpoint_sha256": "6dcca8c1abe42b109b7e8ab69e6f58f23ef94b4f7dfdc439b83efbfe0142744f"},
+    {"index": 14, "run_id": "sweep_diffusion_a2_n500_seed0", "policy": "diffusion", "action_space": "A2_ee_delta", "dataset_size": 500, "view_id": "v3_scale_n500", "returned_checkpoint": "outputs/cluster_sweep/returned/11281591/attempts/11281591/14/sweep_diffusion_a2_n500_seed0/checkpoints/best.pt", "workspace_checkpoint": "outputs/phase3_unified_evaluation/workspace/runs/sweep_diffusion_a2_n500_seed0/checkpoints/best.pt", "checkpoint_sha256": "d4317accd4f07cd7b645180ee36c85ef3842708086cb338bb762aee9ec0c732f"},
+    {"index": 15, "run_id": "sweep_diffusion_a3_n500_seed0", "policy": "diffusion", "action_space": "A3_obj_rel_ee_delta", "dataset_size": 500, "view_id": "v3_scale_n500", "returned_checkpoint": "outputs/cluster_sweep/returned/11281591/attempts/11281591/15/sweep_diffusion_a3_n500_seed0/checkpoints/best.pt", "workspace_checkpoint": "outputs/phase3_unified_evaluation/workspace/runs/sweep_diffusion_a3_n500_seed0/checkpoints/best.pt", "checkpoint_sha256": "bee9a64b47f318a35978060c4fb341cf79261bf146683c9b47e88b17590d0f9a"}
+  ]
+}
