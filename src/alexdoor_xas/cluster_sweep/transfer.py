@@ -32,6 +32,13 @@ from alexdoor_xas.dataset import (
 from alexdoor_xas.policies.common.data import PolicyDataError, load_policy_data
 
 from .config import SweepConfig
+from .scale_provenance import (
+    DEFAULT_EXPERIMENT,
+    _load_plan,
+    _state_path,
+    _validate_candidate_provenance,
+    _validate_generation_state_binding,
+)
 
 TRANSFER_SCHEMA = "alexdoor_xas.cluster_sweep_transfer_manifest.v1"
 DEFAULT_OUTPUT_DIR = Path("outputs/cluster_sweep")
@@ -256,14 +263,6 @@ def _collect_contract(
         raise SweepTransferError("scale master pose-plan path is stale")
     if master.get("pose_plan_sha256") != sha256_file(pose_plan_path):
         raise SweepTransferError("scale master pose-plan hash is stale")
-    from scripts.build_scale_dataset import (
-        DEFAULT_EXPERIMENT,
-        _load_plan,
-        _state_path,
-        _validate_candidate_provenance,
-        _validate_generation_state_binding,
-    )
-
     plan = _load_plan(pose_plan_path, config)
     source_ids = list(master.get("selected_episode_ids") or ())
     if len(source_ids) != 550 or len(source_ids) != len(set(source_ids)):

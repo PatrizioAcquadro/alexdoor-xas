@@ -546,6 +546,7 @@ def _tracked(value: Any) -> tuple[str, ...]:
         "src/alexdoor_xas/cluster_sweep/config.py",
         "src/alexdoor_xas/cluster_sweep/preflight.py",
         "src/alexdoor_xas/cluster_sweep/returns.py",
+        "src/alexdoor_xas/cluster_sweep/scale_provenance.py",
         "src/alexdoor_xas/cluster_sweep/slurm.py",
         "src/alexdoor_xas/cluster_sweep/transfer.py",
     }

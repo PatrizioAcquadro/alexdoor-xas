@@ -9,6 +9,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -42,6 +43,53 @@ def _write_executable(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
     path.chmod(0o755)
+
+
+def test_direct_manifest_verification_does_not_require_repo_root_on_pythonpath() -> None:
+    worktree = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=all"],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    if worktree.stdout:
+        pytest.skip("exact committed-manifest verification requires a clean worktree")
+    command = [
+        "scripts/build_cluster_sweep_manifest.py",
+        "verify",
+        "--config",
+        "configs/cluster_sweep.v1.json",
+        "--manifest",
+        "outputs/cluster_sweep/sweep_transfer_manifest.json",
+    ]
+    isolated_entrypoint = """
+import os
+import runpy
+import sys
+from pathlib import Path
+
+repo_root = Path(sys.argv[1]).resolve()
+sys.path[:] = [
+    entry
+    for entry in sys.path
+    if Path(entry or ".").resolve() != repo_root
+]
+os.environ.pop("PYTHONPATH", None)
+sys.argv = sys.argv[2:]
+runpy.run_path(sys.argv[0], run_name="__main__")
+"""
+    env = dict(os.environ)
+    result = subprocess.run(
+        [sys.executable, "-c", isolated_entrypoint, str(REPO_ROOT), *command],
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "PASS: sweep transfer manifest verified" in result.stdout
 
 
 @pytest.fixture(scope="module")
@@ -185,6 +233,14 @@ def test_sweep_slurm_is_16_cell_single_gpu_non_isaac_and_prefix_python(config) -
     assert "train.overfit_episodes=null" in rendered
     assert "+wandb.mode=offline" in rendered
     assert '"$CONDA_PREFIX/bin/python"' in rendered
+    assert (
+        'env -u PYTHONPATH "$CONDA_PREFIX/bin/python" '
+        "scripts/build_cluster_sweep_manifest.py verify"
+    ) in rendered
+    assert (
+        'env -u PYTHONPATH "$CONDA_PREFIX/bin/python" '
+        'scripts/preflight_cluster_sweep.py "${PREFLIGHT_ARGS[@]}"'
+    ) in rendered
     assert "conda activate" not in rendered.lower()
     assert "bin/activate" not in rendered
     assert "isaaclab" not in rendered.lower()
@@ -265,9 +321,11 @@ set -eu
 printf '%s|%s\n' "$0" "$*" >> "$PREFIX_CALL_LOG"
 case "$1" in
   scripts/build_cluster_sweep_manifest.py)
+    [[ -z "${PYTHONPATH+x}" ]] || exit 96
     exit 0
     ;;
   scripts/preflight_cluster_sweep.py)
+    [[ -z "${PYTHONPATH+x}" ]] || exit 96
     report=""; environment_dir=""
     while [[ $# -gt 0 ]]; do
       case "$1" in
