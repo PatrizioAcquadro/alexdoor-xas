@@ -1,6 +1,6 @@
 # Project Status
 
-Documentation refreshed 2026-07-13. This page records durable development
+Documentation refreshed 2026-07-14. This page records durable development
 state; raw run detail remains under ignored `outputs/` artifacts and Git
 history.
 
@@ -36,8 +36,20 @@ history.
   Slurm tooling, and directly transferable exact-attempt return controls are
   implemented. The real `v3_scale_master` is locally published and verified at
   550 episodes (110 per D0-D4), with paired A2/A3 exports, four nested views,
-  and eight train-only norm files. Clean-tree manifest build and verification
-  remain local preparation evidence only.
+  and eight train-only norm files.
+- **Full Gilbreth nested sweep:** attempt `11281591` completed all 16 ACT and
+  Diffusion cells from source commit
+  `efa39434a123dab4d029f5f4ffdb122844892a6d`, with zero failed cells and 16
+  best checkpoints. The 736-file payload inventory, both return-control hashes,
+  complete provenance, and all 16 CPU checkpoint loads passed on Ubuntu. The
+  returned package is retained byte-for-byte with a separate 738-file local
+  hash/size inventory.
+- **Phase 3 unified evaluation:** all 16 returned checkpoints completed the
+  frozen D0-D4 primary protocol: 36 rollouts per cell and 576 total. Every pose
+  artifact passed schema and provenance validation, and the evidence audit
+  excluded zero cells. Evaluation used CPU simulation, CUDA policy inference,
+  adapter-v1, a 45-degree first-crossing success threshold, 600 ticks, ACT-40
+  without temporal ensembling, and Diffusion DDIM-10/Tp16/Ta8.
 
 ## Local stabilization evidence
 
@@ -67,28 +79,57 @@ bound.
 All 876 warnings are structured warn-level lower-body reset-transient records,
 219 in each matrix cell. The v3 adjudication envelope allows only the five
 known passive knee/ankle joints during the initial reset window, with
-≤4 events for one joint and ≤11 total records per rollout. Warnings remain present in the
-evaluation evidence; unknown or out-of-envelope records require review.
+≤4 events for one joint and ≤11 total records per rollout. Warnings remain
+present in the evaluation evidence; unknown or out-of-envelope records require
+review.
 
 These numbers validate the pipeline and safety-evidence contract at smoke
 scale. They are not ACT-versus-Diffusion, A2-versus-A3, generalization, or
 hardware-performance claims. `scripts/verify_stabilization_doc.py` checks the
 artifact-bound values above against the local evidence.
 
+## Phase 3 unified evaluation evidence
+
+The returned scale sweep and Ubuntu closed-loop matrix are complete and
+provenance-valid. Every cell achieved 36/36 successes; the per-cell 95% Wilson
+interval is `[90.4%, 100.0%]`. All 36 matched success outcomes tie for every
+A3-versus-A2 and Diffusion-versus-ACT comparison. The benchmark therefore does
+not select an action space, policy family, or N50/N100/N250/N500 dataset size
+on success rate.
+
+Secondary behavior is heterogeneous. Mean ticks to success do not improve
+monotonically with dataset size, and paired timing, force, and adapter-correction
+directions change across policy/action-space/size cells. This does not support
+a general A3-over-A2 or Diffusion-over-ACT claim. Exact continuous summaries,
+95% deterministic bootstrap intervals, and all matched comparisons are under
+`outputs/curated/phase3_unified_evaluation/aggregate_summary.json`.
+
+All 576 rollouts recorded force-sensor contact. Across 57,678 adapter decisions,
+54,183 were accepted, 3,495 corrected, and zero rejected. All 3,506 warning
+records are in the established `a2.joint_velocity_limit` family. One
+ACT-A3-N50 D0 randomized rollout (seed 112) exceeded the 200 N force watch
+bound for one tick and peaked at 219.95 N; that cell is `REVIEW_REQUIRED`.
+The remaining 15 cells pass the bounded simulation audit. This isolated watch
+event must not be hidden or interpreted as hardware-safe behavior.
+
+Diffusion diagnostic evidence remains incomplete. Training binds horizon 16
+and uses a 10-step DDIM sampled validation metric, while the primary matrix
+freezes DDIM-10/Tp16/Ta8, but no controlled closed-loop sampler or horizon
+comparison exists. Training used only seed 0; matched rollout seeds enable
+paired evaluation but do not establish robustness across training seeds.
+
 ## Current boundaries
 
-- The **Gilbreth N50 compatibility pilot is complete and return-verified**.
-  The persistent Python prefix later used by the canary is the supported
-  full-sweep environment contract; this does not constitute a sweep run.
-- The **full cluster dataset-scale sweep has not started**. Its nested
-  N50/N100/N250/N500 implementation is local-only preparation. No sweep package
-  has been transferred, no 16-cell array has been submitted, and no full-sweep
-  training result exists.
+- The **full Gilbreth dataset-scale sweep and Ubuntu Phase 3 unified evaluation
+  are complete** for attempt `11281591`; no additional cluster run, training,
+  or dataset generation is authorized by this evidence.
 - **Phase 4 VLA work has not started**. There is no image/VLA observation
   pipeline, OpenVLA fine-tuning, or mixed-action-space model yet.
 - A4 is recorded and adapter-executable but has no learned A4 policy.
 - Local simulation safety readiness is not Alex hardware-readiness evidence.
   No real-door trial is authorized.
+- The 576-rollout result does not establish general geometry, viewpoint,
+  language, door-family, training-seed, or sim-to-real generalization.
 
 ## Known limitations
 
@@ -104,11 +145,14 @@ artifact-bound values above against the local evidence.
 - Machine-local Alex and scene assets are required and are not distributed by
   this repository.
 
-## Next development sequence
+## Phase 4 planning recommendations
 
-1. Build and validate the final clean-tree transfer manifest and 16-cell Slurm
-   matrix locally from the verified scale master.
-2. Transfer and hash-verify the committed sweep package on Gilbreth only after
-   separate authorization.
-3. Launch the full sweep only after every prior gate passes and submission is
-   separately authorized.
+1. Treat the all-success matrix as pipeline validation and a saturated
+   benchmark, not proof that A3, Diffusion, or larger datasets are superior.
+2. Before selecting a Phase 4 baseline, review the ACT-A3-N50 219.95 N event
+   and use the complete paired timing/force/correction tables, not success alone.
+3. If sampler or horizon choice matters to a later decision, design a small,
+   separately authorized controlled diagnostic; current evidence is
+   inconclusive.
+4. Any Phase 4, VLA, A4-learning, RL, WAM-lite, hardware, fake-door, or
+   sim-to-real execution requires a new scope and explicit authorization.
