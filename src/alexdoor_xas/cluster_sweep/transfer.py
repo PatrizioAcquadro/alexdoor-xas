@@ -269,7 +269,9 @@ def _collect_contract(
     if len(source_ids) != 550 or len(source_ids) != len(set(source_ids)):
         raise SweepTransferError("scale master selected episode inventory is invalid")
     candidate_state = None
+    generation_root = None
     if require_local_sources:
+        generation_root = root / "outputs" / DEFAULT_EXPERIMENT
         state_path = _state_path(root / "outputs", DEFAULT_EXPERIMENT)
         if not state_path.is_file():
             raise SweepTransferError(f"scale generation state is missing: {state_path}")
@@ -290,6 +292,7 @@ def _collect_contract(
             expected_source_fingerprint=master["source_fingerprint_sha256"],
             require_source_paths=require_local_sources,
             candidate_state=candidate_state,
+            generation_root=generation_root,
         )
     except ValueError as error:
         raise SweepTransferError(f"candidate provenance ledger failed: {error}") from error

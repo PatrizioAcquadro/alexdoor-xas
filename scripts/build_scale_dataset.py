@@ -266,7 +266,51 @@ def _pose_seeds(pose: dict[str, Any]) -> list[int]:
     ]
 
 
-def _verify_candidate_run(run_dir: Path, pose: dict[str, Any]) -> None:
+def _validate_generation_evidence_path(
+    path: Path,
+    generation_root: Path,
+    *,
+    label: str,
+    directory: bool = False,
+) -> Path:
+    try:
+        resolved_root = generation_root.resolve(strict=True)
+    except (OSError, RuntimeError) as error:
+        raise ValueError(f"scale generation root is unavailable: {generation_root}") from error
+    if not resolved_root.is_dir():
+        raise ValueError(f"scale generation root is not a directory: {generation_root}")
+    if path.is_symlink():
+        raise ValueError(f"{label} may not be a symlink: {path}")
+    try:
+        resolved = path.resolve(strict=True)
+    except (OSError, RuntimeError) as error:
+        raise ValueError(f"{label} is missing or unreadable: {path}") from error
+    try:
+        resolved.relative_to(resolved_root)
+    except ValueError as error:
+        raise ValueError(
+            f"{label} resolves outside the scale generation root: {path}"
+        ) from error
+    if directory:
+        if not path.is_dir():
+            raise ValueError(f"{label} is not a directory: {path}")
+    elif not path.is_file():
+        raise ValueError(f"{label} is not a regular file: {path}")
+    return resolved
+
+
+def _verify_candidate_run(
+    run_dir: Path,
+    pose: dict[str, Any],
+    *,
+    generation_root: Path,
+) -> list[Path]:
+    run_dir = _validate_generation_evidence_path(
+        run_dir,
+        generation_root,
+        label=f"pose {pose['pose_id']} candidate run directory",
+        directory=True,
+    )
     files = sorted((run_dir / "episodes").glob("episode_*.hdf5"))
     expected = _pose_seeds(pose)
     if len(files) != len(expected):
@@ -274,18 +318,35 @@ def _verify_candidate_run(run_dir: Path, pose: dict[str, Any]) -> None:
             f"pose {pose['pose_id']} candidate run has {len(files)} episodes, "
             f"expected {len(expected)}"
         )
-    episodes = [read_episode(path) for path in files]
+    validated_files: list[Path] = []
+    for path in files:
+        validated_files.append(
+            _validate_generation_evidence_path(
+                path,
+                generation_root,
+                label=f"pose {pose['pose_id']} candidate HDF5 evidence",
+            )
+        )
+        _validate_generation_evidence_path(
+            path.with_suffix(".meta.json"),
+            generation_root,
+            label=f"pose {pose['pose_id']} candidate metadata evidence",
+        )
+    episodes = [read_episode(path) for path in validated_files]
     seeds = sorted(episode.meta.seed for episode in episodes)
     if seeds != sorted(expected):
         raise ValueError(f"pose {pose['pose_id']} candidate seed inventory mismatch")
     if any(episode.extras.get("door_pose_id") != pose["pose_id"] for episode in episodes):
         raise ValueError(f"pose {pose['pose_id']} candidate records wrong pose provenance")
-    sanity_path = run_dir / "metrics" / "sanity.json"
-    if not sanity_path.is_file():
-        raise ValueError(f"pose {pose['pose_id']} candidate run has no sanity evidence")
+    sanity_path = _validate_generation_evidence_path(
+        run_dir / "metrics" / "sanity.json",
+        generation_root,
+        label=f"pose {pose['pose_id']} candidate sanity evidence",
+    )
     sanity = json.loads(sanity_path.read_text())
     if sanity.get("n_episodes_checked") != len(expected):
         raise ValueError(f"pose {pose['pose_id']} sanity candidate count mismatch")
+    return validated_files
 
 
 def generate(
@@ -299,13 +360,14 @@ def generate(
     source = _git_state()
     if not source["clean_tree"]:
         raise RuntimeError("scale generation requires a clean committed checkout")
+    generation_root = outputs_root / experiment
     state = _load_or_create_state(outputs_root, experiment, plan_path, source)
     for pose in plan["poses"]:
         pose_id = pose["pose_id"]
         record = state["poses"].setdefault(pose_id, {"attempts": [], "completed": None})
         if record["completed"] is not None:
             completed = Path(record["completed"])
-            _verify_candidate_run(completed, pose)
+            _verify_candidate_run(completed, pose, generation_root=generation_root)
             print(f"[resume] {pose_id}: verified existing completed run {completed}")
             continue
         attempt_number = len(record["attempts"]) + 1
@@ -376,7 +438,7 @@ def generate(
         try:
             if result.returncode:
                 raise RuntimeError(f"candidate process exited {result.returncode}")
-            _verify_candidate_run(run_dir, pose)
+            _verify_candidate_run(run_dir, pose, generation_root=generation_root)
         except Exception as error:
             attempt["status"] = "FAILED"
             attempt["error"] = str(error)
@@ -391,7 +453,10 @@ def generate(
 
 
 def _candidate_paths_from_state(
-    plan: dict[str, Any], state: dict[str, Any]
+    plan: dict[str, Any],
+    state: dict[str, Any],
+    *,
+    generation_root: Path,
 ) -> dict[str, list[Path]]:
     paths_by_pose: dict[str, list[Path]] = {}
     for pose in plan["poses"]:
@@ -399,9 +464,11 @@ def _candidate_paths_from_state(
         completed = state.get("poses", {}).get(pose_id, {}).get("completed")
         if completed is None:
             raise RuntimeError(f"pose {pose_id} has no completed candidate run")
-        run_dir = Path(completed).resolve()
-        _verify_candidate_run(run_dir, pose)
-        paths_by_pose[pose_id] = sorted((run_dir / "episodes").glob("episode_*.hdf5"))
+        paths_by_pose[pose_id] = _verify_candidate_run(
+            Path(completed),
+            pose,
+            generation_root=generation_root,
+        )
     return paths_by_pose
 
 
@@ -485,9 +552,15 @@ def _evaluate_candidate_paths(
 
 
 def _select_master(
-    plan: dict[str, Any], state: dict[str, Any]
+    plan: dict[str, Any],
+    state: dict[str, Any],
+    *,
+    generation_root: Path,
 ) -> tuple[list[EpisodeBuffer], list[Path], list[dict[str, Any]]]:
-    return _evaluate_candidate_paths(plan, _candidate_paths_from_state(plan, state))
+    return _evaluate_candidate_paths(
+        plan,
+        _candidate_paths_from_state(plan, state, generation_root=generation_root),
+    )
 
 
 def _source_fingerprint(paths_: list[Path]) -> str:
@@ -526,6 +599,7 @@ def _validate_candidate_provenance(
     expected_source_fingerprint: str,
     require_source_paths: bool,
     candidate_state: dict[str, Any] | None = None,
+    generation_root: Path | None = None,
 ) -> dict[str, Any]:
     """Validate the complete candidate ledger and selected-source binding."""
     expected_inventory = {
@@ -575,7 +649,13 @@ def _validate_candidate_provenance(
     if require_source_paths:
         if candidate_state is None:
             raise ValueError("candidate raw replay requires the completed generation state")
-        paths_by_pose = _candidate_paths_from_state(plan, candidate_state)
+        if generation_root is None:
+            raise ValueError("candidate raw replay requires the authoritative generation root")
+        paths_by_pose = _candidate_paths_from_state(
+            plan,
+            candidate_state,
+            generation_root=generation_root,
+        )
         replay_selected, replay_selected_paths, replay_provenance = _evaluate_candidate_paths(
             plan, paths_by_pose
         )
@@ -715,7 +795,12 @@ def publish(
         raise RuntimeError("generation and publication source commits differ")
     if state.get("pose_plan_sha256") != _plan_hash(plan_path):
         raise RuntimeError("generation state pose plan hash mismatch")
-    selected, selected_paths, provenance = _select_master(plan, state)
+    generation_root = outputs_root / experiment
+    selected, selected_paths, provenance = _select_master(
+        plan,
+        state,
+        generation_root=generation_root,
+    )
     source_fp = _source_fingerprint(selected_paths)
     _validate_candidate_provenance(
         plan,
@@ -724,6 +809,7 @@ def publish(
         expected_source_fingerprint=source_fp,
         require_source_paths=True,
         candidate_state=state,
+        generation_root=generation_root,
     )
     robot_asset = dataset_robot_asset_payload(selected)
     per_pose = {
@@ -905,6 +991,7 @@ def verify(config: SweepConfig, plan: dict[str, Any], *, datasets_root: Path) ->
         for episode_id in a2.episode_ids
     ):
         raise RuntimeError("A2/A3 paired masters are numerically identical")
+    generation_root = paths.OUTPUTS_DIR / DEFAULT_EXPERIMENT
     state_path = _state_path(paths.OUTPUTS_DIR, DEFAULT_EXPERIMENT)
     if not state_path.is_file():
         raise RuntimeError(f"scale generation state is missing: {state_path}")
@@ -921,6 +1008,7 @@ def verify(config: SweepConfig, plan: dict[str, Any], *, datasets_root: Path) ->
         expected_source_fingerprint=str(manifest.get("source_fingerprint_sha256", "")),
         require_source_paths=True,
         candidate_state=candidate_state,
+        generation_root=generation_root,
     )
     if sorted(manifest["selected_episode_ids"]) != sorted(a2.episode_ids):
         raise RuntimeError("candidate ledger selected IDs differ from paired exports")

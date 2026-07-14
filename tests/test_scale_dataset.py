@@ -114,12 +114,139 @@ def _candidate_fixture(tmp_path: Path):
     return plan, state
 
 
+def _candidate_replay_inputs(scale, plan, state):
+    generation_root = Path(state["poses"]["D0"]["completed"]).parent
+    selected, paths, provenance = scale._select_master(
+        plan,
+        state,
+        generation_root=generation_root,
+    )
+    return {
+        "provenance": provenance,
+        "selected_episode_ids": [episode.meta.episode_id for episode in selected],
+        "expected_source_fingerprint": scale._source_fingerprint(paths),
+        "require_source_paths": True,
+        "candidate_state": state,
+    }
+
+
+def test_candidate_replay_rejects_hdf5_symlink_outside_generation_root(
+    tmp_path,
+) -> None:
+    scale = _scale_module()
+    generation_root = tmp_path / "generation"
+    plan, state = _candidate_fixture(generation_root)
+    inputs = _candidate_replay_inputs(scale, plan, state)
+
+    run = Path(state["poses"]["D0"]["completed"])
+    hdf5 = next((run / "episodes").glob("episode_*.hdf5"))
+    outside = tmp_path / "outside-candidate.hdf5"
+    shutil.copy2(hdf5, outside)
+    hdf5.unlink()
+    hdf5.symlink_to(outside)
+
+    with pytest.raises(ValueError, match="symlink|generation root|evidence"):
+        scale._validate_candidate_provenance(
+            plan,
+            generation_root=generation_root,
+            **inputs,
+        )
+
+
+def test_candidate_replay_rejects_completed_run_outside_generation_root(
+    tmp_path,
+) -> None:
+    scale = _scale_module()
+    generation_root = tmp_path / "generation"
+    generation_root.mkdir()
+    plan, state = _candidate_fixture(tmp_path / "external")
+    inputs = _candidate_replay_inputs(scale, plan, state)
+
+    with pytest.raises(ValueError, match="outside|generation root|escape"):
+        scale._validate_candidate_provenance(
+            plan,
+            generation_root=generation_root,
+            **inputs,
+        )
+
+
+@pytest.mark.parametrize("evidence_kind", ["run", "metadata", "sanity"])
+def test_candidate_paths_reject_symlinked_run_and_evidence(
+    tmp_path, evidence_kind
+) -> None:
+    scale = _scale_module()
+    generation_root = tmp_path / "generation"
+    plan, state = _candidate_fixture(generation_root)
+    run = Path(state["poses"]["D0"]["completed"])
+
+    if evidence_kind == "run":
+        target = run.with_name(f"{run.name}_real")
+        run.rename(target)
+        run.symlink_to(target, target_is_directory=True)
+    elif evidence_kind == "metadata":
+        path = next((run / "episodes").glob("episode_*.meta.json"))
+        target = generation_root / "metadata-target.json"
+        shutil.copy2(path, target)
+        path.unlink()
+        path.symlink_to(target)
+    else:
+        path = run / "metrics" / "sanity.json"
+        target = generation_root / "sanity-target.json"
+        shutil.copy2(path, target)
+        path.unlink()
+        path.symlink_to(target)
+
+    with pytest.raises(ValueError, match="symlink"):
+        scale._candidate_paths_from_state(
+            plan,
+            state,
+            generation_root=generation_root,
+        )
+
+
+@pytest.mark.parametrize("evidence_kind", ["run", "hdf5", "metadata", "sanity"])
+def test_candidate_paths_reject_non_regular_run_and_evidence(
+    tmp_path, evidence_kind
+) -> None:
+    scale = _scale_module()
+    generation_root = tmp_path / "generation"
+    plan, state = _candidate_fixture(generation_root)
+    run = Path(state["poses"]["D0"]["completed"])
+
+    if evidence_kind == "run":
+        shutil.rmtree(run)
+        run.write_text("not a directory\n")
+    elif evidence_kind == "hdf5":
+        path = next((run / "episodes").glob("episode_*.hdf5"))
+        path.unlink()
+        path.mkdir()
+    elif evidence_kind == "metadata":
+        path = next((run / "episodes").glob("episode_*.meta.json"))
+        path.unlink()
+        path.mkdir()
+    else:
+        path = run / "metrics" / "sanity.json"
+        path.unlink()
+        path.mkdir()
+
+    with pytest.raises(ValueError, match="regular|directory"):
+        scale._candidate_paths_from_state(
+            plan,
+            state,
+            generation_root=generation_root,
+        )
+
+
 def test_master_selection_uses_overdraw_only_for_failed_source_and_records_provenance(
     tmp_path,
 ) -> None:
     scale = _scale_module()
     plan, state = _candidate_fixture(tmp_path)
-    selected, paths, provenance = scale._select_master(plan, state)
+    selected, paths, provenance = scale._select_master(
+        plan,
+        state,
+        generation_root=tmp_path,
+    )
     assert [episode.meta.seed for episode in selected] == [11, 20]
     assert len(paths) == 2
     rows = {row["seed"]: row for row in provenance}
@@ -140,13 +267,17 @@ def test_master_selection_fails_closed_when_overdraw_cannot_fill_quota(tmp_path)
     plan, state = _candidate_fixture(tmp_path)
     plan["selected_episodes_per_pose"] = 4
     with pytest.raises(RuntimeError, match="need 4"):
-        scale._select_master(plan, state)
+        scale._select_master(plan, state, generation_root=tmp_path)
 
 
 def test_candidate_ledger_rejects_deleted_row_and_false_replacement_link(tmp_path) -> None:
     scale = _scale_module()
     plan, state = _candidate_fixture(tmp_path)
-    selected, paths, provenance = scale._select_master(plan, state)
+    selected, paths, provenance = scale._select_master(
+        plan,
+        state,
+        generation_root=tmp_path,
+    )
     selected_ids = [episode.meta.episode_id for episode in selected]
 
     validator = scale._validate_candidate_provenance
@@ -157,6 +288,7 @@ def test_candidate_ledger_rejects_deleted_row_and_false_replacement_link(tmp_pat
         expected_source_fingerprint=scale._source_fingerprint(paths),
         require_source_paths=True,
         candidate_state=state,
+        generation_root=tmp_path,
     )["status"] == "PASS"
 
     with pytest.raises(ValueError, match="inventory"):
@@ -167,6 +299,7 @@ def test_candidate_ledger_rejects_deleted_row_and_false_replacement_link(tmp_pat
             expected_source_fingerprint=scale._source_fingerprint(paths),
             require_source_paths=True,
             candidate_state=state,
+            generation_root=tmp_path,
         )
 
     falsified = json.loads(json.dumps(provenance))
@@ -180,6 +313,7 @@ def test_candidate_ledger_rejects_deleted_row_and_false_replacement_link(tmp_pat
             expected_source_fingerprint=scale._source_fingerprint(paths),
             require_source_paths=True,
             candidate_state=state,
+            generation_root=tmp_path,
         )
 
 
@@ -203,7 +337,11 @@ def test_unused_overdraw_rows_are_authenticated_against_raw_candidates(
 ) -> None:
     scale = _scale_module()
     plan, state = _candidate_fixture(tmp_path)
-    selected, paths, provenance = scale._select_master(plan, state)
+    selected, paths, provenance = scale._select_master(
+        plan,
+        state,
+        generation_root=tmp_path,
+    )
     tampered = json.loads(json.dumps(provenance))
     unused = next(row for row in tampered if row["decision"] == "NOT_NEEDED_OVERDRAW")
     mutation(unused, tmp_path)
@@ -216,6 +354,7 @@ def test_unused_overdraw_rows_are_authenticated_against_raw_candidates(
             expected_source_fingerprint=scale._source_fingerprint(paths),
             require_source_paths=True,
             candidate_state=state,
+            generation_root=tmp_path,
         )
 
 
@@ -224,7 +363,11 @@ def test_candidate_replay_rejects_invented_unused_decision_and_skipped_reason(
 ) -> None:
     scale = _scale_module()
     plan, state = _candidate_fixture(tmp_path)
-    selected, paths, provenance = scale._select_master(plan, state)
+    selected, paths, provenance = scale._select_master(
+        plan,
+        state,
+        generation_root=tmp_path,
+    )
     selected_ids = [episode.meta.episode_id for episode in selected]
     source_fingerprint = scale._source_fingerprint(paths)
 
@@ -240,6 +383,7 @@ def test_candidate_replay_rejects_invented_unused_decision_and_skipped_reason(
             expected_source_fingerprint=source_fingerprint,
             require_source_paths=True,
             candidate_state=state,
+            generation_root=tmp_path,
         )
 
     wrong_reason = json.loads(json.dumps(provenance))
@@ -253,13 +397,18 @@ def test_candidate_replay_rejects_invented_unused_decision_and_skipped_reason(
             expected_source_fingerprint=source_fingerprint,
             require_source_paths=True,
             candidate_state=state,
+            generation_root=tmp_path,
         )
 
 
 def test_candidate_raw_replay_defeats_refreshed_ledger_and_report_hashes(tmp_path) -> None:
     scale = _scale_module()
     plan, state = _candidate_fixture(tmp_path)
-    selected, paths, provenance = scale._select_master(plan, state)
+    selected, paths, provenance = scale._select_master(
+        plan,
+        state,
+        generation_root=tmp_path,
+    )
     tampered = json.loads(json.dumps(provenance))
     unused = next(row for row in tampered if row["decision"] == "NOT_NEEDED_OVERDRAW")
     unused["episode_id"] = "forged-unused-candidate"
@@ -283,6 +432,7 @@ def test_candidate_raw_replay_defeats_refreshed_ledger_and_report_hashes(tmp_pat
             expected_source_fingerprint=scale._source_fingerprint(paths),
             require_source_paths=True,
             candidate_state=state,
+            generation_root=tmp_path,
         )
 
 
@@ -291,7 +441,11 @@ def test_candidate_replay_rejects_nondeterministic_row_and_replacement_order(
 ) -> None:
     scale = _scale_module()
     plan, state = _candidate_fixture(tmp_path)
-    selected, paths, provenance = scale._select_master(plan, state)
+    selected, paths, provenance = scale._select_master(
+        plan,
+        state,
+        generation_root=tmp_path,
+    )
     selected_ids = [episode.meta.episode_id for episode in selected]
     source_fingerprint = scale._source_fingerprint(paths)
 
@@ -305,6 +459,7 @@ def test_candidate_replay_rejects_nondeterministic_row_and_replacement_order(
             expected_source_fingerprint=source_fingerprint,
             require_source_paths=True,
             candidate_state=state,
+            generation_root=tmp_path,
         )
 
     second_plan, second_state = _candidate_fixture(tmp_path / "second")
@@ -324,7 +479,11 @@ def test_candidate_replay_rejects_nondeterministic_row_and_replacement_order(
         episode_path.unlink()
         episode_path.with_suffix(".meta.json").unlink()
         write_episode(episode, episodes_dir)
-    selected, paths, provenance = scale._select_master(second_plan, second_state)
+    selected, paths, provenance = scale._select_master(
+        second_plan,
+        second_state,
+        generation_root=tmp_path / "second",
+    )
     swapped = json.loads(json.dumps(provenance))
     replacements = [
         row for row in swapped
@@ -343,6 +502,7 @@ def test_candidate_replay_rejects_nondeterministic_row_and_replacement_order(
             expected_source_fingerprint=scale._source_fingerprint(paths),
             require_source_paths=True,
             candidate_state=second_state,
+            generation_root=tmp_path / "second",
         )
 
 
@@ -361,6 +521,7 @@ def test_real_candidate_ledger_replays_all_750_raw_candidates() -> None:
         expected_source_fingerprint=master["source_fingerprint_sha256"],
         require_source_paths=True,
         candidate_state=state,
+        generation_root=REPO_ROOT / "outputs/v3_scale_generation",
     )
     assert report["candidate_count"] == 750
     assert report["selected_count"] == 550
