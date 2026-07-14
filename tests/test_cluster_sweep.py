@@ -233,14 +233,10 @@ def test_sweep_slurm_is_16_cell_single_gpu_non_isaac_and_prefix_python(config) -
     assert "train.overfit_episodes=null" in rendered
     assert "+wandb.mode=offline" in rendered
     assert '"$CONDA_PREFIX/bin/python"' in rendered
-    assert (
-        'env -u PYTHONPATH "$CONDA_PREFIX/bin/python" '
-        "scripts/build_cluster_sweep_manifest.py verify"
-    ) in rendered
-    assert (
-        'env -u PYTHONPATH "$CONDA_PREFIX/bin/python" '
-        'scripts/preflight_cluster_sweep.py "${PREFLIGHT_ARGS[@]}"'
-    ) in rendered
+    assert "unset PYTHONPATH" in rendered
+    assert rendered.index("unset PYTHONPATH") < rendered.index(
+        '"$CONDA_PREFIX/bin/python"'
+    )
     assert "conda activate" not in rendered.lower()
     assert "bin/activate" not in rendered
     assert "isaaclab" not in rendered.lower()
@@ -342,6 +338,7 @@ case "$1" in
     exit 0
     ;;
   scripts/train_act.py|scripts/train_diffusion.py)
+    [[ -z "${PYTHONPATH+x}" ]] || exit 96
     entry=$1; shift
     output_root=""; run_id=""; wandb_dir=""
     for arg in "$@"; do
@@ -369,6 +366,7 @@ case "$1" in
     exit 0
     ;;
   src/alexdoor_xas/cluster_pilot/wandb_publication.py)
+    [[ -z "${PYTHONPATH+x}" ]] || exit 96
     source=""; destination=""
     while [[ $# -gt 0 ]]; do
       case "$1" in
@@ -408,6 +406,7 @@ esac
     base_env = {
         **os.environ,
         "PATH": f"{polluted}:/usr/bin:/bin",
+        "PYTHONPATH": "/hostile/submission/pythonpath",
         "PREFIX_CALL_LOG": str(calls),
         "POLLUTED_PYTHON_MARKER": str(polluted_marker),
         "SLURM_ARRAY_TASK_ID": "0",

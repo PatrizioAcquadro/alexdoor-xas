@@ -84,6 +84,7 @@ def render_sweep_slurm_script(
             "",
             "set -Eeuo pipefail",
             "umask 077",
+            "unset PYTHONPATH",
             "",
             f"SOURCE_COMMIT={shlex.quote(source_commit)}",
             f"DEPOT_ROOT={shlex.quote(str(depot))}",
@@ -159,7 +160,7 @@ def render_sweep_slurm_script(
             "}",
             "trap publish_result EXIT",
             "",
-            'env -u PYTHONPATH "$CONDA_PREFIX/bin/python" scripts/build_cluster_sweep_manifest.py verify --config configs/cluster_sweep.v1.json --manifest "$MANIFEST"',
+            '"$CONDA_PREFIX/bin/python" scripts/build_cluster_sweep_manifest.py verify --config configs/cluster_sweep.v1.json --manifest "$MANIFEST"',
             "PREFLIGHT_ARGS=(--config configs/cluster_sweep.v1.json --manifest \"$MANIFEST\" --scratch-output \"$CELL_RUNTIME\" --report \"$CELL_RUNTIME/environment/preflight_report.json\" --environment-dir \"$CELL_RUNTIME/environment\" --live-cuda --expected-device-count 1 --requested-partition \"$PARTITION\")",
         ]
     )
@@ -169,7 +170,7 @@ def render_sweep_slurm_script(
         [
             "",
             "set +e",
-            'env -u PYTHONPATH "$CONDA_PREFIX/bin/python" scripts/preflight_cluster_sweep.py "${PREFLIGHT_ARGS[@]}" > "$CELL_RUNTIME/slurm/stdout.log" 2> "$CELL_RUNTIME/slurm/stderr.log"',
+            '"$CONDA_PREFIX/bin/python" scripts/preflight_cluster_sweep.py "${PREFLIGHT_ARGS[@]}" > "$CELL_RUNTIME/slurm/stdout.log" 2> "$CELL_RUNTIME/slurm/stderr.log"',
             "run_code=$?",
             "if [[ $run_code -eq 0 ]]; then",
             '  "$CONDA_PREFIX/bin/python" "$ENTRYPOINT" "${CELL_OVERRIDES[@]}" >> "$CELL_RUNTIME/slurm/stdout.log" 2>> "$CELL_RUNTIME/slurm/stderr.log"',
