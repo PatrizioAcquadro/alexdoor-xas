@@ -1,0 +1,38 @@
+{
+  "schema": "alexdoor_xas.phase3_seed112_force_diagnostic_provenance.v1",
+  "diagnostic_id": "phase3_seed112_force_diagnostic_20260730",
+  "executed_at": "2026-07-30",
+  "repository": {
+    "path": "/home/pacquadr/Desktop/DoorManipulation",
+    "diagnostic_commit": "40b6ecd03aada46ebd487106e67e9df5f813a946",
+    "original_training_source_commit": "efa39434a123dab4d029f5f4ffdb122844892a6d"
+  },
+  "frozen_inputs": {
+    "protocol_id": "phase3_unified_primary_v1",
+    "protocol_path": "configs/phase3_unified_eval.v1.json",
+    "protocol_sha256": "b53a130f9e475fb14ec2a5271c92bab5715e9898fdc6f1dc365cbd08356e5bae",
+    "checkpoint_sha256": "1b6fade66d107c28139f47adca93f6f07d47bf6d5917cc3c10bd7b2506f55de8",
+    "act_evaluator_sha256": "38771247e7d4fb5a131f6271357ee7d10ec99c2cead510dae8264f56736e30ed",
+    "historical_pose_artifact": "outputs/phase3_unified_evaluation/workspace/results/primary/sweep_act_a3_n50_seed0/D0.json",
+    "historical_target_row_canonical_sha256": "e7a3ba901db7f6572028d4210659c53c6a59f5ece3380a7edfe246b172e597dd"
+  },
+  "runtime": {
+    "simulation_device": "cpu",
+    "policy_device": "cuda",
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "driver_version": "580.173.02",
+    "isaac_lab_commit": "f7fc04076b176c3f807db47cb884d5f6389ab5d0"
+  },
+  "raw_diagnostic_root": "outputs/phase3_5_force_diagnostic/20260730_seed112_minimal",
+  "raw_artifacts": {
+    "exact_replay_metrics_sha256": "9b0e86f9653b14b68c67dbc8f57e12643a33f13188ad1643c40589e13f516ee8",
+    "minus_1mm_metrics_sha256": "c43fbc2ef210493df121e8fe9e89b055b178cdecfde3905b69cd9821d1a9ae34",
+    "plus_1mm_metrics_sha256": "2e6e3cd9dea8aaa0afc68f46d505144307796c1e2a902b66401095959a75a600",
+    "exact_replay_argv_sha256": "a95c7e489ba0e72be1886605d3bf53e5341a13d5a2c044de744e2179604e298a",
+    "minus_1mm_argv_sha256": "c3c2946cf8fef4d65afac12dafc8b39295bfd375580bf2596e27a32fd6c7c01e",
+    "plus_1mm_argv_sha256": "f3f7126a592283e6ac2f6724d1b3fa5659326be90482d24435e8d3aca1197164",
+    "diagnostic_evaluator_sha256": "bc38449f59c2095e356ab54409600f8df8d35df8850f56a0c2d0d8b068fe9f51",
+    "diagnostic_evaluator_diff_sha256": "f2041d182af324d25001968ad24c8b2fb78c51a6dfdd6e407b707bceb9a3107f"
+  },
+  "execution_boundary": "No dataset generation, training, safety-threshold change, adapter change, or historical artifact refresh occurred."
+}

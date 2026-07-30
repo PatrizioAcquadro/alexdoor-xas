@@ -1,0 +1,78 @@
+{
+  "schema": "alexdoor_xas.phase3_seed112_force_diagnostic.v1",
+  "diagnostic_id": "phase3_seed112_force_diagnostic_20260730",
+  "target": {
+    "policy": "act",
+    "action_space": "A3_obj_rel_ee_delta",
+    "view_id": "v3_scale_n50",
+    "training_seed": 0,
+    "condition": "D0",
+    "randomized": true,
+    "rollout_seed": 112,
+    "source_protocol_id": "phase3_unified_primary_v1",
+    "force_watch_bound_n": 200.0
+  },
+  "decision_rule_outcome": "reproduced_then_two_start_x_perturbations",
+  "prefix_protocol": {
+    "base_seed": 100,
+    "episodes_fixed": 5,
+    "episodes_randomized": 8,
+    "target_position_in_process": 13
+  },
+  "cases": [
+    {
+      "case_id": "historical_original",
+      "start_offset_x_delta_m": 0.0,
+      "success_tick": 93,
+      "first_contact_tick": 55,
+      "peak_tick": 55,
+      "peak_force_n": 219.95331149702807,
+      "force_exceedance_ticks": 1,
+      "adapter_corrections": 0,
+      "adapter_rejections": 0,
+      "trace_sha256": "56a2b1a40dea614685385a5057d2c47aaec1c7bee4dac523ceb110f6947f27d2"
+    },
+    {
+      "case_id": "exact_replay",
+      "start_offset_x_delta_m": 0.0,
+      "success_tick": 93,
+      "first_contact_tick": 55,
+      "peak_tick": 55,
+      "peak_force_n": 219.95331149702807,
+      "force_exceedance_ticks": 1,
+      "adapter_corrections": 0,
+      "adapter_rejections": 0,
+      "trace_sha256": "56a2b1a40dea614685385a5057d2c47aaec1c7bee4dac523ceb110f6947f27d2"
+    },
+    {
+      "case_id": "start_x_minus_1mm",
+      "start_offset_x_delta_m": -0.001,
+      "success_tick": 94,
+      "first_contact_tick": 56,
+      "peak_tick": 57,
+      "peak_force_n": 66.00192535786152,
+      "force_exceedance_ticks": 0,
+      "adapter_corrections": 2,
+      "adapter_rejections": 0,
+      "trace_sha256": "68c21d6bb5726c56d5b246b404f3b2232a0dbf4ef4a30ee7f0933a7a839b4cae"
+    },
+    {
+      "case_id": "start_x_plus_1mm",
+      "start_offset_x_delta_m": 0.001,
+      "success_tick": 94,
+      "first_contact_tick": 55,
+      "peak_tick": 55,
+      "peak_force_n": 86.44205766433603,
+      "force_exceedance_ticks": 0,
+      "adapter_corrections": 0,
+      "adapter_rejections": 0,
+      "trace_sha256": "77cc55b7e8ecb1dea469a2f87296f336e61d68463f620f2e9df70e5e25bba4e3"
+    }
+  ],
+  "verified_observations": [
+    "The exact replay target row is byte-identical to the historical target row after canonical JSON sorting.",
+    "Seeds 100 through 111 retain their original trace hashes in the exact replay and both perturbation executions.",
+    "Both one-millimeter door-frame X perturbations eliminate the greater-than-200-newton event while preserving success."
+  ],
+  "bounded_interpretation": "The event is reproducible and locally sensitive to initial door-normal position and contact-entry motion. The diagnostic does not prove root cause or validate a fix."
+}

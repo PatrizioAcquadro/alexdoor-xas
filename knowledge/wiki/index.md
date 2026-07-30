@@ -38,6 +38,7 @@ the source of truth for executable behavior.
 - [[experiments/local-n50-stabilization|Local N50 Stabilization Matrix]] — Four-cell, 144-rollout smoke matrix used to validate closed-loop semantics and bounded safety corrections.
 - [[experiments/gilbreth-nested-scale-sweep|Gilbreth Nested Scale Sweep]] — Sixteen-cell cluster training run across policy family, action space, and nested training size.
 - [[experiments/phase-3-unified-evaluation|Phase 3 Unified Evaluation]] — Matched 576-rollout evaluation that found saturated success and one force-review cell.
+- [[experiments/act-a3-n50-seed-112-force-diagnostic|ACT-A3-N50 Seed-112 Force Diagnostic]] — Exact replay and two controlled start-position perturbations for the Phase 3 force-review event.
 
 ## Sources
 

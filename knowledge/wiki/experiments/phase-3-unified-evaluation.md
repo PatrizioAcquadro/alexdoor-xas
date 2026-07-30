@@ -40,6 +40,12 @@ The evaluation recorded 3,506 warnings in the expected family. Fifteen cells
 remained within the configured force-watch envelope. ACT-A3-N50 at seed 112
 reached 219.95 N peak panel-filtered force and is `REVIEW_REQUIRED`.
 
+The later
+[[act-a3-n50-seed-112-force-diagnostic|ACT-A3-N50 Seed-112 Force Diagnostic]]
+reproduced that target row exactly and found local sensitivity to ±1 mm changes
+in initial door-normal position. This follow-up does not alter the historical
+matrix or clear the review status.
+
 ## Interpretation
 
 The benchmark is success-saturated under this protocol. It does not identify a
@@ -63,6 +69,8 @@ not implemented by this phase.
 - Curated package: `outputs/curated/phase3_unified_evaluation/`
 - Report: `outputs/curated/phase3_unified_evaluation/report.md`
 - Tests: `tests/test_phase3_unified_evaluation.py`
+- Force follow-up:
+  [[act-a3-n50-seed-112-force-diagnostic|ACT-A3-N50 Seed-112 Force Diagnostic]]
 
 The curated package is immutable historical evidence. A changed protocol or
 rerun must receive a new identity rather than replacing this package.

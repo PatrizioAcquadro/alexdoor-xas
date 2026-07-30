@@ -112,6 +112,16 @@ bound for one tick and peaked at 219.95 N; that cell is `REVIEW_REQUIRED`.
 The remaining 15 cells pass the bounded simulation audit. This isolated watch
 event must not be hidden or interpreted as hardware-safe behavior.
 
+A minimal follow-up diagnostic replayed the original seed prefix 100–112 in a
+fresh process and reproduced the seed-112 target row exactly, including the
+tick-55 peak and trace hash. Changing only seed 112's initial door-frame X
+offset by −1 mm and +1 mm reduced the peak to 66.00 N and 86.44 N,
+respectively, with no force-watch exceedance and no rejection. This supports
+local sensitivity to initial door-normal position and contact-entry motion; it
+does not prove root cause, validate an adapter change, or clear the original
+review status. The compact evidence is under
+`outputs/curated/phase3_seed112_force_diagnostic/`.
+
 Diffusion diagnostic evidence remains incomplete. Training binds horizon 16
 and uses a 10-step DDIM sampled validation metric, while the primary matrix
 freezes DDIM-10/Tp16/Ta8, but no controlled closed-loop sampler or horizon
@@ -149,8 +159,9 @@ paired evaluation but do not establish robustness across training seeds.
 
 1. Treat the all-success matrix as pipeline validation and a saturated
    benchmark, not proof that A3, Diffusion, or larger datasets are superior.
-2. Before selecting a Phase 4 baseline, review the ACT-A3-N50 219.95 N event
-   and use the complete paired timing/force/correction tables, not success alone.
+2. Treat the ACT-A3-N50 force review as investigated but not cleared. Use its
+   demonstrated contact-start sensitivity when designing the next dataset and
+   require a post-training multi-seed and contact-start robustness gate.
 3. If sampler or horizon choice matters to a later decision, design a small,
    separately authorized controlled diagnostic; current evidence is
    inconclusive.
