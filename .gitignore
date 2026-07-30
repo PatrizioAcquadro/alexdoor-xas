@@ -54,6 +54,9 @@ htmlcov/
 *.topdown.png
 .lmdb/
 
+# ── Local phase records ──────────────────────────────────────────────────────
+/implementation_phases/
+
 # ── Local assistant state ────────────────────────────────────────────────────
 /.agents/
 /.codex/
