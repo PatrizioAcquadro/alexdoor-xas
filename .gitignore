@@ -56,6 +56,7 @@ htmlcov/
 
 # ── Local phase records ──────────────────────────────────────────────────────
 /implementation_phases/
+/docs/
 
 # ── Local assistant state ────────────────────────────────────────────────────
 /.agents/
@@ -63,6 +64,8 @@ htmlcov/
 /.claude/
 /CLAUDE.md
 /claude.md
+/AGENTS.md
+/agents.md
 /TODO.md
 /prompts/
 
