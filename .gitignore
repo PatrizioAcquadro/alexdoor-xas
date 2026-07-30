@@ -70,6 +70,7 @@ htmlcov/
 /prompts/
 
 # ── Editor / OS cruft ────────────────────────────────────────────────────────
+/knowledge/.obsidian/
 .idea/
 .vscode/
 .DS_Store
