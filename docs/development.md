@@ -83,6 +83,7 @@ PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/eval_act.py \
   --video-output outputs/demo_videos/act_rollout.mp4 \
   --video-playback-fps 30 --video-intro-hold-s 1 \
   --video-outro-hold-s 2 \
+  --visual-room floorplan212_living_room \
   rollout.policy_device=cuda rollout.episodes_fixed=0 \
   rollout.episodes_randomized=1 rollout.base_seed=106
 ```
@@ -95,6 +96,15 @@ the 60 Hz control loop; the explicit 30 fps playback makes the motion half-speed
 and the intro/outro holds improve presentation without changing rollout
 physics. The JSON records both rates, holds, and durations. Video mode does not
 modify the checkpoint's original metrics or curated Phase 3 evidence.
+
+`--visual-room floorplan212_living_room` optionally references the living room
+and hallway from the registered combined scene, aligns their doorway around the
+unchanged D0 task door, removes the duplicate scene door, and disables all
+imported colliders and rigid-body behavior. This is a presentation-only pixel
+change: policy observations, the calibrated door articulation, contact filter,
+rollout physics, and success criteria remain unchanged. The JSON sidecar records
+the source-scene hash, placement/camera profile, removed door path, and disabled
+physics counts.
 
 The full nested scale master has a dedicated fail-closed orchestrator. It
 requires a clean committed checkout and launches one fresh simulator process

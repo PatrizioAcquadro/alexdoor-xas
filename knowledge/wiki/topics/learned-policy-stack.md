@@ -50,6 +50,14 @@ control rate, and explicitly records a configurable playback rate plus
 intro/outro holds; camera-mode evidence remains separate from the frozen
 headless evaluation.
 
+Video mode can additionally compose the FloorPlan212 living room and hallway
+from the registered combined scene around the unchanged D0 task door. The
+presentation layer removes the duplicate room door, disables every imported
+collider/rigid-body behavior, and records its source hash, camera profile, and
+disabled-physics counts. It changes rendered pixels only; ACT remains
+state-only and the calibrated task, contact filter, and rollout evidence are
+unchanged.
+
 ## Diffusion
 
 `src/alexdoor_xas/policies/diffusion/model.py::DiffusionTransformer` is a
@@ -104,3 +112,5 @@ the evaluation record.
 - 2026-08-06 — ACT evaluation gained fail-closed single-rollout MP4 capture,
   full-body framing, explicit playback timing and holds, and a colocated
   camera-mode evidence sidecar.
+- 2026-08-06 — ACT video mode gained an auditable, visual-only FloorPlan212
+  living-room and hallway context around the unchanged task door.

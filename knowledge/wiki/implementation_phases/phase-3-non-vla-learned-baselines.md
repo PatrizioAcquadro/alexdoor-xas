@@ -116,6 +116,14 @@ door, and records capture timing separately from configurable playback speed
 and presentation holds. Camera-mode demo evidence stays separate from the
 original checkpoint metrics and frozen unified evaluation.
 
+The optional `--visual-room floorplan212_living_room` presentation profile
+references the combined-scene living room and hallway, aligns their doorway
+around the unchanged D0 task door, removes the duplicate room door, and
+disables all imported physics. Its source hash, camera placement, and
+disabled-physics counts are added to the sidecar. The profile changes pixels
+only: ACT observations, door/contact physics, adapters, and success semantics
+remain unchanged.
+
 #### Key Decisions and Problems
 
 - ACT predicts action chunks to model short-horizon temporal structure while
@@ -175,3 +183,6 @@ does not require it.
   state-only Phase 3 model boundary.
 - 2026-08-06 — Added fail-closed single-rollout ACT video capture, full-body
   framing, explicit presentation timing, and colocated camera-mode evidence.
+- 2026-08-06 — Added an optional visual-only FloorPlan212 living-room and
+  hallway context for ACT presentation videos without changing benchmark
+  physics.

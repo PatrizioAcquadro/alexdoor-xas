@@ -34,6 +34,11 @@ from functools import partial
 # config layer is torch/Isaac-free, so it resolves first (Hydra precedent).
 from isaaclab.app import AppLauncher
 
+from alexdoor_xas.eval.visual_room import (
+    VISUAL_ROOM_PROFILE_NAMES,
+    attach_visual_room,
+    visual_room_profile,
+)
 from alexdoor_xas.policies.act import ActConfigError, load_act_config
 
 parser = argparse.ArgumentParser(description="AlexDoor-XAS ACT closed-loop evaluation")
@@ -93,6 +98,15 @@ parser.add_argument(
     default=2.0,
     help="Seconds to hold the final successful frame after the rollout motion.",
 )
+parser.add_argument(
+    "--visual-room",
+    choices=VISUAL_ROOM_PROFILE_NAMES,
+    default=None,
+    help=(
+        "Add a presentation-only combined-scene room and hallway around the "
+        "unchanged task door (video mode only)."
+    ),
+)
 AppLauncher.add_app_launcher_args(parser)
 args, hydra_overrides = parser.parse_known_args()
 
@@ -131,6 +145,8 @@ if args.video_output is not None:
         or args.video_outro_hold_s < 0.0
     ):
         parser.error("--video-intro-hold-s and --video-outro-hold-s must be non-negative")
+if args.visual_room is not None and args.video_output is None:
+    parser.error("--visual-room requires --video-output")
 # A non-default door pose must carry an explicit pose label: rows and the
 # per-pose metrics filename are keyed by it, so an unlabeled pose would be
 # silently bucketed as the default pose in the smoke summary.
@@ -212,6 +228,10 @@ def _make_env():
     cfg.sim.device = args.device
     cfg.door_yaw_rad = math.radians(act_cfg.rollout.door_yaw_deg)
     cfg.door_offset_xy = (act_cfg.rollout.door_offset_x, act_cfg.rollout.door_offset_y)
+    if args.visual_room is not None:
+        room = visual_room_profile(args.visual_room)
+        cfg.viewer.eye = room.camera_eye
+        cfg.viewer.lookat = room.camera_lookat
     render_mode = "rgb_array" if args.video_output is not None else None
     return gym.make(
         door_task.DOOR_PUSH_ALEX_V2_ENV_ID,
@@ -416,6 +436,23 @@ def main() -> int:
             else None
         )
         env = _make_env()
+        visual_context = None
+        if args.visual_room is not None:
+            from omni.usd import get_context  # noqa: PLC0415
+
+            visual_context = attach_visual_room(
+                get_context().get_stage(),
+                args.visual_room,
+                target_doorframe_path=(
+                    "/World/envs/env_0/DoorTaskScene/DoorTaskDoor/Doorframe"
+                ),
+            )
+            env.sim.render()
+            print(
+                f"[eval_act] visual room={visual_context['profile']['label']} "
+                "physics=disabled",
+                flush=True,
+            )
         runtime_asset = RobotAssetRef.from_dict(env.robot_asset_provenance())
         policy = ActPolicy.from_checkpoint(
             checkpoint_path,
@@ -584,6 +621,7 @@ def main() -> int:
             "rollouts": rows,
             "aggregate": aggregate,
             "video": video_metadata,
+            "visual_context": visual_context,
             "scripted_reference": _reference_aggregate(),
             "scripted_matched_reference": matched_scripted_reference,
         }

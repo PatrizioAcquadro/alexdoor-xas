@@ -26,7 +26,8 @@ observation -> policy -> A1/A2/A3/A4 -> adapter -> environment
   orchestration.
 - `dataset/` — fail-closed loading, validation, splits, normalization, and
   chunk sampling.
-- `eval/` — metrics, failure labels, plots, reports, and safety diagnostics.
+- `eval/` — metrics, failure labels, plots, reports, safety diagnostics, and
+  optional presentation-only visual context for rollout videos.
 - `cluster_pilot/` — non-Isaac transfer, preflight, Slurm, publication, and
   return-manifest contracts.
 
@@ -105,6 +106,13 @@ detection are not implemented.
 
 Both learned policies are evaluated closed-loop through adapter-v1 and use
 per-tick first-crossing success termination.
+
+ACT video capture can optionally compose the combined-scene FloorPlan212
+living room and hallway around the unchanged D0 task. The duplicate furnished
+scene door is removed and every imported physics schema is disabled before the
+rollout. This keeps the visual context outside policy observations, task
+physics, contact filtering, and benchmark evidence; the source asset hash,
+camera profile, and disabled-physics counts are recorded in the video sidecar.
 
 ## Episode and dataset contract
 
