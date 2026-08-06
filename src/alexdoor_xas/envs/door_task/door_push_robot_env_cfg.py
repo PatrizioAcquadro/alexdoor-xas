@@ -55,8 +55,8 @@ class DoorPushRobotEnvCfg(DirectRLEnvCfg):
         clone_in_fabric=False,
     )
 
-    # Camera framing the robot + door for --video runs.
-    viewer: ViewerCfg = ViewerCfg(eye=(0.9, 1.8, 1.9), lookat=(-0.7, 0.0, 1.1))
+    # Wide camera framing the complete robot (including feet) and door.
+    viewer: ViewerCfg = ViewerCfg(eye=(1.5, 2.6, 2.0), lookat=(-0.7, 0.0, 0.9))
 
     door_task_scene = AssetBaseCfg(
         prim_path=DOOR_TASK_SCENE_SOURCE_PRIM_PATH,

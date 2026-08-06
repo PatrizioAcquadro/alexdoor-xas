@@ -41,3 +41,15 @@ artifacts. No user-owned raw material was modified or ingested.
 Verified all 26 wiki pages, internal wikilinks, index coverage, nine phase-page
 mappings, allowed tree shape, Markdown whitespace, and protected-directory
 boundaries after the ACT video update.
+
+## 2026-08-06 — update : ACT demo framing and playback
+
+Corrected the learned-policy demo contract to frame Alex head-to-feet with the
+door and to distinguish 60 Hz capture from configurable playback speed and
+intro/outro presentation holds. The first output artifact remains preserved.
+
+## 2026-08-06 — lint : ACT demo correction
+
+Verified all 26 wiki pages, internal links, index coverage, nine phase-page
+mappings, allowed tree shape, Markdown whitespace, and protected raw/phase
+boundaries after the framing and playback correction.

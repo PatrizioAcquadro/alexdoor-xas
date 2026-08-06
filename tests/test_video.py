@@ -69,6 +69,44 @@ def test_recorder_captures_rgb_copy() -> None:
     assert not recorder._frames[0].any()
 
 
+def test_presentation_frames_trim_blank_and_add_holds() -> None:
+    recorder = RolloutVideoRecorder(
+        Path("rollout.mp4"),
+        fps=2,
+        capture_fps=4,
+        intro_hold_s=1.0,
+        outro_hold_s=1.5,
+    )
+    blank = np.zeros((2, 3, 3), dtype=np.uint8)
+    first = np.full((2, 3, 3), 32, dtype=np.uint8)
+    last = np.full((2, 3, 3), 64, dtype=np.uint8)
+    for tick, frame in enumerate((blank, first, last), start=1):
+        recorder.capture(RenderEnv(frame), tick=tick)
+
+    frames, dropped, intro, outro = recorder._presentation_frames()
+
+    assert dropped == 1
+    assert intro == 2
+    assert outro == 3
+    assert len(frames) == 7
+    assert np.array_equal(frames[0], first)
+    assert np.array_equal(frames[-1], last)
+
+
+@pytest.mark.parametrize(
+    "kwargs, message",
+    [
+        ({"fps": 0}, "playback fps"),
+        ({"fps": 30, "capture_fps": 0}, "capture fps"),
+        ({"fps": 30, "intro_hold_s": -1.0}, "holds"),
+        ({"fps": 30, "outro_hold_s": float("nan")}, "holds"),
+    ],
+)
+def test_recorder_rejects_invalid_playback_settings(kwargs, message: str) -> None:
+    with pytest.raises(VideoCaptureError, match=message):
+        RolloutVideoRecorder(Path("rollout.mp4"), **kwargs)
+
+
 @pytest.mark.parametrize(
     "frame, message",
     [

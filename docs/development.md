@@ -81,6 +81,8 @@ PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/eval_act.py \
   --viz none --device cpu --enable_cameras \
   --checkpoint outputs/act_door_push/RUN_ID/checkpoints/best.pt \
   --video-output outputs/demo_videos/act_rollout.mp4 \
+  --video-playback-fps 30 --video-intro-hold-s 1 \
+  --video-outro-hold-s 2 \
   rollout.policy_device=cuda rollout.episodes_fixed=0 \
   rollout.episodes_randomized=1 rollout.base_seed=106
 ```
@@ -88,8 +90,11 @@ PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/eval_act.py \
 Video mode is fail-closed: it requires exactly one rollout, refuses paths
 outside `outputs/` or existing MP4/JSON targets, publishes only a successful
 door opening, and writes the camera-mode evaluation evidence beside the video.
-It does not modify the checkpoint's original metrics or curated Phase 3
-evidence.
+The camera includes the complete robot and door. Capture stays synchronized to
+the 60 Hz control loop; the explicit 30 fps playback makes the motion half-speed
+and the intro/outro holds improve presentation without changing rollout
+physics. The JSON records both rates, holds, and durations. Video mode does not
+modify the checkpoint's original metrics or curated Phase 3 evidence.
 
 The full nested scale master has a dedicated fail-closed orchestrator. It
 requires a clean committed checkout and launches one fresh simulator process

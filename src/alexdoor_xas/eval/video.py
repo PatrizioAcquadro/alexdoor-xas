@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -48,6 +49,9 @@ class RolloutVideoRecorder:
 
     output_path: Path
     fps: int
+    capture_fps: int | None = None
+    intro_hold_s: float = 0.0
+    outro_hold_s: float = 0.0
     _frames: list[np.ndarray] = field(default_factory=list, init=False, repr=False)
     _frame_shape: tuple[int, int, int] | None = field(default=None, init=False, repr=False)
 
@@ -56,7 +60,18 @@ class RolloutVideoRecorder:
         if self.output_path.suffix.lower() != ".mp4":
             raise VideoCaptureError("rollout video output must use the .mp4 extension")
         if self.fps <= 0:
-            raise VideoCaptureError("rollout video fps must be positive")
+            raise VideoCaptureError("rollout video playback fps must be positive")
+        if self.capture_fps is None:
+            self.capture_fps = self.fps
+        if self.capture_fps <= 0:
+            raise VideoCaptureError("rollout video capture fps must be positive")
+        if not (
+            math.isfinite(self.intro_hold_s)
+            and math.isfinite(self.outro_hold_s)
+            and self.intro_hold_s >= 0.0
+            and self.outro_hold_s >= 0.0
+        ):
+            raise VideoCaptureError("rollout video holds must be finite and non-negative")
 
     @property
     def frame_count(self) -> int:
@@ -91,6 +106,25 @@ class RolloutVideoRecorder:
             )
         self._frames.append(rgb.copy())
 
+    def _presentation_frames(self) -> tuple[list[np.ndarray], int, int, int]:
+        """Build playback frames, trimming renderer warm-up black frames."""
+        motion_frames = list(self._frames)
+        dropped_leading_blank = 0
+        while motion_frames and not np.any(motion_frames[0]):
+            motion_frames.pop(0)
+            dropped_leading_blank += 1
+        if not motion_frames:
+            raise VideoCaptureError("all captured rollout frames are blank")
+
+        intro_frames = round(self.intro_hold_s * self.fps)
+        outro_frames = round(self.outro_hold_s * self.fps)
+        presentation = (
+            [motion_frames[0]] * intro_frames
+            + motion_frames
+            + [motion_frames[-1]] * outro_frames
+        )
+        return presentation, dropped_leading_blank, intro_frames, outro_frames
+
     def write(self) -> dict[str, Any]:
         """Encode all captured frames and return auditable file metadata."""
         if not self._frames or self._frame_shape is None:
@@ -100,6 +134,8 @@ class RolloutVideoRecorder:
 
         import imageio.v3 as iio
 
+        frames, dropped_blank, intro_frames, outro_frames = self._presentation_frames()
+        motion_frame_count = self.frame_count - dropped_blank
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.output_path.with_name(
             f".{self.output_path.stem}.encoding{self.output_path.suffix}"
@@ -107,7 +143,7 @@ class RolloutVideoRecorder:
         if temporary.exists():
             raise VideoCaptureError(f"temporary video path already exists: {temporary}")
         try:
-            iio.imwrite(temporary, np.stack(self._frames), fps=self.fps)
+            iio.imwrite(temporary, np.stack(frames), fps=self.fps)
             if not temporary.is_file() or temporary.stat().st_size <= 0:
                 raise VideoCaptureError("video encoder produced no file content")
             temporary.replace(self.output_path)
@@ -123,11 +159,23 @@ class RolloutVideoRecorder:
             "sha256": hashlib.sha256(self.output_path.read_bytes()).hexdigest(),
             "size_bytes": self.output_path.stat().st_size,
             "fps": self.fps,
-            "frame_count": self.frame_count,
+            "playback_fps": self.fps,
+            "capture_fps": self.capture_fps,
+            "playback_speed_factor": self.fps / self.capture_fps,
+            "captured_frame_count": self.frame_count,
+            "dropped_leading_blank_frames": dropped_blank,
+            "motion_frame_count": motion_frame_count,
+            "intro_hold_frames": intro_frames,
+            "outro_hold_frames": outro_frames,
+            "intro_hold_s": intro_frames / self.fps,
+            "outro_hold_s": outro_frames / self.fps,
+            "frame_count": len(frames),
             "width": width,
             "height": height,
             "channels": channels,
-            "duration_s": self.frame_count / self.fps,
+            "source_motion_duration_s": motion_frame_count / self.capture_fps,
+            "playback_motion_duration_s": motion_frame_count / self.fps,
+            "duration_s": len(frames) / self.fps,
         }
 
 

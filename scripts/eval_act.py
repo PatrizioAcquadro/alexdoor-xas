@@ -75,6 +75,24 @@ parser.add_argument(
         "evaluation JSON alongside it (requires --enable_cameras)."
     ),
 )
+parser.add_argument(
+    "--video-playback-fps",
+    type=int,
+    default=30,
+    help="Encoded playback FPS for --video-output (capture remains at the control rate).",
+)
+parser.add_argument(
+    "--video-intro-hold-s",
+    type=float,
+    default=1.0,
+    help="Seconds to hold the first valid frame before the rollout motion.",
+)
+parser.add_argument(
+    "--video-outro-hold-s",
+    type=float,
+    default=2.0,
+    help="Seconds to hold the final successful frame after the rollout motion.",
+)
 AppLauncher.add_app_launcher_args(parser)
 args, hydra_overrides = parser.parse_known_args()
 
@@ -104,6 +122,15 @@ if args.video_output is not None:
         parser.error("--video-output cannot be combined with --determinism-replay")
     if not getattr(args, "enable_cameras", False):
         parser.error("--video-output requires --enable_cameras")
+    if args.video_playback_fps <= 0:
+        parser.error("--video-playback-fps must be positive")
+    if (
+        not math.isfinite(args.video_intro_hold_s)
+        or not math.isfinite(args.video_outro_hold_s)
+        or args.video_intro_hold_s < 0.0
+        or args.video_outro_hold_s < 0.0
+    ):
+        parser.error("--video-intro-hold-s and --video-outro-hold-s must be non-negative")
 # A non-default door pose must carry an explicit pose label: rows and the
 # per-pose metrics filename are keyed by it, so an unlabeled pose would be
 # silently bucketed as the default pose in the smoke summary.
@@ -429,7 +456,13 @@ def main() -> int:
         protocol = _seed_protocol(env)
         control_dt = float(env.cfg.sim.dt) * int(env.cfg.decimation)
         recorder = (
-            RolloutVideoRecorder(video_path, fps=round(1.0 / control_dt))
+            RolloutVideoRecorder(
+                video_path,
+                fps=args.video_playback_fps,
+                capture_fps=round(1.0 / control_dt),
+                intro_hold_s=args.video_intro_hold_s,
+                outro_hold_s=args.video_outro_hold_s,
+            )
             if video_path is not None
             else None
         )

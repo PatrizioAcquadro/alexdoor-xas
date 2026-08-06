@@ -45,8 +45,10 @@ actions; `act/checkpoint.py` enforces self-contained serialization.
 closed-loop rollout to a new MP4 under `outputs/`. The same run writes a JSON
 sidecar with checkpoint identity, rollout metrics, and video metadata. Capture
 fails rather than publishing a missing-frame, unsuccessful, or overwriting
-result; camera-mode evidence remains separate from the frozen headless
-evaluation.
+result. The presentation path uses full-robot/door framing, records at the
+control rate, and explicitly records a configurable playback rate plus
+intro/outro holds; camera-mode evidence remains separate from the frozen
+headless evaluation.
 
 ## Diffusion
 
@@ -99,5 +101,6 @@ the evaluation record.
 - 2026-07-06 to 2026-07-07 — ACT and Diffusion state-only baselines landed.
 - 2026-07-16 to 2026-07-18 — Sixteen scale checkpoints trained on Gilbreth and
   completed the matched workstation evaluation.
-- 2026-08-06 — ACT evaluation gained fail-closed single-rollout MP4 capture
-  with a colocated camera-mode evidence sidecar.
+- 2026-08-06 — ACT evaluation gained fail-closed single-rollout MP4 capture,
+  full-body framing, explicit playback timing and holds, and a colocated
+  camera-mode evidence sidecar.
