@@ -65,3 +65,14 @@ state-only policy, calibrated task physics, and frozen benchmark evidence.
 Verified all 26 wiki pages, internal links, index coverage, nine phase-page
 mappings, allowed tree shape, Markdown whitespace, and protected raw/phase
 boundaries after the visual-room update.
+
+## 2026-08-06 — update : ACT living-room doorway alignment
+
+Documented the bounds-based rotated-doorway alignment and pre-capture renderer
+warm-up that remove the wall gap while preserving the visual-only boundary.
+
+## 2026-08-06 — lint : ACT doorway-alignment documentation
+
+Verified all 26 wiki pages, 77 internal links, index coverage, nine phase-page
+mappings, allowed tree shape, Markdown whitespace, and protected raw/phase
+boundaries after the doorway-alignment correction.

@@ -110,9 +110,13 @@ per-tick first-crossing success termination.
 ACT video capture can optionally compose the combined-scene FloorPlan212
 living room and hallway around the unchanged D0 task. The duplicate furnished
 scene door is removed and every imported physics schema is disabled before the
-rollout. This keeps the visual context outside policy observations, task
-physics, contact filtering, and benchmark evidence; the source asset hash,
-camera profile, and disabled-physics counts are recorded in the video sidecar.
+rollout. The 180-degree placement matches the complete source and task
+doorframe bounds rather than their asymmetric hinge origins, then validates
+the resulting center and size errors. A short render-only warm-up prevents
+partially loaded materials from entering the intro hold. This keeps the visual
+context outside policy observations, task physics, contact filtering, and
+benchmark evidence; the source asset hash, camera profile, alignment evidence,
+warm-up count, and disabled-physics counts are recorded in the video sidecar.
 
 ## Episode and dataset contract
 

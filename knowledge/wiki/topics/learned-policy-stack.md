@@ -53,10 +53,11 @@ headless evaluation.
 Video mode can additionally compose the FloorPlan212 living room and hallway
 from the registered combined scene around the unchanged D0 task door. The
 presentation layer removes the duplicate room door, disables every imported
-collider/rigid-body behavior, and records its source hash, camera profile, and
-disabled-physics counts. It changes rendered pixels only; ACT remains
-state-only and the calibrated task, contact filter, and rollout evidence are
-unchanged.
+collider/rigid-body behavior, aligns the rotated source and task doorframe
+bounds, and warms the renderer before capture. It records the source hash,
+camera profile, alignment errors, warm-up count, and disabled-physics counts.
+It changes rendered pixels only; ACT remains state-only and the calibrated
+task, contact filter, and rollout evidence are unchanged.
 
 ## Diffusion
 
@@ -114,3 +115,5 @@ the evaluation record.
   camera-mode evidence sidecar.
 - 2026-08-06 — ACT video mode gained an auditable, visual-only FloorPlan212
   living-room and hallway context around the unchanged task door.
+- 2026-08-06 — Rotated doorway placement switched from hinge origins to full
+  doorframe bounds, with renderer warm-up before capture.

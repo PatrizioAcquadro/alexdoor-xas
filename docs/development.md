@@ -103,8 +103,11 @@ unchanged D0 task door, removes the duplicate scene door, and disables all
 imported colliders and rigid-body behavior. This is a presentation-only pixel
 change: policy observations, the calibrated door articulation, contact filter,
 rollout physics, and success criteria remain unchanged. The JSON sidecar records
-the source-scene hash, placement/camera profile, removed door path, and disabled
-physics counts.
+the source-scene hash, placement/camera profile, doorframe-bounds alignment
+errors, render warm-up count, removed door path, and disabled physics counts.
+The bounds-based alignment is required after the 180-degree room rotation:
+matching the hinge origins would shift the asymmetric doorway by roughly one
+door width and expose the corridor beside the closed task door.
 
 The full nested scale master has a dedicated fail-closed orchestrator. It
 requires a clean committed checkout and launches one fresh simulator process

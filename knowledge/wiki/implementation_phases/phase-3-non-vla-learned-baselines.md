@@ -119,10 +119,13 @@ original checkpoint metrics and frozen unified evaluation.
 The optional `--visual-room floorplan212_living_room` presentation profile
 references the combined-scene living room and hallway, aligns their doorway
 around the unchanged D0 task door, removes the duplicate room door, and
-disables all imported physics. Its source hash, camera placement, and
-disabled-physics counts are added to the sidecar. The profile changes pixels
-only: ACT observations, door/contact physics, adapters, and success semantics
-remain unchanged.
+disables all imported physics. Because the source doorframe origin is
+hinge-biased, the 180-degree placement matches and validates the complete
+source and task doorframe bounds instead of their origins. The profile also
+warms the renderer before capture; its source hash, camera placement, alignment
+errors, warm-up count, and disabled-physics counts are added to the sidecar.
+The profile changes pixels only: ACT observations, door/contact physics,
+adapters, and success semantics remain unchanged.
 
 #### Key Decisions and Problems
 
@@ -186,3 +189,5 @@ does not require it.
 - 2026-08-06 — Added an optional visual-only FloorPlan212 living-room and
   hallway context for ACT presentation videos without changing benchmark
   physics.
+- 2026-08-06 — Corrected the rotated doorway placement to use full doorframe
+  bounds and added render warm-up before capture.

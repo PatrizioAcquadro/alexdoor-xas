@@ -36,6 +36,7 @@ from isaaclab.app import AppLauncher
 
 from alexdoor_xas.eval.visual_room import (
     VISUAL_ROOM_PROFILE_NAMES,
+    VISUAL_ROOM_RENDER_WARMUP_FRAMES,
     attach_visual_room,
     visual_room_profile,
 )
@@ -447,10 +448,12 @@ def main() -> int:
                     "/World/envs/env_0/DoorTaskScene/DoorTaskDoor/Doorframe"
                 ),
             )
-            env.sim.render()
+            for _ in range(VISUAL_ROOM_RENDER_WARMUP_FRAMES):
+                env.render()
+            visual_context["render_warmup_frames"] = VISUAL_ROOM_RENDER_WARMUP_FRAMES
             print(
                 f"[eval_act] visual room={visual_context['profile']['label']} "
-                "physics=disabled",
+                f"physics=disabled warmup_frames={VISUAL_ROOM_RENDER_WARMUP_FRAMES}",
                 flush=True,
             )
         runtime_asset = RobotAssetRef.from_dict(env.robot_asset_provenance())

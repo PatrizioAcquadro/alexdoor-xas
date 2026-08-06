@@ -7,6 +7,7 @@ import pytest
 from alexdoor_xas.eval.visual_room import (
     DEFAULT_VISUAL_ROOM_PROFILE,
     VISUAL_ROOM_PROFILE_NAMES,
+    VISUAL_ROOM_RENDER_WARMUP_FRAMES,
     VisualRoomError,
     visual_room_profile,
 )
@@ -15,6 +16,7 @@ from alexdoor_xas.eval.visual_room import (
 def test_living_room_profile_is_frozen_for_video_capture() -> None:
     assert VISUAL_ROOM_PROFILE_NAMES == ("floorplan212_living_room",)
     assert DEFAULT_VISUAL_ROOM_PROFILE == "floorplan212_living_room"
+    assert VISUAL_ROOM_RENDER_WARMUP_FRAMES == 8
 
     profile = visual_room_profile(DEFAULT_VISUAL_ROOM_PROFILE)
 
