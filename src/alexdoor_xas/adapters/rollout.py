@@ -358,6 +358,7 @@ def rollout_chunks(
     stop_on_reject: bool = False,
     success_angle_rad: float | None = None,
     post_success_diagnostic: bool = False,
+    step_hook: Callable[[int], None] | None = None,
 ) -> RolloutResult:
     """Drive the env with adapter-mediated chunks until success/exhaustion/budget.
 
@@ -381,6 +382,11 @@ def rollout_chunks(
     read). A defensive episode-counter guard (``env.episode_length_buf``)
     additionally fails loudly if an unreported mid-rollout reset slipped
     through — analogous to the data-engine guard.
+
+    When provided, ``step_hook`` runs after every completed, non-truncated
+    environment step. It receives the one-based tick count and may fail the
+    rollout; video capture uses this boundary so a missing frame cannot be
+    silently accepted.
 
     The env must already be reset; the door frame is read once up front (the
     stage-read pose is static for the episode in this build).
@@ -460,6 +466,8 @@ def rollout_chunks(
                     f"at tick {ticks}; rollout state frozen at the last valid read"
                 )
                 break
+            if step_hook is not None:
+                step_hook(ticks)
             try:
                 ctx = read_step_context(env, door_frame, joint_limits, execution_limits)
             except InvalidSimulatorStateError as exc:

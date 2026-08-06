@@ -41,6 +41,13 @@ executes ACT without temporal ensembling. `act/train.py` owns optimization and
 validation; `act/policy.py` normalizes observations and denormalizes predicted
 actions; `act/checkpoint.py` enforces self-contained serialization.
 
+`scripts/eval_act.py --video-output` can record exactly one camera-enabled
+closed-loop rollout to a new MP4 under `outputs/`. The same run writes a JSON
+sidecar with checkpoint identity, rollout metrics, and video metadata. Capture
+fails rather than publishing a missing-frame, unsuccessful, or overwriting
+result; camera-mode evidence remains separate from the frozen headless
+evaluation.
+
 ## Diffusion
 
 `src/alexdoor_xas/policies/diffusion/model.py::DiffusionTransformer` is a
@@ -92,3 +99,5 @@ the evaluation record.
 - 2026-07-06 to 2026-07-07 — ACT and Diffusion state-only baselines landed.
 - 2026-07-16 to 2026-07-18 — Sixteen scale checkpoints trained on Gilbreth and
   completed the matched workstation evaluation.
+- 2026-08-06 — ACT evaluation gained fail-closed single-rollout MP4 capture
+  with a colocated camera-mode evidence sidecar.

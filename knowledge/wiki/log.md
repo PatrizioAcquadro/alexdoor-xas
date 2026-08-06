@@ -29,3 +29,15 @@ curated package and review status.
 Verified the new experiment index entry, all internal wikilinks, Markdown
 whitespace, and protected raw and phase paths. No raw source was ingested and
 no executable behavior changed.
+
+## 2026-08-06 — update : ACT rollout video capture
+
+Documented the fail-closed single-rollout ACT MP4 path, its colocated
+camera-mode evidence, and its separation from frozen Phase 3 evaluation
+artifacts. No user-owned raw material was modified or ingested.
+
+## 2026-08-06 — lint : ACT rollout video documentation
+
+Verified all 26 wiki pages, internal wikilinks, index coverage, nine phase-page
+mappings, allowed tree shape, Markdown whitespace, and protected-directory
+boundaries after the ACT video update.

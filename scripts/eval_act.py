@@ -28,6 +28,7 @@ import math
 import os
 import sys
 import traceback
+from functools import partial
 
 # -- AppLauncher must be configured before any other Isaac import; the ACT
 # config layer is torch/Isaac-free, so it resolves first (Hydra precedent).
@@ -65,6 +66,15 @@ parser.add_argument(
     action="store_true",
     help="Call SimulationApp.close() before exiting; useful for debugging Kit shutdown hangs.",
 )
+parser.add_argument(
+    "--video-output",
+    type=str,
+    default=None,
+    help=(
+        "Record exactly one rollout to a new MP4 under outputs/ and write its "
+        "evaluation JSON alongside it (requires --enable_cameras)."
+    ),
+)
 AppLauncher.add_app_launcher_args(parser)
 args, hydra_overrides = parser.parse_known_args()
 
@@ -81,6 +91,19 @@ except ActConfigError as error:
     parser.error(str(error))
 if act_cfg.rollout.checkpoint is None:
     parser.error("rollout.checkpoint is required (--checkpoint or rollout.checkpoint=...)")
+if args.video_output is not None:
+    n_rollouts = act_cfg.rollout.episodes_fixed + act_cfg.rollout.episodes_randomized
+    if n_rollouts != 1:
+        parser.error(
+            "--video-output requires exactly one configured rollout "
+            "(rollout.episodes_fixed + rollout.episodes_randomized == 1)"
+        )
+    if act_cfg.rollout.matched_scripted_reference:
+        parser.error("--video-output cannot run a matched scripted reference")
+    if args.determinism_replay:
+        parser.error("--video-output cannot be combined with --determinism-replay")
+    if not getattr(args, "enable_cameras", False):
+        parser.error("--video-output requires --enable_cameras")
 # A non-default door pose must carry an explicit pose label: rows and the
 # per-pose metrics filename are keyed by it, so an unlabeled pose would be
 # silently bucketed as the default pose in the smoke summary.
@@ -124,6 +147,10 @@ from alexdoor_xas.envs.door_task.door_push_alex_v2_env_cfg import (  # noqa: E40
 )
 from alexdoor_xas.eval.metrics import aggregate_metrics, episode_metrics  # noqa: E402
 from alexdoor_xas.eval.sanity import FORCE_DATASET_LIMIT_N  # noqa: E402
+from alexdoor_xas.eval.video import (  # noqa: E402
+    RolloutVideoRecorder,
+    resolve_video_output,
+)
 from alexdoor_xas.policies.act.policy import (  # noqa: E402
     ActPolicy,
     act_chunk_source,
@@ -158,7 +185,12 @@ def _make_env():
     cfg.sim.device = args.device
     cfg.door_yaw_rad = math.radians(act_cfg.rollout.door_yaw_deg)
     cfg.door_offset_xy = (act_cfg.rollout.door_offset_x, act_cfg.rollout.door_offset_y)
-    return gym.make(door_task.DOOR_PUSH_ALEX_V2_ENV_ID, cfg=cfg).unwrapped
+    render_mode = "rgb_array" if args.video_output is not None else None
+    return gym.make(
+        door_task.DOOR_PUSH_ALEX_V2_ENV_ID,
+        cfg=cfg,
+        render_mode=render_mode,
+    ).unwrapped
 
 
 def _door_pose_payload() -> dict:
@@ -192,6 +224,7 @@ def _run_rollout(
     success_angle_rad: float,
     *,
     capture_final_ee: bool = False,
+    step_hook=None,
 ) -> tuple[dict, object, dict | None]:
     env.reset(seed=seed)
     settle_report = None
@@ -214,6 +247,7 @@ def _run_rollout(
         adapter,
         max_ticks=act_cfg.rollout.max_ticks,
         success_angle_rad=success_angle_rad,
+        step_hook=step_hook,
     )
     warning_summary = summarize_decision_warnings(result.decisions_per_tick)
     control_dt = float(env.cfg.sim.dt) * int(env.cfg.decimation)
@@ -345,6 +379,15 @@ def main() -> int:
     env = None
     try:
         checkpoint_path = paths.REPO_ROOT / act_cfg.rollout.checkpoint
+        video_path = (
+            resolve_video_output(
+                args.video_output,
+                repo_root=paths.REPO_ROOT,
+                outputs_root=paths.OUTPUTS_DIR,
+            )
+            if args.video_output is not None
+            else None
+        )
         env = _make_env()
         runtime_asset = RobotAssetRef.from_dict(env.robot_asset_provenance())
         policy = ActPolicy.from_checkpoint(
@@ -384,12 +427,21 @@ def main() -> int:
 
         plan = _episode_plan(env)
         protocol = _seed_protocol(env)
+        control_dt = float(env.cfg.sim.dt) * int(env.cfg.decimation)
+        recorder = (
+            RolloutVideoRecorder(video_path, fps=round(1.0 / control_dt))
+            if video_path is not None
+            else None
+        )
         rows: list[dict] = []
         first_fixed_result = None
         first_fixed_ee = None
         fixed_i = 0
         random_i = 0
         for item in plan:
+            step_hook = None
+            if recorder is not None:
+                step_hook = partial(recorder.capture, env)
             row, result, ee_state = _run_rollout(
                 env,
                 policy,
@@ -397,6 +449,7 @@ def main() -> int:
                 item.variation,
                 success_angle_rad,
                 capture_final_ee=item.variation is None and first_fixed_result is None,
+                step_hook=step_hook,
             )
             rows.append(row)
             if item.variation is None:
@@ -430,6 +483,32 @@ def main() -> int:
             )
 
         aggregate = aggregate_rollout_rows(rows)
+        video_metadata = None
+        if recorder is not None:
+            if not rows[0]["success"]:
+                raise RuntimeError(
+                    "camera-enabled rollout did not reach the success angle; "
+                    "refusing to publish a door-opening video"
+                )
+            if recorder.frame_count != rows[0]["n_ticks"]:
+                raise RuntimeError(
+                    f"captured {recorder.frame_count} frames for "
+                    f"{rows[0]['n_ticks']} completed rollout ticks"
+                )
+            video_metadata = recorder.write()
+            video_metadata.update(
+                {
+                    "seed": rows[0]["seed"],
+                    "randomized": rows[0]["randomized"],
+                    "door_pose": _door_pose_payload(),
+                    "success": rows[0]["success"],
+                    "first_success_tick": rows[0]["first_success_tick"],
+                    "time_to_success_s": rows[0]["time_to_success_s"],
+                    "max_contact_force_n": rows[0]["force_n_all_samples"]["max"],
+                    "adapter_corrected": rows[0]["n_corrected"],
+                    "adapter_rejected": rows[0]["n_rejected"],
+                }
+            )
         matched_scripted_reference = None
         if act_cfg.rollout.matched_scripted_reference:
             matched_scripted_reference = _run_matched_scripted_reference(
@@ -465,25 +544,33 @@ def main() -> int:
             "success_semantics": "per_tick_first_crossing_stop",
             "base_seed": act_cfg.rollout.base_seed,
             "door_pose": _door_pose_payload(),
-            "control_dt": float(env.cfg.sim.dt) * int(env.cfg.decimation),
+            "control_dt": control_dt,
             "dataset_provenance": provenance,
             "seed_protocol": protocol,
             "determinism_probe": determinism_probe,
             "rollouts": rows,
             "aggregate": aggregate,
+            "video": video_metadata,
             "scripted_reference": _reference_aggregate(),
             "scripted_matched_reference": matched_scripted_reference,
         }
         # Pose-qualified filename so per-pose eval invocations never overwrite
         # each other (the default/no-pose-id eval keeps the frozen name).
-        eval_name = (
-            f"act_eval_{act_cfg.rollout.door_pose_id}.json"
-            if act_cfg.rollout.door_pose_id
-            else "act_eval.json"
-        )
-        metrics_path = run_dir / "metrics" / eval_name
+        if video_path is not None:
+            metrics_path = video_path.with_suffix(".json")
+        else:
+            eval_name = (
+                f"act_eval_{act_cfg.rollout.door_pose_id}.json"
+                if act_cfg.rollout.door_pose_id
+                else "act_eval.json"
+            )
+            metrics_path = run_dir / "metrics" / eval_name
         metrics_path.parent.mkdir(parents=True, exist_ok=True)
-        metrics_path.write_text(json.dumps(payload, indent=2) + "\n")
+        if video_path is not None:
+            with metrics_path.open("x") as stream:
+                stream.write(json.dumps(payload, indent=2) + "\n")
+        else:
+            metrics_path.write_text(json.dumps(payload, indent=2) + "\n")
 
         wandb_cfg = load_wandb_config(
             overrides={
@@ -515,6 +602,13 @@ def main() -> int:
             flush=True,
         )
         print(f"[eval_act] metrics: {metrics_path}", flush=True)
+        if video_metadata is not None:
+            print(
+                f"[eval_act] video: {video_metadata['path']} "
+                f"frames={video_metadata['frame_count']} "
+                f"duration={video_metadata['duration_s']:.3f}s",
+                flush=True,
+            )
     except Exception:  # noqa: BLE001
         traceback.print_exc()
         print("FAIL: ACT evaluation failed.", flush=True)

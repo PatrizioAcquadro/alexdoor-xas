@@ -314,6 +314,35 @@ def test_policy_exhaustion_and_tick_budget_reasons() -> None:
     assert budget.n_ticks == 6
 
 
+def test_step_hook_observes_each_completed_tick() -> None:
+    observed_ticks: list[int] = []
+    result = _run(
+        FakeDoorPushEnv(),
+        4,
+        max_ticks=6,
+        step_hook=observed_ticks.append,
+    )
+
+    assert result.n_ticks == 6
+    assert observed_ticks == [1, 2, 3, 4, 5, 6]
+
+
+def test_step_hook_does_not_capture_auto_reset_tick() -> None:
+    observed_ticks: list[int] = []
+    env = TruncatingEnv(truncate_at=2)
+    env.reset(seed=0)
+    result = rollout_chunks(
+        env,
+        _push_source(3),
+        A2Adapter(PROXY_LIMITS),
+        step_hook=observed_ticks.append,
+    )
+
+    assert result.n_ticks == 2
+    assert result.env_truncated is True
+    assert observed_ticks == [1]
+
+
 def test_env_truncation_freezes_pre_reset_state() -> None:
     # Truncate one tick before the known success crossing: the door is open
     # (angle > 0) but the env auto-resets it to 0 inside the truncating step.

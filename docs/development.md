@@ -74,6 +74,23 @@ headless physics traces must be compared within their own mode. Non-default
 door-pose runs cannot export directly; create per-pose no-export runs and merge
 them once with `scripts/export_merged_dataset.py` and a tracked pose plan.
 
+Record one learned ACT rollout to a new MP4 under `outputs/` with:
+
+```bash
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/eval_act.py \
+  --viz none --device cpu --enable_cameras \
+  --checkpoint outputs/act_door_push/RUN_ID/checkpoints/best.pt \
+  --video-output outputs/demo_videos/act_rollout.mp4 \
+  rollout.policy_device=cuda rollout.episodes_fixed=0 \
+  rollout.episodes_randomized=1 rollout.base_seed=106
+```
+
+Video mode is fail-closed: it requires exactly one rollout, refuses paths
+outside `outputs/` or existing MP4/JSON targets, publishes only a successful
+door opening, and writes the camera-mode evaluation evidence beside the video.
+It does not modify the checkpoint's original metrics or curated Phase 3
+evidence.
+
 The full nested scale master has a dedicated fail-closed orchestrator. It
 requires a clean committed checkout and launches one fresh simulator process
 per pose. Generation state is commit/plan-hash bound and resumes only after

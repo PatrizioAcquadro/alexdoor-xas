@@ -109,6 +109,12 @@ normalization, split, dataset, provenance, and robot-asset bindings. The
 default training contract is in `configs/act.yaml`; Hydra overrides select
 dataset space and version.
 
+The later `scripts/eval_act.py --video-output` path records one successful
+camera-enabled rollout to a new MP4 under `outputs/` and writes its evaluation
+JSON alongside it. The path is overwrite-safe and keeps camera-mode demo
+evidence separate from the original checkpoint metrics and frozen unified
+evaluation.
+
 #### Key Decisions and Problems
 
 - ACT predicts action chunks to model short-horizon temporal structure while
@@ -166,3 +172,5 @@ does not require it.
 - 2026-07-08 onward — Alex V2 migration and stabilization refreshed datasets,
   robot bindings, checkpoints, and rollout semantics while preserving the
   state-only Phase 3 model boundary.
+- 2026-08-06 — Added fail-closed single-rollout ACT video capture and colocated
+  camera-mode evidence.
