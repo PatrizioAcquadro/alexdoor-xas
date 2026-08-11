@@ -79,7 +79,7 @@ def test_v2_runtime_refuses_missing_dedicated_articulation_cfg() -> None:
         inject_alex_v2_runtime_cfg(SimpleNamespace(), None, _calibration())
 
 
-def test_executor_source_hooks_offset_pose_point_jacobian_and_filtered_force() -> None:
+def test_executor_source_hooks_offset_pose_point_jacobian_and_exact_gpu_force() -> None:
     source = (_TASK_DIR / "door_push_alex_v2_executor.py").read_text(encoding="utf-8")
 
     assert "class DoorPushAlexV2Executor(DoorPushRobotEnv)" in source
@@ -87,8 +87,9 @@ def test_executor_source_hooks_offset_pose_point_jacobian_and_filtered_force() -
     assert "link_jacobian_to_point(" in source
     assert "def _ee_pose_w(" in source
     assert "def _solve_arm_ik(" in source
-    assert "force_matrix_w" in source
-    assert "force.sum(dim=(1, 2))" in source
+    assert "get_raw_contact_data" in source
+    assert "sum_actor_contact_forces" in source
+    assert "get_other_actor_paths_from_ids" in source
     assert "net_forces_w" not in source
     assert "def robot_asset_provenance(" in source
     assert "def alex_v2_calibration(" in source
@@ -102,10 +103,15 @@ def test_executor_source_hooks_offset_pose_point_jacobian_and_filtered_force() -
     )
 
 
-def test_v2_cfg_requires_exact_door_panel_filter() -> None:
+def test_v2_cfg_requires_gpu_raw_contacts_without_physx_filter_patterns() -> None:
     source = (_TASK_DIR / "door_push_alex_v2_env_cfg.py").read_text(encoding="utf-8")
+    base_cfg_source = (_TASK_DIR / "door_push_robot_env_cfg.py").read_text(encoding="utf-8")
 
-    assert "filter_prim_paths_expr=[DOOR_PANEL_PRIM_PATH]" in source
+    assert "filter_prim_paths_expr=[]" in source
+    assert 'DOOR_PANEL_BODY_PRIM_PATH = f"{DOOR_TASK_ARTICULATION_PRIM_PATH}/Door"' in (
+        base_cfg_source
+    )
+    assert "Cylinder_001" not in base_cfg_source
     assert "ContactSensorCfg(" in source
     assert "class DoorPushAlexV2EnvCfg(DoorPushRobotEnvCfg)" in source
 

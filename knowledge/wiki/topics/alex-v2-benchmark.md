@@ -24,8 +24,9 @@ limited to 0.02 m per control tick. Rotation remains represented but is not
 actuated.
 
 Success is the first hinge crossing at 45 degrees. Door poses D0-D4 move the
-fixture around its hinge. Contact force is filtered to the door panel and does
-not represent all robot/environment contacts.
+fixture around its hinge. Contact force comes from PhysX raw GPU contact buffers
+and is selected by the exact door actor ID; it does not represent arbitrary
+robot/environment contacts.
 
 ## Limits
 
@@ -34,5 +35,7 @@ hardware calibration workflow, or hardware safety layer.
 
 ## Version Notes
 
+- 2026-08-11 — Replaced the unsupported GPU shape-level contact filter with
+  exact door-actor selection over raw GPU contact buffers.
 - 2026-08-11 — Replaced the self-fingerprinted candidate/validated calibration
   pair with one minimal active calibration plus the existing live verifier.

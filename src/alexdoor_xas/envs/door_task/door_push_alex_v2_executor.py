@@ -6,7 +6,9 @@ from collections.abc import Mapping
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import torch
+import warp as wp
 
 from alexdoor_xas.assets.alex_v2 import load_alex_v2_articulation_cfg
 from alexdoor_xas.assets.alex_v2_contract import RobotAssetRef
@@ -17,7 +19,9 @@ from alexdoor_xas.kinematics.offset_point import (
 )
 
 from .alex_v2_runtime import inject_alex_v2_runtime_cfg
+from .contact_force import sum_actor_contact_forces
 from .door_push_robot_env import DoorPushRobotEnv
+from .door_push_robot_env_cfg import DOOR_PANEL_BODY_PRIM_PATH
 from .joint_limits import clamp_joint_targets
 
 if TYPE_CHECKING:
@@ -59,6 +63,8 @@ class DoorPushAlexV2Executor(DoorPushRobotEnv):
         self._tool_orientation_link_xyzw = tuple(
             float(value) for value in calibration.tool_frame["orientation_xyzw"]
         )
+        self._door_contact_actor_ids: dict[int, int] = {}
+        self._contact_actor_paths_seen: set[str] = set()
         robot_cfg = load_alex_v2_articulation_cfg(fix_base=True)
         inject_alex_v2_runtime_cfg(cfg, robot_cfg, calibration)
         super().__init__(cfg, render_mode, **kwargs)
@@ -113,24 +119,82 @@ class DoorPushAlexV2Executor(DoorPushRobotEnv):
         self._joint_targets[:, self._arm_joint_ids] = self._arm_targets
 
     def contact_force_w(self) -> torch.Tensor:
-        """Sum every exact-door filter entry; never use unfiltered net force."""
+        """Return exact gripper-to-door force from PhysX raw GPU contacts."""
 
-        force_matrix = self._contact_sensor.data.force_matrix_w
-        if force_matrix is None:
-            raise RuntimeError(
-                "Alex V2 requires filtered force_matrix_w for the exact door panel"
-            )
-        force = _as_torch(force_matrix)
-        if force.ndim != 4 or force.shape[-1] != 3:
-            raise RuntimeError(
-                "Alex V2 filtered contact force must have shape (N, B, F, 3), "
-                f"got {tuple(force.shape)}"
-            )
-        if force.shape[1] < 1 or force.shape[2] < 1:
-            raise RuntimeError("Alex V2 filtered contact force contains no filter entries")
-        if not bool(torch.isfinite(force).all()):
-            raise RuntimeError("Alex V2 filtered contact force contains non-finite values")
-        return force.sum(dim=(1, 2)).clone()
+        contact_view = self._contact_sensor.contact_view
+        if not hasattr(contact_view, "get_raw_contact_data"):
+            raise RuntimeError("PhysX raw contact data is required for GPU door-force sensing")
+        (
+            force_magnitudes,
+            _,
+            normals_w,
+            _,
+            counts,
+            start_indices,
+            other_actor_ids,
+        ) = contact_view.get_raw_contact_data(dt=self.physics_dt)
+        self._resolve_door_contact_actor_ids(
+            counts,
+            start_indices,
+            other_actor_ids,
+            contact_view,
+        )
+
+        target_ids = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        target_known = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        for env_id, actor_id in self._door_contact_actor_ids.items():
+            target_ids[env_id] = actor_id
+            target_known[env_id] = True
+
+        try:
+            return sum_actor_contact_forces(
+                wp.to_torch(force_magnitudes),
+                wp.to_torch(normals_w),
+                wp.to_torch(counts),
+                wp.to_torch(start_indices),
+                wp.to_torch(other_actor_ids),
+                target_ids,
+                target_known,
+            ).clone()
+        except ValueError as error:
+            raise RuntimeError(f"invalid PhysX raw contact data: {error}") from error
+
+    def _resolve_door_contact_actor_ids(
+        self,
+        counts: Any,
+        start_indices: Any,
+        other_actor_ids: Any,
+        contact_view: Any,
+    ) -> None:
+        """Resolve actor IDs once, then keep per-tick filtering on the GPU."""
+
+        unresolved = set(range(self.num_envs)) - self._door_contact_actor_ids.keys()
+        if not unresolved:
+            return
+        counts_cpu = np.asarray(counts.numpy(), dtype=np.int64).reshape(-1)
+        starts_cpu = np.asarray(start_indices.numpy(), dtype=np.int64).reshape(-1)
+        actor_ids_cpu = np.asarray(other_actor_ids.numpy(), dtype=np.uint64).reshape(-1)
+        for env_id in unresolved:
+            count = int(counts_cpu[env_id])
+            if count == 0:
+                continue
+            start = int(starts_cpu[env_id])
+            actor_ids = actor_ids_cpu[start : start + count]
+            unique_ids = np.unique(actor_ids)
+            ids_buffer = wp.array(unique_ids, dtype=wp.uint64, device="cpu")
+            paths = contact_view.get_other_actor_paths_from_ids(ids_buffer)
+            expected = DOOR_PANEL_BODY_PRIM_PATH.replace("env_.*", f"env_{env_id}", 1)
+            for actor_id, path in zip(unique_ids, paths, strict=True):
+                path = str(path)
+                self._contact_actor_paths_seen.add(path)
+                if path == expected or path.startswith(expected + "/"):
+                    self._door_contact_actor_ids[env_id] = int(actor_id)
+                    break
+
+    def contact_actor_paths_seen(self) -> tuple[str, ...]:
+        """Return raw-contact partner paths observed while resolving door IDs."""
+
+        return tuple(sorted(self._contact_actor_paths_seen))
 
     def point_jacobian_w(self) -> torch.Tensor:
         """World-frame tool-point Jacobian for the six ordered arm joints."""

@@ -18,12 +18,13 @@ from .door_env_cfg import (
 )
 from .door_push_env_cfg import ACTION_TERMS, OBSERVATION_TERMS
 
-DOOR_PANEL_PRIM_PATH = "/World/envs/env_.*/DoorTaskScene/DoorTaskDoor/Door/Cylinder_001"
-"""Door panel collision-shape prim (the 25 kg slab's only collider), used as the
-contact-sensor filter. Must be the *shape* prim, not the ``Door`` body: PhysX
-filter globs prefix-match path strings, so the body path also captures the
-sibling ``Doorframe`` collider ("expected 1, found 2") and the filtered
-``force_matrix_w`` view silently fails to build (measured on 6.0.1)."""
+DOOR_PANEL_BODY_PRIM_PATH = f"{DOOR_TASK_ARTICULATION_PRIM_PATH}/Door"
+"""Rigid body containing the door panel's only collider.
+
+The executor compares this exact path with the opposite actor IDs reported by
+the raw GPU contact buffer. The trailing-path check cannot confuse ``Door``
+with the sibling ``Doorframe`` body.
+"""
 
 HINGE_DAMPING_NM_S_PER_RAD = 4.0
 """Passive hinge damping for the articulated-robot door task."""
@@ -127,6 +128,6 @@ class DoorPushRobotEnvCfg(DirectRLEnvCfg):
 
 
 __all__ = [
-    "DOOR_PANEL_PRIM_PATH",
+    "DOOR_PANEL_BODY_PRIM_PATH",
     "DoorPushRobotEnvCfg",
 ]

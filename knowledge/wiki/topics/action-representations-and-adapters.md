@@ -55,8 +55,10 @@ this layer.
 
 ## Contact and Force Semantics
 
-Task force is filtered to contact with the door-panel shape, not arbitrary
-robot collision. Pre-action contact belongs to each recorded step;
+Task force uses PhysX raw GPU contact buffers and selects only contacts whose
+opposite actor ID belongs to the door panel body. It does not use the gripper's
+unfiltered net force or the unsupported shape-filter API. Pre-action contact
+belongs to each recorded step;
 `terminal_contact` records the response to the final action. Two current input
 validation gaps are documented: finite scalar contact values are coerced to
 Boolean rather than restricted to exact Boolean/0/1, and geometric contact

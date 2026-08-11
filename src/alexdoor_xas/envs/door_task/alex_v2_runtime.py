@@ -20,8 +20,8 @@ ALEX_V2_LIMITATIONS = (
     "rotation action components remain recorded but are not actuated.",
     "The controlled EE is the collision-derived gripper support point and its "
     "point Jacobian, both pinned to the validated runtime manifest.",
-    "Contact force requires the exact door-panel filtered force matrix; unfiltered "
-    "net force is never accepted.",
+    "Contact force is selected by exact door actor ID from PhysX raw GPU contacts; "
+    "unfiltered net force is never accepted.",
     "The standard articulated forearm collision union is used without external hands.",
 )
 

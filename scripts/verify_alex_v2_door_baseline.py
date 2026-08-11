@@ -443,11 +443,10 @@ def main() -> int:
             ],
             "force_admission_passed": fixed["force_diagnostics"]["force_admission_passed"],
             "force_diagnostics": fixed["force_diagnostics"],
-            "filtered_force_matrix_shape": list(
-                _tensor(env._contact_sensor.data.force_matrix_w).shape  # noqa: SLF001
-            ),
+            "raw_contact_capacity": env.cfg.ee_contact.max_contact_data_count_per_prim,
             "filter_prim_paths_expr": list(env.cfg.ee_contact.filter_prim_paths_expr),
-            "force_semantics": "sum of exact door-panel force_matrix_w entries",
+            "contact_actor_paths_seen": list(env.contact_actor_paths_seen()),
+            "force_semantics": "exact door actor selected from PhysX raw GPU contacts",
             "passed": contact_passed,
         }
 

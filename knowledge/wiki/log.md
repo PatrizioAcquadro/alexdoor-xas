@@ -103,3 +103,15 @@ experiment summaries.
 Verified all internal wikilinks, complete index coverage, exactly nine phase
 pages, repository-relative references, Markdown whitespace, and the protected
 raw and local-output boundaries after the cleanup.
+
+## 2026-08-11 — update : GPU-compatible Alex V2 contact sensing
+
+Replaced collision-shape filtering with exact door-actor selection over PhysX
+raw GPU contact buffers and documented the unchanged pair-specific force
+semantics.
+
+## 2026-08-11 — lint : GPU contact-sensing documentation
+
+Verified internal links, index coverage, phase-page count, repository-relative
+references, Markdown whitespace, and protected boundaries after the GPU contact
+sensor correction.
