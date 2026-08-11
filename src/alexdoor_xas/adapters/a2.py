@@ -10,7 +10,7 @@ Checks implemented here: shape/finiteness, per-tick position/rotation clamps,
 workspace reachability (robots with a measured workspace model), and
 warn-level joint position/velocity limit flags (envs that report joint state).
 Acceleration limits, collision queries beyond the door panel, and slip
-detection are documented future checks (docs/architecture.md).
+detection are documented future checks in the action-representation wiki page.
 """
 
 from __future__ import annotations

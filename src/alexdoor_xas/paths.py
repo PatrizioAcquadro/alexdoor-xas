@@ -20,7 +20,10 @@ REPO_ROOT: Path = Path(__file__).resolve().parents[2]
 
 DATASETS_DIR: Path = REPO_ROOT / "datasets"   # reusable exported episodes (Phase 2+)
 OUTPUTS_DIR: Path = REPO_ROOT / "outputs"     # per-run artifacts (metrics/plots/…)
-DOCS_DIR: Path = REPO_ROOT / "docs"
+KNOWLEDGE_DIR: Path = REPO_ROOT / "knowledge"
+WIKI_DIR: Path = KNOWLEDGE_DIR / "wiki"
+# Backward-compatible name for the canonical documentation directory.
+DOCS_DIR: Path = WIKI_DIR
 
 # ── External asset root (referenced in place, overridable) ───────────────────
 ASSETS_ROOT: Path = Path(

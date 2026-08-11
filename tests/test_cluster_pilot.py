@@ -174,6 +174,10 @@ def test_transfer_inventory_is_exactly_a2_a3_split_and_tracked_pilot_files(
         "src/alexdoor_xas/cluster_pilot/wandb_publication.py"
         in config.tracked_transfer_files
     )
+    assert (
+        "knowledge/wiki/implementation_phases/extra-03-gilbreth-compatibility-pilot.md"
+        in config.tracked_transfer_files
+    )
     assert all("A1_joint_delta" not in path for path in paths)
     assert all("A4_obj_centric_chunk" not in path for path in paths)
     assert all("outputs/local_smoke" not in path for path in paths)

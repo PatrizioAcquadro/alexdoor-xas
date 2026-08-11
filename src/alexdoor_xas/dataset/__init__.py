@@ -2,7 +2,8 @@
 
 The frozen contract that lets learned baselines (ACT, Diffusion Policy, later
 VLA conversion) consume Phase 2 episode datasets without special-case hacks.
-See docs/architecture.md. Pure numpy — no Isaac imports, h5py lazy.
+See ``knowledge/wiki/topics/episode-and-dataset-contracts.md``. Pure numpy —
+no Isaac imports, h5py lazy.
 """
 
 from __future__ import annotations

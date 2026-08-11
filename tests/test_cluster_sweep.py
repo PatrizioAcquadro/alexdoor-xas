@@ -45,7 +45,9 @@ def _write_executable(path: Path, content: str) -> None:
     path.chmod(0o755)
 
 
-def test_direct_manifest_verification_does_not_require_repo_root_on_pythonpath() -> None:
+def test_direct_manifest_verification_does_not_require_repo_root_on_pythonpath(
+    tmp_path: Path, config
+) -> None:
     worktree = subprocess.run(
         ["git", "status", "--porcelain", "--untracked-files=all"],
         cwd=REPO_ROOT,
@@ -55,13 +57,16 @@ def test_direct_manifest_verification_does_not_require_repo_root_on_pythonpath()
     )
     if worktree.stdout:
         pytest.skip("exact committed-manifest verification requires a clean worktree")
+    manifest_path = tmp_path / "current_sweep_transfer_manifest.json"
+    manifest = build_sweep_transfer_manifest(REPO_ROOT, config)
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     command = [
         "scripts/build_cluster_sweep_manifest.py",
         "verify",
         "--config",
         "configs/cluster_sweep.v1.json",
         "--manifest",
-        "outputs/cluster_sweep/sweep_transfer_manifest.json",
+        str(manifest_path),
     ]
     isolated_entrypoint = """
 import os
@@ -134,6 +139,12 @@ def test_sweep_config_freezes_master_views_and_16_stable_cells(config) -> None:
     assert config.selection.pose_plan == "configs/door_pose_plan_v3_scale.json"
     assert config.selection.canonical_pose_plan == "configs/door_pose_plan_v2_pose.json"
     assert config.selection.calibration == "configs/alex_v2_door_calibration.v0.json"
+    assert {
+        "knowledge/wiki/topics/system-architecture.md",
+        "knowledge/wiki/implementation_phases/phase-1-project-and-simulation-readiness.md",
+        "knowledge/wiki/status.md",
+        "knowledge/wiki/implementation_phases/extra-05-full-gilbreth-nested-sweep.md",
+    }.issubset(config.tracked_transfer_files)
 
 
 @pytest.mark.parametrize(

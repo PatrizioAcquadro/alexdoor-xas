@@ -1,4 +1,4 @@
-"""Logging role: record every trial to the episode schema (docs/architecture.md)."""
+"""Record every trial to the schema in the episode-and-dataset wiki contract."""
 
 from __future__ import annotations
 

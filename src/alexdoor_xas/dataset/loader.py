@@ -6,7 +6,7 @@ into :class:`EpisodeDataset` (A1/A2/A3, HDF5 episodes) or :class:`A4ChunkDataset
 stacked arrays plus meta/outcome, so learned baselines never touch the storage
 container directly. Observation vectors are built from **frozen named presets**
 (:data:`OBS_PRESETS`) — the Phase 3.0 dataset/model interface freeze
-(docs/architecture.md).
+(``knowledge/wiki/topics/episode-and-dataset-contracts.md``).
 
 Pure numpy; h5py is imported lazily (same policy as ``recording/writer.py``).
 """
@@ -28,7 +28,7 @@ from alexdoor_xas.action.spaces import (
 from alexdoor_xas.recording import EpisodeBuffer, read_episode
 
 # Step tables stacked into ``EpisodeRecord.obs``. ``obs_ref`` is skipped: its
-# inline scalars duplicate proprio/object_state keys (docs/architecture.md).
+# inline scalars duplicate proprio/object_state keys (see the dataset-contract wiki page).
 _OBS_TABLES = ("proprio", "object_state", "contact")
 
 CONTACT_FLAG_KEY = "contact_flag"

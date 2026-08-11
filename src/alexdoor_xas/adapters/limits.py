@@ -6,7 +6,8 @@ module never invents or persists a workspace center.
 
 :class:`DoorPanelGeometry` duplicates the panel constants of the scripted
 controller's ``DoorPushControllerCfg`` on purpose: adapters must not import
-policies (docs/architecture.md), so a unit test pins the two instead.
+policies, as documented in the action-representation wiki page, so a unit test
+pins the two instead.
 """
 
 from __future__ import annotations
@@ -138,7 +139,7 @@ def limits_for_robot(
 
 @dataclass(frozen=True)
 class DoorPanelGeometry:
-    """Measured door-panel geometry in the panel frame (docs/architecture.md).
+    """Measured door-panel geometry in the panel frame.
 
     The panel occupies ``x in [0, thickness]``, ``y in [0, width]``,
     ``z in [-height/2, height/2]`` (the hinge origin sits at panel mid-height).

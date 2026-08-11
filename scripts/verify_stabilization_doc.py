@@ -25,7 +25,7 @@ A3_TRAIN = Path(
     "outputs/door_push_alex_v2/act_door_push/"
     "local_smoke_act_a3_n50_seed0/logs/train_log.json"
 )
-DOCUMENT = Path("docs/status.md")
+DOCUMENT = Path("knowledge/wiki/status.md")
 
 
 def _load_json(root: Path, relative: Path) -> dict:

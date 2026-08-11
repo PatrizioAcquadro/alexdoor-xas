@@ -78,7 +78,7 @@
     "require_a100_80gb": false
   },
   "tracked_transfer_files": [
-    "docs/cluster.md",
+    "knowledge/wiki/implementation_phases/extra-03-gilbreth-compatibility-pilot.md",
     "pyproject.toml",
     "configs/act.yaml",
     "configs/diffusion.yaml",

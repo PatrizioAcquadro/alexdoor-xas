@@ -3,7 +3,7 @@
 The Adapter role of the system separation (guidelines §5): predicted actions
 in any of the frozen spaces execute only through this layer, which validates,
 corrects or rejects them against robot limits and door geometry, and logs
-every decision. See docs/architecture.md.
+every decision. See ``knowledge/wiki/topics/action-representations-and-adapters.md``.
 
 No Isaac imports — envs enter duck-typed via the frozen Phase 2 accessor
 surface, so the layer is unit-testable and reusable by ACT / Diffusion Policy

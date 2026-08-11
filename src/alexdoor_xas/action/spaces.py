@@ -1,4 +1,4 @@
-"""Canonical action-space tags and structs (docs/architecture.md, operational form).
+"""Canonical action-space tags and structs (see the action-representation wiki page).
 
 The tags are the single source of dispatch for episode metadata, dataset layout,
 and (later) action-space-conditioned policies. Phase 2 exports A2/A3/A4 from the
@@ -25,7 +25,7 @@ ALL_ACTION_SPACES: tuple[str, ...] = (
 
 # Spaces the data engine exports for every robot. A1 is additionally exported
 # when per-tick joint targets were recorded (Alex episodes, since Phase 2.5);
-# the proxy sphere has no joints, so proxy runs stay A1-less (docs/architecture.md).
+# the proxy sphere has no joints, so proxy runs stay A1-less (see the action wiki page).
 EXPORTED_ACTION_SPACES: tuple[str, ...] = (
     A2_EE_DELTA,
     A3_OBJ_REL_EE_DELTA,

@@ -14,7 +14,8 @@ Proves the two local assets load in Isaac Lab, as a *fast* smoke test:
 
 Exits 0 only if both checks pass.
 
-Run through the official Isaac Lab launcher (see docs/development.md)::
+Run through the official Isaac Lab launcher (see
+knowledge/wiki/implementation_phases/phase-1-project-and-simulation-readiness.md)::
 
     PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p \
         scripts/verify_assets.py --viz none --device cpu --steps 1

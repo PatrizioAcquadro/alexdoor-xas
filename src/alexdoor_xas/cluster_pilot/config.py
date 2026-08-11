@@ -372,7 +372,7 @@ def _build_tracked_files(value: Any) -> tuple[str, ...]:
     if len(paths) != len(set(paths)):
         raise PilotConfigError("tracked_transfer_files contains duplicates")
     required = {
-        "docs/cluster.md",
+        "knowledge/wiki/implementation_phases/extra-03-gilbreth-compatibility-pilot.md",
         "pyproject.toml",
         "configs/act.yaml",
         "configs/diffusion.yaml",

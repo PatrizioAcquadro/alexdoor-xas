@@ -5,7 +5,8 @@ Reports the official Isaac install paths, Python / package versions, and CUDA
 availability, then confirms every registered external asset exists. Exits
 non-zero if a required package, install path, or asset is missing.
 
-Run through the official Isaac Lab Python (see docs/development.md)::
+Run through the official Isaac Lab Python (see
+knowledge/wiki/implementation_phases/phase-1-project-and-simulation-readiness.md)::
 
     PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/check_env.py
 """
