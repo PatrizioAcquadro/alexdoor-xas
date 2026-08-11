@@ -1,6 +1,6 @@
 # Project Status
 
-Documentation refreshed 2026-07-14. This page records durable development
+Documentation aligned with the technical wiki on 2026-08-11. This page records durable development
 state; raw run detail remains under ignored `outputs/` artifacts and Git
 history.
 

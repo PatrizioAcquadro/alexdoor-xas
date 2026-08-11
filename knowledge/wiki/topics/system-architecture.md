@@ -84,8 +84,8 @@ inventories. This separation is a deliberate decision; see
 
 ## Primary References
 
-- `docs/PROJECT_GUIDELINES.md`
-- `docs/architecture.md`
+- `README.md`
+- `knowledge/wiki/status.md`
 - `src/alexdoor_xas/data_engine/generate.py`
 - `src/alexdoor_xas/adapters/rollout.py`
 - `src/alexdoor_xas/policies/common/rollout_eval.py`

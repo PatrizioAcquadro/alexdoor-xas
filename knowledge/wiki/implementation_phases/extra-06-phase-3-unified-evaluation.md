@@ -98,9 +98,9 @@ requires a new run and separately identified evidence package, consistent with
   operational dataset.
 - Git records detailed evolution, while the wiki retains only the latest
   verified interpretation and concise version notes.
-- `docs/status.md` and the curated report reflect this completed phase. README
-  and portions of `docs/cluster.md` still contain older “not run” statements
-  and are not authoritative for current completion status.
+- [[status|Project Status]], README, and the curated report reflect this
+  completed phase; the wiki status and curated evidence remain authoritative
+  for current completion claims.
 
 #### Tests
 

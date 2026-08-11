@@ -11,32 +11,37 @@ safety and provenance evidence.
 
 ## Current state
 
-Phases 1–3 are implemented through local post-Phase 3.3 stabilization:
+Phases 1–3 are implemented through the completed Phase 3 unified evaluation:
 
 - deterministic proxy and calibrated Alex V2 door-push environments;
 - scripted generation and A1–A4 dataset export;
 - fail-closed dataset, split, normalization, and provenance contracts;
 - A2/A3/A4 adapter execution;
 - state-only ACT and Diffusion Policy training and evaluation;
-- a validated five-pose, 50-episode Alex V2 smoke dataset;
-- tooling for a two-cell Gilbreth compatibility pilot.
+- a validated 550-episode paired A2/A3 scale dataset with four nested views;
+- a completed two-cell Gilbreth compatibility pilot and sixteen-cell sweep;
+- a matched 576-rollout closed-loop evaluation with curated evidence.
 
-The Gilbreth pilot has not run, the full cluster sweep has not started, and
-Phase 4 VLA work has not started. See [project status](docs/status.md) for the
-evidence and boundaries.
+The all-success primary matrix is saturated and does not select a winning
+representation, policy family, or dataset size. One ACT-A3-N50 rollout remains
+`REVIEW_REQUIRED` after its reproducible force-watch event. Phase 4 VLA work
+has not started. See [Project Status](knowledge/wiki/status.md) for the evidence
+and boundaries.
 
 ## Documentation
 
-- [Project guidelines](docs/PROJECT_GUIDELINES.md) — research intent, phases,
-  evaluation principles, and hardware boundary.
-- [System architecture](docs/architecture.md) — implemented components and
-  technical contracts.
-- [Development guide](docs/development.md) — runtime, workflows, and exact
-  verification commands.
-- [Project status](docs/status.md) — completed work, evidence, limitations, and
-  next steps.
-- [Gilbreth pilot runbook](docs/cluster.md) — contract-bound transfer, execution,
-  and return procedure.
+- [Technical wiki](knowledge/wiki/index.md) — navigation root for the official
+  repository documentation.
+- [Project Status](knowledge/wiki/status.md) — completed work, evidence,
+  limitations, boundaries, and next steps.
+- [System Architecture](knowledge/wiki/topics/system-architecture.md) —
+  implemented components, responsibilities, and data/control flows.
+- [Action Representations and Adapters](knowledge/wiki/topics/action-representations-and-adapters.md)
+  — canonical A1–A4 meanings and execution semantics.
+- [Alex V2 Benchmark](knowledge/wiki/topics/alex-v2-benchmark.md) — calibrated
+  task geometry, control, sensing, and runtime limits.
+- [Provenance and Artifact Lifecycle](knowledge/wiki/topics/provenance-and-artifact-lifecycle.md)
+  — fail-closed identities, cluster packages, and curated evidence.
 
 ## Quick start
 
@@ -49,8 +54,10 @@ PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p -m pytest -q
 PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/check_env.py
 ```
 
-Do not use bare system `python3` for Isaac code. The complete gate list and
-data/training workflows are in the [development guide](docs/development.md).
+Do not use bare system `python3` for Isaac code. Runtime and verification
+responsibilities are documented in
+[Phase 1](knowledge/wiki/implementation_phases/phase-1-project-and-simulation-readiness.md)
+and the [technical wiki](knowledge/wiki/index.md).
 
 ## Repository layout
 
@@ -59,7 +66,7 @@ src/alexdoor_xas/   package: assets, envs, actions, adapters, policies, data, ev
 scripts/            verification, generation, training, evaluation, cluster tools
 configs/            calibration, data, policy, tracking, and pilot contracts
 tests/              pure-Python regression and contract tests
-docs/               four canonical project docs plus the cluster runbook
+knowledge/          user-owned raw research plus the official technical wiki
 datasets/           reusable generated datasets (ignored except README)
 outputs/            per-run artifacts (ignored except README/curated evidence)
 ```

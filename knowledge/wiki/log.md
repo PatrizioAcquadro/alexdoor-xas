@@ -76,3 +76,17 @@ warm-up that remove the wall gap while preserving the visual-only boundary.
 Verified all 26 wiki pages, 77 internal links, index coverage, nine phase-page
 mappings, allowed tree shape, Markdown whitespace, and protected raw/phase
 boundaries after the doorway-alignment correction.
+
+## 2026-08-11 — update : Official documentation path alignment
+
+Moved Project Status into the official wiki and aligned navigation, repository
+summaries, canonical references, and current completion language after removal
+of the legacy top-level `docs/` directory. Historical evidence and user-owned
+raw material remain unchanged.
+
+## 2026-08-11 — lint : Official documentation path alignment
+
+Verified all 27 wiki pages, internal wikilinks, complete index coverage, nine
+phase-page mappings, the allowed tree shape, Markdown whitespace, and protected
+raw/evidence boundaries after making `knowledge/wiki/` the sole official
+documentation location.

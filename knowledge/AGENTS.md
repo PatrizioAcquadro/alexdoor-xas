@@ -27,6 +27,7 @@ knowledge/
     ├── experiments/
     ├── sources/
     ├── index.md
+    ├── status.md
     └── log.md
 ```
 
@@ -76,6 +77,8 @@ an earlier phase merely because it exists in the current tree.
 
 Every subject has one canonical documentation location:
 
+- `wiki/status.md` — current completed work, evidence, limitations, boundaries,
+  and next steps.
 - `wiki/implementation_phases/` — what a phase actually introduced, including
   its stages, tests, deviations, replacements, and later meaningful updates.
 - `wiki/topics/` — reusable concepts, technologies, systems, models, datasets,
@@ -134,9 +137,10 @@ trivia. Use concise bullets for decisions/problems and tests.
 - Give each subject one stable, lower-kebab-case filename.
 - Keep only concise one- or two-line notes for meaningful changes; Git owns
   detailed history.
-- `wiki/index.md` is the navigation root. It must list every wiki page other
-  than itself and `log.md`, grouped under Implementation Phases, Topics, Key
-  Decisions, Experiments, and Sources, with a one-line description.
+- `wiki/index.md` is the navigation root. It must list `status.md` prominently
+  and every other wiki page except itself and `log.md`, grouped under
+  Implementation Phases, Topics, Key Decisions, Experiments, and Sources, with
+  a one-line description.
 - `wiki/log.md` is append-only. Do not rewrite or reorder existing entries.
   Append concise entries for setup, ingests, documentation updates, queries,
   experiments, and lint passes.

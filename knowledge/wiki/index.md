@@ -4,6 +4,10 @@ This wiki describes the latest verified state of AlexDoor-XAS while preserving
 phase attribution through concise derived documentation. Code and tests remain
 the source of truth for executable behavior.
 
+## Project Status
+
+- [[status|Project Status]] — Current completed work, evidence, limitations, boundaries, and next steps.
+
 ## Implementation Phases
 
 - [[implementation_phases/phase-1-project-and-simulation-readiness|Phase 1 — Project and Simulation Readiness]] — Established the package, runtime boundary, path registry, asset checks, and simulator smoke gate.

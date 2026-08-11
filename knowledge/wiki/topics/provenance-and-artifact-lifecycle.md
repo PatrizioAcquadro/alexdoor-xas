@@ -61,8 +61,8 @@ mixed. See [[decisions/fail-closed-provenance-and-immutable-artifacts|Fail-Close
 
 Git is the detailed historical record. Phase artifacts explain intent and
 closeout but do not override current code or tracked evidence. For current
-project status, `docs/status.md` and verified curated evidence are stronger
-than stale summary prose in README or portions of `docs/cluster.md`.
+project status, [[status|Project Status]] and verified curated evidence are
+the authoritative documentation and evidence surfaces.
 
 W&B is optional supplementary tracking. Repository-owned configurations,
 inventories, checkpoints, and evidence packages remain the reproducibility

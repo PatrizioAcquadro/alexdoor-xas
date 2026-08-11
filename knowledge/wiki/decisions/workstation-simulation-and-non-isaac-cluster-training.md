@@ -37,10 +37,12 @@ than hard-coded project facts.
 - `src/alexdoor_xas/cluster_pilot/preflight.py`
 - `src/alexdoor_xas/cluster_sweep/slurm.py`
 - `scripts/verify_returned_cluster_sweep.py`
-- `docs/cluster.md`
 
 See [[topics/system-architecture|System Architecture]] and
-[[topics/provenance-and-artifact-lifecycle|Provenance and Artifact Lifecycle]].
+[[topics/provenance-and-artifact-lifecycle|Provenance and Artifact Lifecycle]],
+plus [[implementation_phases/extra-03-gilbreth-compatibility-pilot|Extra 03]]
+and [[implementation_phases/extra-05-full-gilbreth-nested-sweep|Extra 05]] for
+the verified pilot and sweep workflows.
 
 ## Version Notes
 
