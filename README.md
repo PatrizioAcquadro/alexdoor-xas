@@ -1,52 +1,31 @@
 # AlexDoor-XAS
 
-AlexDoor-XAS is a research codebase for comparing action representations in
-humanoid articulated-object manipulation. Its first benchmark is door pushing
-with the fixed-base IHMC Alex V2 torso in NVIDIA Isaac Sim and Isaac Lab.
+AlexDoor-XAS compares action representations for contact-rich humanoid
+manipulation. Its first benchmark is simulated door pushing with the fixed-base
+IHMC Alex V2 torso in NVIDIA Isaac Sim and Isaac Lab.
 
-The main research variable is the action interface: joint deltas (A1),
-end-effector deltas (A2), object-relative deltas (A3), and object-centric
-chunks (A4). Policies execute through a shared adapter and produce explicit
-safety and provenance evidence.
+## Current product
 
-## Current state
+The maintained path includes:
 
-Phases 1–3 are implemented through the completed Phase 3 unified evaluation:
+- the calibrated Alex V2 door benchmark and scripted baseline;
+- matched A1-A4 episode export, with learned-policy datasets for A2 and A3;
+- content-grouped splits and train-only normalization;
+- state-only ACT and Diffusion training and closed-loop evaluation;
+- A2/A3/A4 adapters, force checks, and execution safety controls;
+- W&B as optional run tracking.
 
-- deterministic proxy and calibrated Alex V2 door-push environments;
-- scripted generation and A1–A4 dataset export;
-- fail-closed dataset, split, normalization, and provenance contracts;
-- A2/A3/A4 adapter execution;
-- state-only ACT and Diffusion Policy training and evaluation;
-- a validated 550-episode paired A2/A3 scale dataset with four nested views;
-- a completed two-cell Gilbreth compatibility pilot and sixteen-cell sweep;
-- a matched 576-rollout closed-loop evaluation with curated evidence.
+The completed Gilbreth pilot, cluster sweep, smoke-matrix aggregation, and
+unified-evaluation orchestration are no longer executable product workflows.
+Their scientific conclusions remain in the wiki and curated reports; Git owns
+their source history.
 
-The all-success primary matrix is saturated and does not select a winning
-representation, policy family, or dataset size. One ACT-A3-N50 rollout remains
-`REVIEW_REQUIRED` after its reproducible force-watch event. Phase 4 VLA work
-has not started. See [Project Status](knowledge/wiki/status.md) for the evidence
-and boundaries.
-
-## Documentation
-
-- [Technical wiki](knowledge/wiki/index.md) — navigation root for the official
-  repository documentation.
-- [Project Status](knowledge/wiki/status.md) — completed work, evidence,
-  limitations, boundaries, and next steps.
-- [System Architecture](knowledge/wiki/topics/system-architecture.md) —
-  implemented components, responsibilities, and data/control flows.
-- [Action Representations and Adapters](knowledge/wiki/topics/action-representations-and-adapters.md)
-  — canonical A1–A4 meanings and execution semantics.
-- [Alex V2 Benchmark](knowledge/wiki/topics/alex-v2-benchmark.md) — calibrated
-  task geometry, control, sensing, and runtime limits.
-- [Provenance and Artifact Lifecycle](knowledge/wiki/topics/provenance-and-artifact-lifecycle.md)
-  — fail-closed identities, cluster packages, and curated evidence.
+The Phase 3 matrix was success-saturated and did not identify a winning policy,
+representation, or dataset size. One ACT-A3-N50 rollout remains
+`REVIEW_REQUIRED` after a reproducible force-watch event. Phase 4 VLA work has
+not started. See [Project Status](knowledge/wiki/status.md).
 
 ## Quick start
-
-Isaac Sim and Isaac Lab are supplied by the workstation runtime; they are not
-installed as Python package dependencies. From the repository root:
 
 ```bash
 PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p -m pip install -e .
@@ -54,27 +33,30 @@ PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p -m pytest -q
 PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/check_env.py
 ```
 
-Do not use bare system `python3` for Isaac code. Runtime and verification
-responsibilities are documented in
-[Phase 1](knowledge/wiki/implementation_phases/phase-1-project-and-simulation-readiness.md)
-and the [technical wiki](knowledge/wiki/index.md).
+Do not use bare system `python3` for Isaac code.
 
 ## Repository layout
 
 ```text
-src/alexdoor_xas/   package: assets, envs, actions, adapters, policies, data, eval
-scripts/            verification, generation, training, evaluation, cluster tools
-configs/            calibration, data, policy, tracking, and pilot contracts
-tests/              pure-Python regression and contract tests
-knowledge/          user-owned raw research plus the official technical wiki
-datasets/           reusable generated datasets (ignored except README)
-outputs/            per-run artifacts (ignored except README/curated evidence)
+src/alexdoor_xas/   assets, environments, actions, adapters, data, policies, evaluation
+scripts/            supported verification, generation, inspection, training, evaluation
+configs/            five active calibration, policy, scripted, and tracking configs
+tests/              deterministic regression and contract tests
+knowledge/          user-owned raw research and the official technical wiki
+datasets/           reusable local datasets (ignored except README)
+outputs/            local runs plus the small tracked curated evidence set
 ```
 
-Machine-local assets are referenced in place. The sole robot lineage is
-`~/Desktop/Alex/urdf/alex_v2.urdf`; generated door assets derive from the local
-CombinedScene checkout. Generated datasets, checkpoints, videos, logs, and raw
-simulator outputs stay out of Git.
+Machine-local assets, datasets, checkpoints, videos, logs, and ordinary run
+outputs stay out of Git.
+
+## Documentation
+
+- [Technical wiki](knowledge/wiki/index.md)
+- [System Architecture](knowledge/wiki/topics/system-architecture.md)
+- [Episode and Dataset Contracts](knowledge/wiki/topics/episode-and-dataset-contracts.md)
+- [Learned Policy Stack](knowledge/wiki/topics/learned-policy-stack.md)
+- [Alex V2 Benchmark](knowledge/wiki/topics/alex-v2-benchmark.md)
 
 ## License
 

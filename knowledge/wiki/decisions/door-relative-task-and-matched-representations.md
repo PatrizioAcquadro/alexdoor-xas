@@ -14,7 +14,7 @@ same physical episode identity. A2 is world-frame end-effector delta; A3 is the
 equivalent delta in a static hinge-anchored door frame; A4 contact targets are
 in the moving panel frame. Matched A2/A3 products share physical outcome,
 episode identity, pose allocation, split, and evaluation seeds while retaining
-distinct action arrays and fingerprints.
+distinct action arrays.
 
 The door-frame origin and +Z hinge axis are explicit. Door pose variants pivot
 around the hinge instead of redefining the task geometry independently.

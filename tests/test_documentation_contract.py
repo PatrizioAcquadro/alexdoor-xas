@@ -102,3 +102,24 @@ def test_active_surfaces_do_not_reference_removed_legacy_documents() -> None:
             if legacy in text:
                 failures.append(f"{path.relative_to(REPO_ROOT)}: {legacy}")
     assert failures == []
+
+
+def test_active_config_and_curated_evidence_surfaces_are_minimal() -> None:
+    assert {path.name for path in (REPO_ROOT / "configs").iterdir()} == {
+        "act.yaml",
+        "alex_v2_door.json",
+        "diffusion.yaml",
+        "scripted_baseline.yaml",
+        "wandb.yaml",
+    }
+    curated = REPO_ROOT / "outputs" / "curated"
+    assert {
+        path.relative_to(curated).as_posix()
+        for path in curated.rglob("*")
+        if path.is_file()
+    } == {
+        "phase3_seed112_force_diagnostic/report.md",
+        "phase3_seed112_force_diagnostic/results.json",
+        "phase3_unified_evaluation/aggregate_summary.json",
+        "phase3_unified_evaluation/report.md",
+    }

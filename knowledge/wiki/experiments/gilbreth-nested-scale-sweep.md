@@ -1,69 +1,31 @@
-# Experiment — Gilbreth Nested Scale Sweep
+# Experiment — Nested Scale Sweep
 
-## Purpose
+## Question
 
-Train a complete, controlled checkpoint matrix across policy family, action
-representation, and nested data scale. The run's durable value is the exact,
-verified set of sixteen training products later used by the unified workstation
-evaluation.
+Train a complete ACT/Diffusion x A2/A3 x N50/N100/N250/N500 matrix so data
+scale, policy family, and action representation could be compared under fixed
+holdouts.
 
-## Matrix
+## Method
 
-| Dimension | Values |
-|---|---|
-| Policy | ACT, Diffusion |
-| Action space | A2, A3 |
-| Training view | N50, N100, N250, N500 |
-| Seed | 0 |
-| Total cells | 16 |
+All 16 cells used training seed 0 and the retained `v3_scale_master` views.
+ACT trained for 100 epochs; Diffusion trained for 300 epochs with EMA. Training
+ran on Purdue Gilbreth A100 GPUs because it required PyTorch but not Isaac.
 
-ACT trained for 100 epochs. Diffusion trained for 300 epochs with EMA. All cells
-used the `v3_scale` physical-master family, fixed 25-episode validation and test
-sets, and the view-specific training-only normalization described in
-[[topics/episode-and-dataset-contracts|Episode and Dataset Contracts]].
+## Result
 
-## Execution
-
-- Location: Purdue Gilbreth, non-Isaac Python/PyTorch environment.
-- Attempt: `11281591`.
-- Source commit: `efa39434…`.
-- Resources: one GPU per cell, at most two concurrent cells under the rendered
-  contract.
-- Inputs and outputs: exact SHA-256 inventories, attempt-specific paths, and
-  symlink-free portable W&B publication.
-- Configuration: `configs/cluster_sweep.v1.json`.
-
-## Results
-
-All 16/16 cells completed. The exact cluster return contained 736 payload files;
-the workstation-side inventory contained 738 entries including enclosing
-manifest material. All sixteen checkpoints passed hash and provenance
-verification and loaded successfully on CPU.
-
-This result establishes complete training, portable serialization, and an
-auditable artifact return for the declared matrix. Training loss alone is not
-a closed-loop outcome, and the sweep did not select a winner.
-
-## Interpretation
-
-The sweep qualified every declared policy/space/scale checkpoint for matched
-workstation simulation. Its main comparative consequence is the availability
-of a complete matrix with controlled data memberships, not a conclusion about
-policy quality.
+All 16 cells completed and all checkpoints loaded on the workstation. This
+established a complete policy matrix for closed-loop evaluation. Training loss
+alone did not identify a winner.
 
 The later [[phase-3-unified-evaluation|Phase 3 Unified Evaluation]] found
-success saturation across these checkpoints and no reliable monotonic
-data-scale advantage under the tested protocol.
+success saturation and no monotonic N50-to-N500 advantage under the tested
+protocol.
 
-## Provenance
-
-- Phase: [[implementation_phases/extra-05-full-gilbreth-nested-sweep|Extra 05 — Full Gilbreth Nested Sweep]]
-- Scale decision: [[decisions/one-scale-master-with-nested-views|One Scale Master with Nested Views]]
-- Cluster boundary: [[decisions/workstation-simulation-and-non-isaac-cluster-training|Workstation Simulation and Non-Isaac Cluster Training]]
-- Verification: `scripts/verify_returned_cluster_sweep.py`,
-  `tests/test_cluster_sweep.py`, `tests/test_wandb_publication.py`
+The cluster, transfer, Slurm, return, and sweep tooling used for this completed
+run is no longer maintained. Git retains its implementation history.
 
 ## Version Notes
 
-- 2026-07-16 — Attempt `11281591` completed all sixteen cells and passed exact
-  return/checkpoint verification.
+- 2026-08-11 — Reduced this page to the scientific design, result, and limits
+  after removal of the completed orchestration.

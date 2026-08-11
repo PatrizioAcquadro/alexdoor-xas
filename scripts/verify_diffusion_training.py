@@ -151,9 +151,18 @@ def check_space(space: str, out_dir: Path, failures: list[str]) -> None:
     save_checkpoint(
         checkpoint_path,
         model,
-        {"dataset": {"space": space, "obs_preset": cfg.dataset.obs_preset}},
+        {
+            "dataset": {
+                "task": cfg.dataset.task,
+                "space": space,
+                "version": cfg.dataset.version,
+                "view_id": cfg.dataset.view_id,
+                "obs_preset": cfg.dataset.obs_preset,
+            }
+        },
         data.stats,
         meta={"gate": "verify_diffusion_training"},
+        robot_asset=data.robot_asset,
     )
     loaded = load_checkpoint(checkpoint_path)
     inference = make_inference_scheduler(cfg.model, "ddim", 10)
@@ -170,7 +179,10 @@ def check_space(space: str, out_dir: Path, failures: list[str]) -> None:
         failures.append(f"{label}: checkpoint round-trip changed predictions")
 
     policy = DiffusionPolicy.from_checkpoint(
-        checkpoint_path, sampler="ddim", num_inference_steps=10
+        checkpoint_path,
+        sampler="ddim",
+        num_inference_steps=10,
+        runtime_asset=data.robot_asset,
     )
     policy.seed(0)
     report = open_loop_report(

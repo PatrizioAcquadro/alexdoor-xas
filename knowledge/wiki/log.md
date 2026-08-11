@@ -90,3 +90,16 @@ Verified all 27 wiki pages, internal wikilinks, complete index coverage, nine
 phase-page mappings, the allowed tree shape, Markdown whitespace, and protected
 raw/evidence boundaries after making `knowledge/wiki/` the sole official
 documentation location.
+
+## 2026-08-11 — update : Active configuration and workflow simplification
+
+Aligned the wiki with the five active configs, compact calibration/dataset/
+checkpoint contracts, dataset-independent evaluation, and removal of completed
+Phase 3 orchestration. Retained nine concise phase pages and three scientific
+experiment summaries.
+
+## 2026-08-11 — lint : Simplified repository documentation
+
+Verified all internal wikilinks, complete index coverage, exactly nine phase
+pages, repository-relative references, Markdown whitespace, and the protected
+raw and local-output boundaries after the cleanup.

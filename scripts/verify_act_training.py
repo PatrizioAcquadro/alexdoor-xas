@@ -108,9 +108,18 @@ def check_space(space: str, out_dir, failures: list[str]) -> None:
     save_checkpoint(
         checkpoint_path,
         model,
-        {"dataset": {"space": space, "obs_preset": cfg.dataset.obs_preset}},
+        {
+            "dataset": {
+                "task": cfg.dataset.task,
+                "space": space,
+                "version": cfg.dataset.version,
+                "view_id": cfg.dataset.view_id,
+                "obs_preset": cfg.dataset.obs_preset,
+            }
+        },
         data.stats,
         meta={"gate": "verify_act_training"},
+        robot_asset=data.robot_asset,
     )
     loaded = load_checkpoint(checkpoint_path)
     probe = torch.zeros(1, data.obs_dim)
@@ -118,7 +127,7 @@ def check_space(space: str, out_dir, failures: list[str]) -> None:
     if not torch.equal(loaded.model.predict(probe), model.predict(probe)):
         failures.append(f"{label}: checkpoint round-trip changed predictions")
 
-    policy = ActPolicy.from_checkpoint(checkpoint_path)
+    policy = ActPolicy.from_checkpoint(checkpoint_path, runtime_asset=data.robot_asset)
     record = data.dataset.by_id(overfit_ids[0])
     report = open_loop_report(
         policy, [record], json_path=out_dir / f"{space}_open_loop.json"
