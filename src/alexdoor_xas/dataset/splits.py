@@ -138,9 +138,7 @@ def make_grouped_splits(
     if n - n_val_target - n_test_target < 1:
         raise ValueError(f"fractions {fractions} leave no training episodes for n={n}")
 
-    short = {
-        pose: len(keys) for pose, keys in pose_groups.items() if len(keys) < len(SPLIT_NAMES)
-    }
+    short = {pose: len(keys) for pose, keys in pose_groups.items() if len(keys) < len(SPLIT_NAMES)}
     if short:
         raise ValueError(
             "cannot stratify splits by pose: pose(s) "
@@ -265,14 +263,6 @@ def _check_fractions(fractions: tuple[float, float, float]) -> None:
         raise ValueError(f"fractions must sum to 1, got {fractions}")
 
 
-def split_fingerprint(splits: dict[str, list[str]]) -> str:
-    """Order-independent identity of one split assignment (sha256)."""
-    canonical = {name: sorted(splits[name]) for name in SPLIT_NAMES}
-    return hashlib.sha256(
-        json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
-
-
 def assert_no_cross_split_duplicates(
     entries: list[SplitEntry], splits: dict[str, list[str]]
 ) -> None:
@@ -310,7 +300,6 @@ def save_splits(
         "fractions": list(fractions),
         "seed": seed,
         "n_episodes": sum(len(ids) for ids in splits.values()),
-        "split_fingerprint_sha256": split_fingerprint(splits),
         "splits": {name: splits[name] for name in SPLIT_NAMES},
         "created_utc": datetime.now(UTC).isoformat(),
     }
@@ -320,9 +309,7 @@ def save_splits(
     return path
 
 
-def load_splits(
-    path: str | Path, episode_ids: list[str] | None = None
-) -> dict[str, list[str]]:
+def load_splits(path: str | Path, episode_ids: list[str] | None = None) -> dict[str, list[str]]:
     """Load a split file; if ``episode_ids`` is given, reject a stale file."""
     payload = load_split_payload(path)
     splits = {name: list(payload["splits"][name]) for name in SPLIT_NAMES}
@@ -357,6 +344,5 @@ __all__ = [
     "make_splits",
     "save_splits",
     "split_entries",
-    "split_fingerprint",
     "splits_path",
 ]

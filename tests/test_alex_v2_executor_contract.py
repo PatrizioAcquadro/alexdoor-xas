@@ -7,7 +7,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from alexdoor_xas.assets.alex_v2_contract import RobotAssetRef
 from alexdoor_xas.calibration.alex_v2_door import AlexV2DoorCalibration
 from alexdoor_xas.envs.door_task.alex_v2_runtime import (
     ALEX_V2_PRIM_PATH,
@@ -15,9 +14,7 @@ from alexdoor_xas.envs.door_task.alex_v2_runtime import (
     inject_alex_v2_runtime_cfg,
 )
 
-_TASK_DIR = (
-    Path(__file__).parents[1] / "src" / "alexdoor_xas" / "envs" / "door_task"
-)
+_TASK_DIR = Path(__file__).parents[1] / "src" / "alexdoor_xas" / "envs" / "door_task"
 
 
 class _FakeRobotCfg:
@@ -54,11 +51,7 @@ def _calibration() -> AlexV2DoorCalibration:
         "controller": {"contact_force_threshold_n": 2.5},
         "randomization_bounds": {},
     }
-    return AlexV2DoorCalibration(
-        Path("candidate.json"),
-        payload,
-        RobotAssetRef("alex-v2", "a" * 64, "b" * 64),
-    )
+    return AlexV2DoorCalibration(Path("candidate.json"), payload)
 
 
 def test_v2_runtime_injects_dedicated_asset_and_calibrated_init_state() -> None:
@@ -127,9 +120,9 @@ def test_robot_base_has_no_asset_builder_or_robot_specific_ee_constants() -> Non
 
 
 def test_candidate_env_is_explicitly_candidate_only_and_not_exported_or_registered() -> None:
-    candidate_source = (
-        _TASK_DIR / "door_push_alex_v2_calibration_env.py"
-    ).read_text(encoding="utf-8")
+    candidate_source = (_TASK_DIR / "door_push_alex_v2_calibration_env.py").read_text(
+        encoding="utf-8"
+    )
     registration_source = (_TASK_DIR / "__init__.py").read_text(encoding="utf-8")
 
     assert "candidate_only = True" in candidate_source
@@ -145,6 +138,6 @@ def test_production_env_runs_shared_executor_after_full_validation() -> None:
     source = (_TASK_DIR / "door_push_alex_v2_env.py").read_text(encoding="utf-8")
 
     assert "class DoorPushAlexV2Env(DoorPushAlexV2Executor)" in source
-    assert "load_validated_alex_v2_door_calibration(" in source
+    assert "load_alex_v2_door_calibration(" in source
     assert "super().__init__(" in source
     assert "executor has not passed" not in source

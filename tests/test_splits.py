@@ -24,7 +24,6 @@ from alexdoor_xas.dataset import (
     make_splits,
     save_splits,
     split_entries,
-    split_fingerprint,
 )
 
 
@@ -215,20 +214,12 @@ def test_make_splits_id_only_still_disjoint_exhaustive_deterministic() -> None:
         make_splits(ids[:2])
 
 
-def test_split_fingerprint_is_order_independent() -> None:
-    a = {"train": ["x", "y"], "val": ["z"], "test": ["w"]}
-    b = {"train": ["y", "x"], "val": ["z"], "test": ["w"]}
-    c = {"train": ["x"], "val": ["y", "z"], "test": ["w"]}
-    assert split_fingerprint(a) == split_fingerprint(b)
-    assert split_fingerprint(a) != split_fingerprint(c)
-
-
-def test_save_splits_round_trips_metadata_and_fingerprint(tmp_path) -> None:
+def test_save_splits_round_trips_metadata(tmp_path) -> None:
     entries = _five_pose_entries()
     splits, meta = make_grouped_splits(entries, seed=0)
     path = save_splits(tmp_path / "splits" / "v2_pose.json", splits, seed=0, metadata=meta)
     payload = load_split_payload(path)
-    assert payload["split_fingerprint_sha256"] == split_fingerprint(splits)
+    assert "split_fingerprint_sha256" not in payload
     assert payload["metadata"]["n_groups"] == meta["n_groups"]
     reloaded = load_splits(path, episode_ids=[e.episode_id for e in entries])
     assert reloaded == splits

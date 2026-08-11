@@ -68,9 +68,7 @@ def inject_alex_v2_runtime_cfg(
     init_state.rot = _tuple(base_pose["orientation_xyzw"], 4, "base_pose.orientation_xyzw")
     init_state.joint_pos = calibrated_joint_position_map(calibration)
     env_cfg.robot = configured_robot
-    env_cfg.contact_force_threshold_n = float(
-        calibration.controller["contact_force_threshold_n"]
-    )
+    env_cfg.contact_force_threshold_n = float(calibration.controller["contact_force_threshold_n"])
     return env_cfg
 
 
@@ -81,8 +79,15 @@ def require_current_collision_tool_frame(
     """Reject a tool transform not reproduced from the current collision union."""
 
     normal = calibration.tool_frame["contact_normal_link"]
-    derived = derive_right_gripper_tool_frame(manifest, normal)
-    if derived.to_dict() != dict(calibration.tool_frame):
+    derived = derive_right_gripper_tool_frame(manifest, normal).to_dict()
+    active_fields = (
+        "parent_link",
+        "translation_m",
+        "orientation_xyzw",
+        "contact_normal_link",
+    )
+    current = {field: derived[field] for field in active_fields}
+    if current != dict(calibration.tool_frame):
         raise AlexV2RuntimeContractError(
             "calibrated tool frame differs from the current collision manifest"
         )

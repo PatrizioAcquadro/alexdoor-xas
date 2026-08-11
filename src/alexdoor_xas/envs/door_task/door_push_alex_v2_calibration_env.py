@@ -13,11 +13,10 @@ from alexdoor_xas.assets.alex_v2 import (
     build_alex_v2_door_asset,
 )
 from alexdoor_xas.calibration.alex_v2_door import (
-    load_candidate_alex_v2_door_calibration,
+    load_alex_v2_door_calibration,
 )
 
 from .alex_v2_runtime import require_current_collision_tool_frame
-from .door_push_alex_v2_env import _runtime_versions
 from .door_push_alex_v2_env_cfg import DoorPushAlexV2EnvCfg
 from .door_push_alex_v2_executor import DoorPushAlexV2Executor
 
@@ -37,11 +36,7 @@ class DoorPushAlexV2CalibrationEnv(DoorPushAlexV2Executor):
         **kwargs,
     ):
         asset, runtime_asset = build_alex_v2_door_asset()
-        calibration = load_candidate_alex_v2_door_calibration(
-            candidate_calibration_path,
-            runtime_asset=runtime_asset,
-            runtime_versions=_runtime_versions(),
-        )
+        calibration = load_alex_v2_door_calibration(candidate_calibration_path)
         require_current_collision_tool_frame(asset.manifest, calibration)
         super().__init__(
             cfg,

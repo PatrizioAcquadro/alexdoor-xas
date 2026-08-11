@@ -1,16 +1,7 @@
-"""Action/observation normalization statistics (Phase 3.0).
-
-Per-dimension mean/std (plus min/max) computed **over the train split only**,
-saved as ``norm_stats.json`` inside the dataset version directory — a stats
-file describes exactly one generation pass and dies with it on re-export.
-``std`` is floored so constant dimensions stay finite: the A2/A3 rotation
-deltas are recorded but never actuated (frozen action contract), so their std
-is exactly zero.
-"""
+"""Train-split action and observation normalization statistics."""
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from dataclasses import dataclass
@@ -23,35 +14,31 @@ from .loader import DEFAULT_OBS_PRESET, EpisodeDataset, obs_matrix
 
 STD_FLOOR = 1e-8
 NORM_STATS_FILENAME = "norm_stats.json"
-DATASET_FINGERPRINT_CONTRACT = "alexdoor_xas.dataset_fingerprint.v2"
+NORM_STATS_SCHEMA = "alexdoor_xas.norm_stats.v2"
 
 
 @dataclass(frozen=True)
 class NormStats:
-    """Per-dimension statistics of one quantity (actions or an obs preset)."""
+    """Per-dimension statistics of one quantity."""
 
-    mean: np.ndarray  # (D,)
-    std: np.ndarray  # (D,), floored at STD_FLOOR
-    min: np.ndarray  # (D,)
-    max: np.ndarray  # (D,)
-    count: int  # total rows aggregated
+    mean: np.ndarray
+    std: np.ndarray
+    min: np.ndarray
+    max: np.ndarray
+    count: int
 
     @classmethod
     def from_rows(cls, arrays: list[np.ndarray]) -> NormStats:
-        """Aggregate a list of ``(N_i, D)`` arrays into one stats record."""
         if not arrays:
             raise ValueError("cannot compute stats from an empty list")
-        normalized = [np.asarray(array, dtype=np.float64) for array in arrays]
-        if any(array.ndim != 2 or array.shape[0] == 0 for array in normalized):
+        rows = [np.asarray(array, dtype=np.float64) for array in arrays]
+        if any(array.ndim != 2 or array.shape[0] == 0 for array in rows):
             raise ValueError("normalization inputs must all be non-empty (N, D) arrays")
-        dimensions = {array.shape[1] for array in normalized}
-        if len(dimensions) != 1:
+        if len({array.shape[1] for array in rows}) != 1:
             raise ValueError("normalization inputs have inconsistent feature dimensions")
-        if not all(np.isfinite(array).all() for array in normalized):
+        if not all(np.isfinite(array).all() for array in rows):
             raise ValueError("normalization inputs must be finite")
-        stacked = np.concatenate(normalized)
-        if stacked.ndim != 2 or stacked.shape[0] == 0:
-            raise ValueError(f"expected non-empty (N, D) rows, got shape {stacked.shape}")
+        stacked = np.concatenate(rows)
         return cls(
             mean=stacked.mean(axis=0),
             std=np.maximum(stacked.std(axis=0), STD_FLOOR),
@@ -81,31 +68,28 @@ class NormStats:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> NormStats:
-        return cls(
-            mean=np.asarray(data["mean"], dtype=np.float64),
-            std=np.asarray(data["std"], dtype=np.float64),
-            min=np.asarray(data["min"], dtype=np.float64),
-            max=np.asarray(data["max"], dtype=np.float64),
-            count=int(data["count"]),
-        )
+        try:
+            return cls(
+                mean=np.asarray(data["mean"], dtype=np.float64),
+                std=np.asarray(data["std"], dtype=np.float64),
+                min=np.asarray(data["min"], dtype=np.float64),
+                max=np.asarray(data["max"], dtype=np.float64),
+                count=int(data["count"]),
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError(f"invalid normalization block: {error}") from error
 
 
 @dataclass(frozen=True)
 class DatasetNormStats:
-    """Train-split stats of one dataset: actions + one obs preset."""
+    """Train-split statistics required by training and checkpoints."""
 
     action: NormStats
     obs: NormStats
     obs_preset: str
     train_episode_ids: tuple[str, ...]
-    dataset_episode_ids: tuple[str, ...] = ()
-    action_space: str = ""
-    dataset_fingerprint: str = ""
-    split_name: str = "train"
+    action_space: str
     view_id: str | None = None
-    view_fingerprint: str = ""
-    normalization_fingerprint: str = ""
-    normalization_sha256: str = ""
 
 
 def compute_norm_stats(
@@ -114,9 +98,7 @@ def compute_norm_stats(
     obs_preset: str = DEFAULT_OBS_PRESET,
     *,
     view_id: str | None = None,
-    view_fingerprint: str = "",
 ) -> DatasetNormStats:
-    """Compute action + observation stats over the train-split episodes."""
     records = [dataset.by_id(episode_id) for episode_id in train_episode_ids]
     if not records:
         raise ValueError("train split is empty")
@@ -125,11 +107,8 @@ def compute_norm_stats(
         obs=NormStats.from_rows([obs_matrix(record, obs_preset) for record in records]),
         obs_preset=obs_preset,
         train_episode_ids=tuple(train_episode_ids),
-        dataset_episode_ids=tuple(dataset.episode_ids),
         action_space=dataset.action_space,
-        dataset_fingerprint=dataset_fingerprint(dataset, obs_preset),
         view_id=view_id,
-        view_fingerprint=view_fingerprint,
     )
 
 
@@ -138,97 +117,41 @@ def norm_stats_path(dataset_dir: str | Path) -> Path:
 
 
 def view_norm_stats_path(dataset_dir: str | Path, view_id: str) -> Path:
-    """Canonical per-action-space normalization artifact for one dataset view."""
     if not isinstance(view_id, str) or not view_id or "/" in view_id or ".." in view_id:
         raise ValueError("view_id must be a safe single path component")
     return Path(dataset_dir) / "views" / view_id / NORM_STATS_FILENAME
 
 
 def save_norm_stats(path: str | Path, stats: DatasetNormStats) -> Path:
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = _stats_payload(stats)
-    payload["normalization_fingerprint_sha256"] = normalization_fingerprint(payload)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
     try:
-        temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-        os.replace(temporary, path)
+        temporary.write_text(json.dumps(_stats_payload(stats), indent=2, sort_keys=True) + "\n")
+        os.replace(temporary, target)
     finally:
         temporary.unlink(missing_ok=True)
-    return path
+    return target
 
 
 def load_norm_stats(path: str | Path) -> DatasetNormStats:
-    source = Path(path)
-    payload = json.loads(source.read_text())
-    return DatasetNormStats(
-        action=NormStats.from_dict(payload["action"]),
-        obs=NormStats.from_dict(payload["obs"]),
-        obs_preset=str(payload["obs_preset"]),
-        train_episode_ids=tuple(payload["train_episode_ids"]),
-        dataset_episode_ids=tuple(payload.get("dataset_episode_ids", ())),
-        action_space=str(payload.get("action_space", "")),
-        dataset_fingerprint=str(payload.get("dataset_fingerprint", "")),
-        split_name=str(payload.get("split_name", "train")),
-        view_id=str(payload["view_id"]) if payload.get("view_id") is not None else None,
-        view_fingerprint=str(payload.get("view_fingerprint_sha256", "")),
-        normalization_fingerprint=str(
-            payload.get("normalization_fingerprint_sha256", "")
-        ),
-        normalization_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
-    )
+    """Load the minimal fields, tolerating administrative fields in legacy files."""
 
-
-def normalization_fingerprint(stats_or_payload: DatasetNormStats | dict[str, Any]) -> str:
-    """Canonical hash of normalization content, excluding its embedded digest."""
-    payload = (
-        _stats_payload(stats_or_payload)
-        if isinstance(stats_or_payload, DatasetNormStats)
-        else dict(stats_or_payload)
-    )
-    payload.pop("normalization_fingerprint_sha256", None)
-    return hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
-
-
-def dataset_fingerprint(dataset: EpisodeDataset, obs_preset: str = DEFAULT_OBS_PRESET) -> str:
-    """Preset-specific content fingerprint for stat/checkpoint compatibility."""
-    digest = hashlib.sha256()
-    digest.update(DATASET_FINGERPRINT_CONTRACT.encode())
-    digest.update(b"\0obs_preset\0")
-    digest.update(obs_preset.encode())
-    digest.update(b"\0")
-    digest.update(dataset.action_space.encode())
-    digest.update(dataset.task.encode())
-    robot_asset = dataset.meta.get("robot_asset")
-    has_robot_provenance = robot_asset is not None or any(
-        record.meta.get("robot_asset_id") or record.meta.get("robot_asset_sha256")
-        for record in dataset.records
-    )
-    # Preserve the exact Phase 3.0/V1 digest byte stream when provenance is
-    # absent.  V2 adds a domain-separated canonical payload and episode refs.
-    if has_robot_provenance:
-        digest.update(b"\0robot_asset\0")
-        digest.update(
-            json.dumps(robot_asset, sort_keys=True, separators=(",", ":")).encode()
+    payload = json.loads(Path(path).read_text())
+    if not isinstance(payload, dict):
+        raise ValueError("normalization artifact must be a JSON object")
+    try:
+        view_id = payload.get("view_id")
+        return DatasetNormStats(
+            action=NormStats.from_dict(payload["action"]),
+            obs=NormStats.from_dict(payload["obs"]),
+            obs_preset=str(payload["obs_preset"]),
+            train_episode_ids=tuple(str(item) for item in payload["train_episode_ids"]),
+            action_space=str(payload["action_space"]),
+            view_id=str(view_id) if view_id is not None else None,
         )
-    for record in sorted(dataset.records, key=lambda r: r.episode_id):
-        digest.update(record.episode_id.encode())
-        for key in ("seed", "robot", "scene", "policy"):
-            digest.update(str(record.meta.get(key, "")).encode())
-            digest.update(b"\0")
-        if has_robot_provenance:
-            for key in ("robot_asset_id", "robot_asset_sha256"):
-                digest.update(str(record.meta.get(key, "")).encode())
-                digest.update(b"\0")
-        digest.update(str(record.success).encode())
-        digest.update(np.asarray([record.final_door_angle], dtype=np.float64).tobytes())
-        digest.update(str(record.failure_label).encode())
-        digest.update(np.asarray(record.t, dtype=np.float64).tobytes())
-        digest.update(np.asarray(record.actions, dtype=np.float64).tobytes())
-        digest.update(obs_matrix(record, obs_preset).astype(np.float64).tobytes())
-    return digest.hexdigest()
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError(f"invalid normalization artifact: {error}") from error
 
 
 def validate_norm_stats(
@@ -236,117 +159,77 @@ def validate_norm_stats(
     dataset: EpisodeDataset,
     train_episode_ids: list[str],
     obs_preset: str = DEFAULT_OBS_PRESET,
-    split_name: str = "train",
+    *,
     view_id: str | None = None,
-    view_fingerprint: str = "",
 ) -> list[str]:
-    """Return compatibility errors for loaded normalization stats."""
+    """Validate schema-level compatibility and recompute every statistic."""
+
     errors: list[str] = []
-    expected_ids = tuple(dataset.episode_ids)
-    expected_train = tuple(train_episode_ids)
     if stats.action_space != dataset.action_space:
         errors.append(
             f"norm stats action_space {stats.action_space!r} != dataset {dataset.action_space!r}"
         )
-    if not stats.dataset_episode_ids:
-        errors.append(
-            "norm stats carry no dataset_episode_ids provenance; regenerate them "
-            "with the current fingerprint contract"
-        )
-    elif stats.dataset_episode_ids != expected_ids:
-        errors.append("norm stats dataset_episode_ids do not match the dataset")
-    if stats.train_episode_ids != expected_train:
-        errors.append("norm stats train_episode_ids do not match the requested train split")
-    if stats.split_name != split_name:
-        errors.append(f"norm stats split_name {stats.split_name!r} != {split_name!r}")
-    if stats.view_id != view_id:
-        errors.append(f"norm stats view_id {stats.view_id!r} != {view_id!r}")
-    if view_id is not None:
-        if not view_fingerprint:
-            errors.append("requested dataset view has no view fingerprint")
-        if stats.view_fingerprint != view_fingerprint:
-            errors.append("norm stats view fingerprint does not match the requested view")
-        if not stats.normalization_fingerprint:
-            errors.append("view norm stats carry no normalization fingerprint")
-        elif stats.normalization_fingerprint != normalization_fingerprint(stats):
-            errors.append("view norm stats normalization fingerprint is stale")
+    if stats.train_episode_ids != tuple(train_episode_ids):
+        errors.append("norm stats train_episode_ids do not match the train split")
     if stats.obs_preset != obs_preset:
         errors.append(f"norm stats obs_preset {stats.obs_preset!r} != {obs_preset!r}")
-    expected_fingerprint = dataset_fingerprint(dataset, obs_preset)
-    if stats.dataset_fingerprint != expected_fingerprint:
-        errors.append("norm stats dataset_fingerprint does not match the dataset content")
+    if stats.view_id != view_id:
+        errors.append(f"norm stats view_id {stats.view_id!r} != {view_id!r}")
+    expected_obs_dim = obs_matrix(dataset[0], obs_preset).shape[1]
     if stats.action.dim != dataset.action_dim:
         errors.append(f"norm stats action dim {stats.action.dim} != dataset {dataset.action_dim}")
-    expected_obs_dim = obs_matrix(dataset[0], obs_preset).shape[1]
     if stats.obs.dim != expected_obs_dim:
         errors.append(f"norm stats obs dim {stats.obs.dim} != preset {expected_obs_dim}")
     for name, block in (("action", stats.action), ("obs", stats.obs)):
-        dims = {block.mean.shape, block.std.shape, block.min.shape, block.max.shape}
-        if len(dims) != 1 or block.mean.ndim != 1:
+        shapes = {block.mean.shape, block.std.shape, block.min.shape, block.max.shape}
+        if len(shapes) != 1 or block.mean.ndim != 1:
             errors.append(f"norm stats {name} arrays must be 1-D with matching shapes")
-        if not (
-            np.isfinite(block.mean).all()
-            and np.isfinite(block.std).all()
-            and np.isfinite(block.min).all()
-            and np.isfinite(block.max).all()
+        if not all(
+            np.isfinite(value).all() for value in (block.mean, block.std, block.min, block.max)
         ):
             errors.append(f"norm stats {name} arrays must be finite")
         if (block.std < STD_FLOOR).any():
             errors.append(f"norm stats {name} std is below STD_FLOOR")
+        if (block.min > block.max).any():
+            errors.append(f"norm stats {name} min exceeds max")
         if block.count <= 0:
             errors.append(f"norm stats {name} count must be positive")
     try:
-        recomputed = compute_norm_stats(
-            dataset,
-            train_episode_ids,
-            obs_preset,
-            view_id=view_id,
-            view_fingerprint=view_fingerprint,
-        )
+        recomputed = compute_norm_stats(dataset, train_episode_ids, obs_preset, view_id=view_id)
     except (IndexError, KeyError, TypeError, ValueError) as error:
         errors.append(f"normalization numerical recomputation failed: {error}")
     else:
         for name in ("action", "obs"):
-            stored_block = getattr(stats, name)
-            expected_block = getattr(recomputed, name)
-            if stored_block.count != expected_block.count:
-                errors.append(
-                    f"norm stats recomputed {name} count mismatch: "
-                    f"stored={stored_block.count}, expected={expected_block.count}"
-                )
+            stored = getattr(stats, name)
+            expected = getattr(recomputed, name)
+            if stored.count != expected.count:
+                errors.append(f"norm stats recomputed {name} count mismatch")
             for field in ("mean", "std", "min", "max"):
-                stored_value = getattr(stored_block, field)
-                expected_value = getattr(expected_block, field)
-                if not np.array_equal(stored_value, expected_value):
+                if not np.array_equal(getattr(stored, field), getattr(expected, field)):
                     errors.append(f"norm stats recomputed {name} {field} mismatch")
     return errors
 
 
 def _stats_payload(stats: DatasetNormStats) -> dict[str, Any]:
     return {
+        "schema_version": NORM_STATS_SCHEMA,
         "action": stats.action.to_dict(),
         "obs": stats.obs.to_dict(),
         "obs_preset": stats.obs_preset,
         "train_episode_ids": list(stats.train_episode_ids),
-        "dataset_episode_ids": list(stats.dataset_episode_ids),
         "action_space": stats.action_space,
-        "dataset_fingerprint": stats.dataset_fingerprint,
-        "split_name": stats.split_name,
         "view_id": stats.view_id,
-        "view_fingerprint_sha256": stats.view_fingerprint,
     }
 
 
 __all__ = [
-    "DATASET_FINGERPRINT_CONTRACT",
     "NORM_STATS_FILENAME",
+    "NORM_STATS_SCHEMA",
     "STD_FLOOR",
     "DatasetNormStats",
     "NormStats",
     "compute_norm_stats",
-    "dataset_fingerprint",
     "load_norm_stats",
-    "normalization_fingerprint",
     "norm_stats_path",
     "save_norm_stats",
     "validate_norm_stats",

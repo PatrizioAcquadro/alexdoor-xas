@@ -12,7 +12,12 @@ import torch
 from alexdoor_xas.adapters import A2Adapter, StepContext, limits_for_robot, rollout_chunks
 from alexdoor_xas.adapters.limits import PROXY_ROBOT_TAG
 from alexdoor_xas.dataset import DatasetNormStats, EpisodeRecord, NormStats
-from alexdoor_xas.policies.act.checkpoint import load_checkpoint, save_checkpoint
+from alexdoor_xas.policies.act.checkpoint import (
+    CHECKPOINT_FORMAT,
+    LEGACY_CHECKPOINT_FORMAT,
+    load_checkpoint,
+    save_checkpoint,
+)
 from alexdoor_xas.policies.act.config import ActModelCfg, ActTrainCfg
 from alexdoor_xas.policies.act.inspect import open_loop_report
 from alexdoor_xas.policies.act.model import ACTModel, act_loss, sinusoidal_table
@@ -72,9 +77,7 @@ def _tiny_stats() -> DatasetNormStats:
         obs=NormStats.from_rows(rows_o),
         obs_preset="core",
         train_episode_ids=("ep0",),
-        dataset_episode_ids=("ep0", "ep1"),
         action_space="A2_ee_delta",
-        dataset_fingerprint="deadbeef",
     )
 
 
@@ -184,7 +187,15 @@ def test_checkpoint_round_trip_preserves_predictions_and_stats(tmp_path) -> None
     obs = _tiny_batch()["obs"]
     expected = model.predict(obs)
     stats = _tiny_stats()
-    config = {"dataset": {"space": "A2_ee_delta", "obs_preset": "core"}}
+    config = {
+        "dataset": {
+            "task": "door_push",
+            "space": "A2_ee_delta",
+            "version": "v0",
+            "view_id": None,
+            "obs_preset": "core",
+        }
+    }
 
     path = save_checkpoint(
         tmp_path / "ckpt" / "best.pt",
@@ -192,7 +203,6 @@ def test_checkpoint_round_trip_preserves_predictions_and_stats(tmp_path) -> None
         config,
         stats,
         meta={"epoch": 3},
-        split_episode_ids={"train": ["ep0"], "val": ["ep1"], "test": ["ep2"]},
     )
     loaded = load_checkpoint(path)
 
@@ -201,6 +211,7 @@ def test_checkpoint_round_trip_preserves_predictions_and_stats(tmp_path) -> None
     assert loaded.obs_preset == "core"
     assert loaded.chunk_size == TINY_MODEL_CFG.chunk_size
     assert loaded.meta["epoch"] == 3
+    assert loaded.checkpoint_format == CHECKPOINT_FORMAT
     assert not loaded.model.training
 
     for name in ("mean", "std", "min", "max"):
@@ -209,16 +220,18 @@ def test_checkpoint_round_trip_preserves_predictions_and_stats(tmp_path) -> None
         )
         np.testing.assert_array_equal(getattr(loaded.stats.obs, name), getattr(stats.obs, name))
     assert loaded.stats.train_episode_ids == stats.train_episode_ids
-    assert loaded.stats.dataset_fingerprint == stats.dataset_fingerprint
-    assert loaded.split_episode_ids == {
-        "train": ("ep0",),
-        "val": ("ep1",),
-        "test": ("ep2",),
-    }
 
 
 def test_checkpoint_creation_rejects_config_stats_preset_mismatch(tmp_path) -> None:
-    config = {"dataset": {"space": "A2_ee_delta", "obs_preset": "core_door_pose"}}
+    config = {
+        "dataset": {
+            "task": "door_push",
+            "space": "A2_ee_delta",
+            "version": "v0",
+            "view_id": None,
+            "obs_preset": "core_door_pose",
+        }
+    }
     with pytest.raises(ValueError, match="observation preset"):
         save_checkpoint(tmp_path / "bad.pt", _tiny_model(), config, _tiny_stats())
 
@@ -228,6 +241,32 @@ def test_checkpoint_rejects_unknown_format(tmp_path) -> None:
     torch.save({"format": "other"}, path)
     with pytest.raises(ValueError, match="unsupported checkpoint format"):
         load_checkpoint(path)
+
+
+def test_checkpoint_loads_legacy_v1_and_ignores_administrative_fields(tmp_path) -> None:
+    config = {
+        "dataset": {
+            "task": "door_push",
+            "space": "A2_ee_delta",
+            "version": "v0",
+            "view_id": None,
+            "obs_preset": "core",
+        }
+    }
+    path = save_checkpoint(tmp_path / "v2.pt", _tiny_model(), config, _tiny_stats())
+    payload = torch.load(path, weights_only=True)
+    payload["format"] = LEGACY_CHECKPOINT_FORMAT
+    payload["config"] = {**config, "train": {"seed": 3}}
+    payload["norm_stats"]["dataset_fingerprint"] = "legacy-field"
+    payload["provenance"] = {"source_git_commit": "legacy-field"}
+    payload.pop("dataset")
+    legacy_path = tmp_path / "v1.pt"
+    torch.save(payload, legacy_path)
+
+    loaded = load_checkpoint(legacy_path)
+
+    assert loaded.checkpoint_format == LEGACY_CHECKPOINT_FORMAT
+    assert loaded.config == config
 
 
 # --- training loop -----------------------------------------------------------
@@ -250,7 +289,12 @@ def test_train_act_overfits_a_constant_mapping() -> None:
     model = _tiny_model()
     batch = _constant_mapping_batch()
     cfg = ActTrainCfg(
-        epochs=200, batch_size=8, lr=1e-3, kl_weight=1.0, seed=0, val_every=50,
+        epochs=200,
+        batch_size=8,
+        lr=1e-3,
+        kl_weight=1.0,
+        seed=0,
+        val_every=50,
         device="cpu",
     )
 
@@ -317,9 +361,7 @@ class _StubModel(torch.nn.Module):
 
     def predict(self, obs: torch.Tensor) -> torch.Tensor:
         self.last_input = obs.detach().clone()
-        return torch.full(
-            (obs.shape[0], self.cfg.chunk_size, self.action_dim), self.output_value
-        )
+        return torch.full((obs.shape[0], self.cfg.chunk_size, self.action_dim), self.output_value)
 
 
 def _identity_obs_stats() -> NormStats:
@@ -358,10 +400,12 @@ def test_act_policy_normalizes_input_and_denormalizes_output() -> None:
 
 def test_act_policy_clips_exploding_normalized_obs() -> None:
     stats = DatasetNormStats(
-        action=NormStats(np.zeros(ACTION_DIM), np.ones(ACTION_DIM), np.zeros(ACTION_DIM),
-                         np.zeros(ACTION_DIM), 1),
-        obs=NormStats(np.zeros(OBS_DIM), np.full(OBS_DIM, 1e-8), np.zeros(OBS_DIM),
-                      np.zeros(OBS_DIM), 1),
+        action=NormStats(
+            np.zeros(ACTION_DIM), np.ones(ACTION_DIM), np.zeros(ACTION_DIM), np.zeros(ACTION_DIM), 1
+        ),
+        obs=NormStats(
+            np.zeros(OBS_DIM), np.full(OBS_DIM, 1e-8), np.zeros(OBS_DIM), np.zeros(OBS_DIM), 1
+        ),
         obs_preset="core",
         train_episode_ids=("ep0",),
         action_space="A2_ee_delta",
@@ -478,8 +522,13 @@ def test_build_env_obs_core_door_pose_matches_dataset_ordering() -> None:
 def _rollout_policy() -> ActPolicy:
     """Tiny real model whose denormalized deltas stay within the A2 clamps."""
     stats = DatasetNormStats(
-        action=NormStats(np.zeros(ACTION_DIM), np.full(ACTION_DIM, 1e-3),
-                         np.zeros(ACTION_DIM), np.zeros(ACTION_DIM), 1),
+        action=NormStats(
+            np.zeros(ACTION_DIM),
+            np.full(ACTION_DIM, 1e-3),
+            np.zeros(ACTION_DIM),
+            np.zeros(ACTION_DIM),
+            1,
+        ),
         obs=_identity_obs_stats(),
         obs_preset="core",
         train_episode_ids=("ep0",),

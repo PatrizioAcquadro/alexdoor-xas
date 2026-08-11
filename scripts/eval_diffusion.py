@@ -42,12 +42,8 @@ parser = argparse.ArgumentParser(description="AlexDoor-XAS Diffusion Policy clos
 parser.add_argument(
     "--checkpoint", type=str, default=None, help="Trained diffusion checkpoint (.pt)."
 )
-parser.add_argument(
-    "--sampler", type=str, default=None, help="Rollout sampler: ddpm or ddim."
-)
-parser.add_argument(
-    "--inference-steps", type=int, default=None, help="Denoising steps at rollout."
-)
+parser.add_argument("--sampler", type=str, default=None, help="Rollout sampler: ddpm or ddim.")
+parser.add_argument("--inference-steps", type=int, default=None, help="Denoising steps at rollout.")
 parser.add_argument(
     "--reference-metrics",
     type=str,
@@ -135,11 +131,7 @@ from alexdoor_xas.envs.door_task.door_push_alex_v2_env_cfg import (  # noqa: E40
 )
 from alexdoor_xas.eval.metrics import aggregate_metrics, episode_metrics  # noqa: E402
 from alexdoor_xas.eval.sanity import FORCE_DATASET_LIMIT_N  # noqa: E402
-from alexdoor_xas.policies.common.eval_metadata import (  # noqa: E402
-    dataset_provenance,
-    file_sha256,
-    verify_checkpoint_dataset_binding,
-)
+from alexdoor_xas.policies.common.eval_metadata import checkpoint_metadata  # noqa: E402
 from alexdoor_xas.policies.common.rollout_eval import (  # noqa: E402
     aggregate_rollout_rows,
     contact_report,
@@ -217,9 +209,7 @@ def _run_rollout(
     # every executed control tick and stops at the first crossing, so
     # first_success_tick is Ta-independent (post-task extrapolation is out of
     # distribution and can knock the open door shut again).
-    source = diffusion_chunk_source(
-        policy, env, n_action_steps=dp_cfg.rollout.n_action_steps
-    )
+    source = diffusion_chunk_source(policy, env, n_action_steps=dp_cfg.rollout.n_action_steps)
     result = rollout_chunks(
         env,
         source,
@@ -337,10 +327,7 @@ def _run_matched_scripted_reference(env, plan, success_angle_rad: float, protoco
         limitations=ALEX_V2_LIMITATIONS,
     )
     controller_cfg = alex_v2_push_cfg(env.alex_v2_calibration())
-    episodes = [
-        run_episode(env, item, engine_cfg, controller_cfg=controller_cfg)
-        for item in plan
-    ]
+    episodes = [run_episode(env, item, engine_cfg, controller_cfg=controller_cfg) for item in plan]
     per_episode = [episode_metrics(episode) for episode in episodes]
     aggregate = aggregate_metrics(per_episode)
     return scripted_reference_payload(
@@ -389,18 +376,7 @@ def main() -> int:
             f"{dp_cfg.rollout.num_inference_steps} device={dp_cfg.rollout.policy_device}",
             flush=True,
         )
-        # Bind the eval to the exact trained dataset before any rollout: a
-        # checkpoint/live fingerprint or split mismatch fails the evaluation.
-        provenance = dataset_provenance(policy.checkpoint_config, run_dir, paths.DATASETS_DIR)
-        provenance.update(
-            verify_checkpoint_dataset_binding(
-                policy.stats,
-                provenance,
-                paths.DATASETS_DIR,
-                checkpoint_split_episode_ids=policy.checkpoint_split_episode_ids,
-                checkpoint_provenance=policy.checkpoint_provenance,
-            )
-        )
+        checkpoint_info = checkpoint_metadata(policy, "diffusion")
         if args.determinism_replay:
             return _run_determinism_replay(env, policy, checkpoint_path, success_angle_rad)
 
@@ -468,7 +444,7 @@ def main() -> int:
         payload = {
             "policy": "diffusion",
             "checkpoint": str(checkpoint_path),
-            "checkpoint_sha256": file_sha256(checkpoint_path),
+            "checkpoint_metadata": checkpoint_info,
             "robot_compatibility_label": policy.robot_compatibility_label,
             "action_space": policy.action_space,
             "obs_preset": policy.obs_preset,
@@ -486,7 +462,6 @@ def main() -> int:
             "config_horizon": dp_cfg.model.horizon,
             "door_pose": _door_pose_payload(),
             "control_dt": float(env.cfg.sim.dt) * int(env.cfg.decimation),
-            "dataset_provenance": provenance,
             "seed_protocol": protocol,
             "determinism_probe": determinism_probe,
             "rollouts": rows,
@@ -564,7 +539,7 @@ def _run_determinism_replay(env, policy, checkpoint_path, success_angle_rad: flo
     # like the reference eval; any drift is a hard error, not a comparison.
     expected = {
         "policy": "diffusion",
-        "checkpoint_sha256": file_sha256(checkpoint_path),
+        "checkpoint": str(checkpoint_path),
         "action_space": policy.action_space,
         "obs_preset": policy.obs_preset,
         "max_ticks": dp_cfg.rollout.max_ticks,

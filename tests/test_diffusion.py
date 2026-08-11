@@ -26,6 +26,7 @@ from alexdoor_xas.policies.common.inspect import open_loop_report  # noqa: E402
 from alexdoor_xas.policies.common.obs import stop_on_hinge_angle  # noqa: E402
 from alexdoor_xas.policies.diffusion.checkpoint import (  # noqa: E402
     CHECKPOINT_FORMAT,
+    LEGACY_CHECKPOINT_FORMAT,
     load_checkpoint,
     save_checkpoint,
 )
@@ -100,7 +101,6 @@ def _tiny_stats() -> DatasetNormStats:
         obs=obs,
         obs_preset="core",
         train_episode_ids=("ep-a",),
-        dataset_episode_ids=("ep-a",),
         action_space="A2_ee_delta",
     )
 
@@ -213,9 +213,7 @@ def test_sample_actions_is_deterministic_with_seeded_generator() -> None:
         torch.testing.assert_close(first, second)
 
     scheduler = make_inference_scheduler(TINY_MODEL_CFG, "ddpm", 10)
-    third = sample_actions(
-        model, scheduler, obs, 8, ACTION_DIM, torch.Generator().manual_seed(8)
-    )
+    third = sample_actions(model, scheduler, obs, 8, ACTION_DIM, torch.Generator().manual_seed(8))
     assert not torch.allclose(first, third)
 
 
@@ -441,7 +439,15 @@ def test_train_diffusion_updates_the_ema_and_validates_with_it() -> None:
 def test_checkpoint_round_trip_preserves_predictions(tmp_path) -> None:
     model = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=0).eval()
     stats = _tiny_stats()
-    config = {"dataset": {"space": "A2_ee_delta", "obs_preset": "core"}}
+    config = {
+        "dataset": {
+            "task": "door_push",
+            "space": "A2_ee_delta",
+            "version": "v0",
+            "view_id": None,
+            "obs_preset": "core",
+        }
+    }
     path = tmp_path / "checkpoints" / "best.pt"
 
     save_checkpoint(
@@ -450,7 +456,6 @@ def test_checkpoint_round_trip_preserves_predictions(tmp_path) -> None:
         config,
         stats,
         meta={"run_id": "test"},
-        split_episode_ids={"train": ["ep0"], "val": ["ep1"], "test": ["ep2"]},
     )
     loaded = load_checkpoint(path)
 
@@ -458,27 +463,42 @@ def test_checkpoint_round_trip_preserves_predictions(tmp_path) -> None:
     assert loaded.obs_preset == "core"
     assert loaded.horizon == TINY_MODEL_CFG.horizon
     assert loaded.meta["run_id"] == "test"
-    assert loaded.meta["diffusers_version"]
-    assert loaded.split_episode_ids["val"] == ("ep1",)
+    assert loaded.checkpoint_format == CHECKPOINT_FORMAT
     np.testing.assert_allclose(loaded.stats.action.min, stats.action.min)
 
     obs = torch.randn(2, OBS_DIM, generator=torch.Generator().manual_seed(0))
     for sampler in ("ddpm", "ddim"):
         scheduler = make_inference_scheduler(TINY_MODEL_CFG, sampler, 10)
         original = sample_actions(
-            model, scheduler, obs, TINY_MODEL_CFG.horizon, ACTION_DIM,
+            model,
+            scheduler,
+            obs,
+            TINY_MODEL_CFG.horizon,
+            ACTION_DIM,
             torch.Generator().manual_seed(1),
         )
         scheduler = make_inference_scheduler(loaded.model.cfg, sampler, 10)
         rebuilt = sample_actions(
-            loaded.model, scheduler, obs, TINY_MODEL_CFG.horizon, ACTION_DIM,
+            loaded.model,
+            scheduler,
+            obs,
+            TINY_MODEL_CFG.horizon,
+            ACTION_DIM,
             torch.Generator().manual_seed(1),
         )
         assert torch.equal(original, rebuilt)
 
 
 def test_checkpoint_creation_rejects_config_stats_preset_mismatch(tmp_path) -> None:
-    config = {"dataset": {"space": "A2_ee_delta", "obs_preset": "core_door_pose"}}
+    config = {
+        "dataset": {
+            "task": "door_push",
+            "space": "A2_ee_delta",
+            "version": "v0",
+            "view_id": None,
+            "obs_preset": "core_door_pose",
+        }
+    }
     with pytest.raises(ValueError, match="observation preset"):
         save_checkpoint(
             tmp_path / "bad.pt",
@@ -496,7 +516,34 @@ def test_checkpoint_rejects_unknown_format(tmp_path) -> None:
 
 
 def test_checkpoint_format_tag() -> None:
-    assert CHECKPOINT_FORMAT == "alexdoor_xas.diffusion.v1"
+    assert CHECKPOINT_FORMAT == "alexdoor_xas.diffusion.v2"
+
+
+def test_checkpoint_loads_legacy_v1_and_ignores_administrative_fields(tmp_path) -> None:
+    config = {
+        "dataset": {
+            "task": "door_push",
+            "space": "A2_ee_delta",
+            "version": "v0",
+            "view_id": None,
+            "obs_preset": "core",
+        }
+    }
+    model = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=0)
+    path = save_checkpoint(tmp_path / "v2.pt", model, config, _tiny_stats())
+    payload = torch.load(path, weights_only=True)
+    payload["format"] = LEGACY_CHECKPOINT_FORMAT
+    payload["config"] = {**config, "train": {"seed": 3}}
+    payload["norm_stats"]["dataset_fingerprint"] = "legacy-field"
+    payload["provenance"] = {"source_git_commit": "legacy-field"}
+    payload.pop("dataset")
+    legacy_path = tmp_path / "v1.pt"
+    torch.save(payload, legacy_path)
+
+    loaded = load_checkpoint(legacy_path)
+
+    assert loaded.checkpoint_format == LEGACY_CHECKPOINT_FORMAT
+    assert loaded.config == config
 
 
 # --- policy wrapper + chunk source (closed-loop smoke, no Isaac) -------------------
@@ -601,7 +648,15 @@ def test_diffusion_policy_seed_makes_sampling_reproducible() -> None:
 def test_diffusion_policy_from_checkpoint(tmp_path) -> None:
     model = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=0)
     stats = _tiny_stats()
-    config = {"dataset": {"space": "A2_ee_delta", "obs_preset": "core"}}
+    config = {
+        "dataset": {
+            "task": "door_push",
+            "space": "A2_ee_delta",
+            "version": "v0",
+            "view_id": None,
+            "obs_preset": "core",
+        }
+    }
     path = save_checkpoint(tmp_path / "best.pt", model, config, stats, meta={"run_id": "x"})
 
     policy = DiffusionPolicy.from_checkpoint(path, sampler="ddim", num_inference_steps=5)
@@ -698,9 +753,7 @@ def test_open_loop_report_with_receding_horizon_stride(tmp_path) -> None:
     policy = _rollout_policy()
     policy.seed(0)
 
-    report = open_loop_report(
-        policy, [record], json_path=tmp_path / "open_loop.json", stride=4
-    )
+    report = open_loop_report(policy, [record], json_path=tmp_path / "open_loop.json", stride=4)
 
     assert report["stride"] == 4
     assert report["chunk_size"] == TINY_MODEL_CFG.horizon

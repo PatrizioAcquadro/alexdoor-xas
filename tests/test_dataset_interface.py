@@ -29,7 +29,6 @@ from alexdoor_xas.dataset import (
     ChunkSampler,
     EpisodeDataset,
     compute_norm_stats,
-    dataset_fingerprint,
     episode_chunk_features,
     load_norm_stats,
     load_splits,
@@ -472,27 +471,26 @@ def test_norm_stats_roundtrip_and_zero_std_guard(proxy_a2, tmp_path) -> None:
     assert validate_norm_stats(loaded, proxy_a2, train_ids) == []
 
     pose_stats = compute_norm_stats(proxy_a2, train_ids, obs_preset="core_door_pose")
-    assert pose_stats.dataset_fingerprint == dataset_fingerprint(
-        proxy_a2, "core_door_pose"
-    )
-    assert pose_stats.dataset_fingerprint != stats.dataset_fingerprint
+    assert pose_stats.obs_preset == "core_door_pose"
+    assert pose_stats.obs.dim > stats.obs.dim
 
 
 def test_norm_stats_validation_rejects_stale_or_wrong_dimension_stats(proxy_a2) -> None:
     train_ids = proxy_a2.episode_ids[:3]
     stats = compute_norm_stats(proxy_a2, train_ids)
 
-    stale = dataclasses.replace(stats, dataset_fingerprint="stale")
-    assert any("fingerprint" in error for error in validate_norm_stats(stale, proxy_a2, train_ids))
+    stale_action = dataclasses.replace(
+        stats.action,
+        mean=stats.action.mean + 1.0,
+    )
+    stale = dataclasses.replace(stats, action=stale_action)
+    assert any(
+        "recomputed action mean" in error
+        for error in validate_norm_stats(stale, proxy_a2, train_ids)
+    )
 
     wrong_train = validate_norm_stats(stats, proxy_a2, list(reversed(train_ids)))
     assert any("train_episode_ids" in error for error in wrong_train)
-
-    missing_dataset_ids = dataclasses.replace(stats, dataset_episode_ids=())
-    assert any(
-        "no dataset_episode_ids provenance" in error
-        for error in validate_norm_stats(missing_dataset_ids, proxy_a2, train_ids)
-    )
 
     bad_action = dataclasses.replace(
         stats.action,
@@ -559,8 +557,7 @@ def test_verify_dataset_interface_requires_a4_by_default(proxy_exports, tmp_path
     failures = verify.verify_task(args, "door_push")
 
     assert any(
-        "missing required" in failure and A4_OBJ_CENTRIC_CHUNK in failure
-        for failure in failures
+        "missing required" in failure and A4_OBJ_CENTRIC_CHUNK in failure for failure in failures
     )
 
 

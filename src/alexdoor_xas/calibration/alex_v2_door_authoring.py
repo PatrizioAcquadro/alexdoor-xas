@@ -11,14 +11,22 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from alexdoor_xas.assets.alex_v2_contract import RobotAssetRef
 from alexdoor_xas.assets.alex_v2_tool_frame import derive_right_gripper_tool_frame
 from alexdoor_xas.calibration.alex_v2_door import (
     CALIBRATION_SCHEMA,
-    REQUIRED_GATES,
     RIGHT_ARM_JOINT_LIMITS_RAD,
     TASK_NAME,
-    calibration_fingerprint,
+    load_alex_v2_door_calibration,
+)
+
+REQUIRED_GATES = (
+    "exact_runtime_joint_order",
+    "reset_stability",
+    "finite_jacobians",
+    "collision_tool_frame",
+    "contact_behavior",
+    "fixed_scripted_baseline",
+    "randomized_scripted_baseline",
 )
 
 BASE_POSE = {
@@ -60,32 +68,29 @@ class CalibrationAuthoringError(RuntimeError):
     """Raised when live evidence is insufficient to author calibration."""
 
 
-def compose_candidate_payload(
-    manifest: Mapping[str, Any],
-    *,
-    robot_asset: RobotAssetRef,
-    runtime_versions: Mapping[str, str],
-) -> dict[str, Any]:
-    """Compose the exact candidate payload from the current runtime manifest."""
+def compose_calibration_payload(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    """Compose the minimal active payload from the current runtime manifest."""
 
     _require_ready_pose_within_limits()
-    tool_frame = derive_right_gripper_tool_frame(manifest, (1.0, 0.0, 0.0))
-    payload: dict[str, Any] = {
+    derived = derive_right_gripper_tool_frame(manifest, (1.0, 0.0, 0.0)).to_dict()
+    return {
         "schema_version": CALIBRATION_SCHEMA,
-        "status": "candidate",
         "task": TASK_NAME,
-        "robot_asset": robot_asset.to_dict(),
-        "runtime_versions": dict(runtime_versions),
-        "tool_frame": tool_frame.to_dict(),
+        "tool_frame": {
+            field: deepcopy(derived[field])
+            for field in (
+                "parent_link",
+                "translation_m",
+                "orientation_xyzw",
+                "contact_normal_link",
+            )
+        },
         "base_pose": deepcopy(BASE_POSE),
         "ready_joint_pos": dict(READY_JOINT_POS),
         "reach_shell_m": list(REACH_SHELL_M),
         "controller": dict(CONTROLLER),
         "randomization_bounds": deepcopy(RANDOMIZATION_BOUNDS),
-        "gates": {name: False for name in REQUIRED_GATES},
     }
-    payload["fingerprint"] = calibration_fingerprint(payload)
-    return payload
 
 
 def all_required_gates_pass(gates: Mapping[str, Any]) -> bool:
@@ -96,35 +101,19 @@ def all_required_gates_pass(gates: Mapping[str, Any]) -> bool:
     )
 
 
-def make_validated_payload(
-    candidate_payload: Mapping[str, Any],
+def write_calibration(
+    destination: str | Path,
+    payload: Mapping[str, Any],
     gates: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Promote a candidate only after every frozen live gate passed."""
+    """Validate live gates, then atomically write the minimal calibration."""
 
-    if candidate_payload.get("status") != "candidate":
-        raise CalibrationAuthoringError("only a candidate payload can be validated")
     if not all_required_gates_pass(gates):
         failed = [name for name in REQUIRED_GATES if gates.get(name) is not True]
         raise CalibrationAuthoringError(
-            "refusing to author production calibration; failed gates: "
-            + ", ".join(failed)
+            "refusing to write production calibration; failed gates: " + ", ".join(failed)
         )
-    validated = deepcopy(dict(candidate_payload))
-    validated["status"] = "validated"
-    validated["gates"] = {name: True for name in REQUIRED_GATES}
-    validated["fingerprint"] = calibration_fingerprint(validated)
-    return validated
-
-
-def write_validated_calibration(
-    destination: str | Path,
-    candidate_payload: Mapping[str, Any],
-    gates: Mapping[str, Any],
-) -> dict[str, Any]:
-    """Atomically write production calibration after fail-closed promotion."""
-
-    validated = make_validated_payload(candidate_payload, gates)
+    calibration = deepcopy(dict(payload))
     path = Path(destination)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary_name: str | None = None
@@ -138,16 +127,17 @@ def write_validated_calibration(
             delete=False,
         ) as stream:
             temporary_name = stream.name
-            json.dump(validated, stream, indent=2, sort_keys=True)
+            json.dump(calibration, stream, indent=2, sort_keys=True)
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
+        load_alex_v2_door_calibration(temporary_name)
         os.replace(temporary_name, path)
         temporary_name = None
     finally:
         if temporary_name is not None:
             Path(temporary_name).unlink(missing_ok=True)
-    return validated
+    return calibration
 
 
 def distance_envelope(values: Iterable[float]) -> tuple[float, float] | None:
@@ -232,10 +222,10 @@ __all__ = [
     "READY_JOINT_POS",
     "CalibrationAuthoringError",
     "all_required_gates_pass",
-    "compose_candidate_payload",
+    "REQUIRED_GATES",
+    "compose_calibration_payload",
     "distance_envelope",
     "envelope_within_shell",
     "make_reset_stability_evidence",
-    "make_validated_payload",
-    "write_validated_calibration",
+    "write_calibration",
 ]

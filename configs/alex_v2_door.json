@@ -23,16 +23,6 @@
     "push_radius_frac": 0.35,
     "release_standoff_m": 0.3
   },
-  "fingerprint": "066e0a2d0157549a331b96702e643fd7626eed58d33bbe701005e111ed358948",
-  "gates": {
-    "collision_tool_frame": true,
-    "contact_behavior": true,
-    "exact_runtime_joint_order": true,
-    "finite_jacobians": true,
-    "fixed_scripted_baseline": true,
-    "randomized_scripted_baseline": true,
-    "reset_stability": true
-  },
   "randomization_bounds": {
     "push_height_m_range": [
       0.12,
@@ -65,20 +55,9 @@
     "RIGHT_WRIST_X": 0.0,
     "RIGHT_WRIST_Z": 0.0
   },
-  "robot_asset": {
-    "id": "alex_v2_fullbody_fixedbase_standard_forearm_v0:b8d5672bd5f1f653640d8822c27b31409697efed53c01d57907f3a161acecc96",
-    "manifest_fingerprint": "b8d5672bd5f1f653640d8822c27b31409697efed53c01d57907f3a161acecc96",
-    "sha256": "b8d5672bd5f1f653640d8822c27b31409697efed53c01d57907f3a161acecc96"
-  },
-  "runtime_versions": {
-    "isaac_lab": "3.0.0",
-    "isaac_sim": "6.0.1-rc.7+release.42383.32955d8d.gl"
-  },
-  "schema_version": "alexdoor.alex_v2_door_calibration.v0",
-  "status": "validated",
+  "schema_version": "alexdoor.alex_v2_door.v1",
   "task": "door_push_alex_v2",
   "tool_frame": {
-    "collision_union_sha256": "5a7233b76dbfd63698adb5b18ea8e2477c5dfffdcb9b1a4bf9aefb43248125b8",
     "contact_normal_link": [
       1.0,
       0.0,
@@ -91,8 +70,6 @@
       1.0
     ],
     "parent_link": "RIGHT_GRIPPER_Z_LINK",
-    "support_distance_m": 0.1179961994235339,
-    "support_shape": "right_thumb_collision",
     "translation_m": [
       0.1179961994235339,
       0.0,

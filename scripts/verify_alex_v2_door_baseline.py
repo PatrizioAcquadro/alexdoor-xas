@@ -28,7 +28,6 @@ from isaaclab.app import AppLauncher  # noqa: E402
 EVIDENCE_DIR = Path("outputs/door_push_alex_v2/calibration/v0")
 EVIDENCE_PATH = EVIDENCE_DIR / "verify_alex_v2_door_baseline.evidence.json"
 CANDIDATE_PATH = EVIDENCE_DIR / "alex_v2_door_calibration.candidate.json"
-VALIDATED_STAGING_PATH = EVIDENCE_DIR / "alex_v2_door_calibration.validated-staging.json"
 
 parser = argparse.ArgumentParser(description="Alex V2 door calibration author/validation gate")
 parser.add_argument("--fixed-seed", type=int, default=0)
@@ -48,11 +47,11 @@ def _write_json(path: Path, payload: Any) -> None:
 
 
 evidence: dict[str, Any] = {
-    "schema_version": "alexdoor.verify_alex_v2_door_baseline.evidence.v0",
+    "schema_version": "alexdoor.verify_alex_v2_door_baseline.evidence.v1",
     "status": "starting",
     "production_calibration_written": False,
     "candidate_path": str(CANDIDATE_PATH),
-    "production_path": "configs/alex_v2_door_calibration.v0.json",
+    "production_path": "configs/alex_v2_door.json",
     "gates": {},
     "gate_evidence": {},
 }
@@ -98,20 +97,18 @@ from alexdoor_xas.assets.alex_v2_tool_frame import (  # noqa: E402
     derive_right_gripper_tool_frame,
 )
 from alexdoor_xas.calibration.alex_v2_door import (  # noqa: E402
-    REQUIRED_GATES,
     default_calibration_path,
-    load_candidate_alex_v2_door_calibration,
-    load_validated_alex_v2_door_calibration,
+    load_alex_v2_door_calibration,
 )
 from alexdoor_xas.calibration.alex_v2_door_authoring import (  # noqa: E402
     CONTROLLER,
+    REQUIRED_GATES,
     all_required_gates_pass,
-    compose_candidate_payload,
+    compose_calibration_payload,
     distance_envelope,
     envelope_within_shell,
     make_reset_stability_evidence,
-    make_validated_payload,
-    write_validated_calibration,
+    write_calibration,
 )
 from alexdoor_xas.data_engine import (  # noqa: E402
     DataEngineCfg,
@@ -125,9 +122,6 @@ from alexdoor_xas.envs.door_task.alex_v2_runtime import (  # noqa: E402
 )
 from alexdoor_xas.envs.door_task.door_push_alex_v2_calibration_env import (  # noqa: E402
     DoorPushAlexV2CalibrationEnv,
-)
-from alexdoor_xas.envs.door_task.door_push_alex_v2_env import (  # noqa: E402
-    _runtime_versions,
 )
 from alexdoor_xas.envs.door_task.door_push_alex_v2_env_cfg import (  # noqa: E402
     ALEX_V2_ROBOT_TAG,
@@ -231,14 +225,10 @@ def _jacobian_evidence(env: DoorPushAlexV2CalibrationEnv) -> dict[str, Any]:
 
 
 def _episode_evidence(episode: Any, distances: list[float]) -> tuple[dict[str, Any], bool]:
-    sanity = check_alex_episode(
-        episode, force_error_n=FORCE_DATASET_LIMIT_N
-    )
+    sanity = check_alex_episode(episode, force_error_n=FORCE_DATASET_LIMIT_N)
     outcome = episode.outcome
     runtime_notes = "" if outcome is None else str(outcome.notes)
-    completed = (
-        outcome is not None and not runtime_notes and episode.n_steps <= args.max_ticks
-    )
+    completed = outcome is not None and not runtime_notes and episode.n_steps <= args.max_ticks
     envelope = distance_envelope(distances)
     shell_ok = envelope_within_shell(distances, (0.2, 0.8))
     summary = {
@@ -316,9 +306,7 @@ def _fixed_gates(
         and summary["force_diagnostics"]["force_admission_passed"]
     )
     outcome = episode.outcome
-    success_angle_passed = bool(
-        outcome is not None and outcome.final_door_angle >= math.pi / 4.0
-    )
+    success_angle_passed = bool(outcome is not None and outcome.final_door_angle >= math.pi / 4.0)
     summary.update(
         {
             "success_angle_rad": math.pi / 4.0,
@@ -376,21 +364,15 @@ def main() -> int:
             raise ValueError("--max-ticks must be at least 1")
 
         asset, robot_asset = build_alex_v2_door_asset()
-        runtime_versions = _runtime_versions()
-        candidate = compose_candidate_payload(
-            asset.manifest,
-            robot_asset=robot_asset,
-            runtime_versions=runtime_versions,
-        )
+        runtime_versions = {
+            "isaac_sim": (Path.home() / "isaacsim" / "VERSION").read_text().strip(),
+            "isaac_lab": (Path.home() / "IsaacLab" / "VERSION").read_text().strip(),
+        }
+        candidate = compose_calibration_payload(asset.manifest)
         _write_json(CANDIDATE_PATH, candidate)
-        calibration = load_candidate_alex_v2_door_calibration(
-            CANDIDATE_PATH,
-            runtime_asset=robot_asset,
-            runtime_versions=runtime_versions,
-        )
+        calibration = load_alex_v2_door_calibration(CANDIDATE_PATH)
         evidence.update(
             {
-                "candidate_fingerprint": candidate["fingerprint"],
                 "robot_asset": robot_asset.to_dict(),
                 "runtime_versions": runtime_versions,
             }
@@ -422,9 +404,12 @@ def main() -> int:
         evidence["gate_evidence"]["finite_jacobians"] = jacobians
 
         require_current_collision_tool_frame(asset.manifest, calibration)
-        derived_tool_frame = derive_right_gripper_tool_frame(
+        derived_tool_frame_full = derive_right_gripper_tool_frame(
             asset.manifest, candidate["tool_frame"]["contact_normal_link"]
         ).to_dict()
+        derived_tool_frame = {
+            field: derived_tool_frame_full[field] for field in candidate["tool_frame"]
+        }
         tool_match = derived_tool_frame == candidate["tool_frame"]
         gates["collision_tool_frame"] = tool_match
         evidence["gate_evidence"]["collision_tool_frame"] = {
@@ -442,9 +427,7 @@ def main() -> int:
         controller_cfg = alex_v2_push_cfg(calibration)
         variation_bounds = alex_v2_variation_bounds(calibration)
 
-        fixed, fixed_passed, contact_passed = _fixed_gates(
-            env, engine_cfg, controller_cfg
-        )
+        fixed, fixed_passed, contact_passed = _fixed_gates(env, engine_cfg, controller_cfg)
         gates["fixed_scripted_baseline"] = fixed_passed
         gates["contact_behavior"] = contact_passed
         evidence["gate_evidence"]["fixed_scripted_baseline"] = fixed
@@ -454,15 +437,11 @@ def main() -> int:
             "peak_push_contact_force_n": fixed["peak_push_contact_force_n"],
             "threshold_n": fixed["contact_force_threshold_n"],
             "upper_force_limit_n": FORCE_DATASET_LIMIT_N,
-            "upper_force_gate_passed": fixed["force_diagnostics"][
-                "upper_force_gate_passed"
-            ],
+            "upper_force_gate_passed": fixed["force_diagnostics"]["upper_force_gate_passed"],
             "non_negative_force_gate_passed": fixed["force_diagnostics"][
                 "non_negative_force_gate_passed"
             ],
-            "force_admission_passed": fixed["force_diagnostics"][
-                "force_admission_passed"
-            ],
+            "force_admission_passed": fixed["force_diagnostics"]["force_admission_passed"],
             "force_diagnostics": fixed["force_diagnostics"],
             "filtered_force_matrix_shape": list(
                 _tensor(env._contact_sensor.data.force_matrix_w).shape  # noqa: SLF001
@@ -482,33 +461,21 @@ def main() -> int:
             failed = [name for name in REQUIRED_GATES if not gates[name]]
             raise RuntimeError("live Alex V2 calibration gates failed: " + ", ".join(failed))
 
-        validated_staging = make_validated_payload(candidate, gates)
-        _write_json(VALIDATED_STAGING_PATH, validated_staging)
-        load_validated_alex_v2_door_calibration(
-            VALIDATED_STAGING_PATH,
-            runtime_asset=robot_asset,
-            runtime_versions=runtime_versions,
-        )
         production_path = default_calibration_path()
-        validated = write_validated_calibration(production_path, candidate, gates)
+        write_calibration(production_path, candidate, gates)
         evidence.update(
             {
                 "production_calibration_written": True,
                 "production_path": str(production_path),
-                "validated_fingerprint": validated["fingerprint"],
             }
         )
-        load_validated_alex_v2_door_calibration(
-            production_path,
-            runtime_asset=robot_asset,
-            runtime_versions=runtime_versions,
-        )
+        load_alex_v2_door_calibration(production_path)
         evidence.update(
             {
                 "status": "passed",
             }
         )
-        print(f"PASS: wrote validated Alex V2 calibration to {production_path}", flush=True)
+        print(f"PASS: wrote Alex V2 calibration to {production_path}", flush=True)
         return 0
     except Exception as error:  # noqa: BLE001
         evidence.update(

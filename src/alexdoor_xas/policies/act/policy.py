@@ -43,13 +43,10 @@ class ActPolicy:
         obs_clip: float = OBS_CLIP,
     ) -> None:
         if stats.obs.dim != model.obs_dim:
-            raise ValueError(
-                f"norm stats obs dim {stats.obs.dim} != model obs dim {model.obs_dim}"
-            )
+            raise ValueError(f"norm stats obs dim {stats.obs.dim} != model obs dim {model.obs_dim}")
         if stats.action.dim != model.action_dim:
             raise ValueError(
-                f"norm stats action dim {stats.action.dim} != model action dim "
-                f"{model.action_dim}"
+                f"norm stats action dim {stats.action.dim} != model action dim {model.action_dim}"
             )
         self.model = model
         self.stats = stats
@@ -57,8 +54,7 @@ class ActPolicy:
         self.obs_clip = obs_clip
         self.checkpoint_config: dict | None = None
         self.checkpoint_meta: dict | None = None
-        self.checkpoint_split_episode_ids: dict[str, tuple[str, ...]] = {}
-        self.checkpoint_provenance: dict = {}
+        self.checkpoint_format: str | None = None
         self.robot_asset: RobotAssetRef | None = None
         self.robot_compatibility_label: str | None = None
         self.model.to(self.device)
@@ -77,13 +73,10 @@ class ActPolicy:
         policy = cls(loaded.model, loaded.stats, device=device)
         policy.checkpoint_config = loaded.config
         policy.checkpoint_meta = loaded.meta
-        policy.checkpoint_split_episode_ids = loaded.split_episode_ids
-        policy.checkpoint_provenance = loaded.provenance
+        policy.checkpoint_format = loaded.checkpoint_format
         policy.robot_asset = loaded.robot_asset
         dataset = loaded.config.get("dataset", {})
-        checkpoint_is_v2 = (
-            isinstance(dataset, dict) and dataset.get("task") == paths.ALEX_V2_TASK
-        )
+        checkpoint_is_v2 = isinstance(dataset, dict) and dataset.get("task") == paths.ALEX_V2_TASK
         if checkpoint_is_v2 and runtime_asset is None:
             raise ValueError("Alex V2 policy loading requires a runtime robot asset")
         if runtime_asset is not None:
@@ -110,9 +103,7 @@ class ActPolicy:
         """One denormalized action chunk ``(H, D)`` for one raw observation."""
         obs = np.asarray(obs, dtype=np.float64).reshape(-1)
         if obs.shape[0] != self.model.obs_dim:
-            raise ValueError(
-                f"expected obs of dim {self.model.obs_dim}, got {obs.shape[0]}"
-            )
+            raise ValueError(f"expected obs of dim {self.model.obs_dim}, got {obs.shape[0]}")
         normalized = np.clip(self.stats.obs.normalize(obs), -self.obs_clip, self.obs_clip)
         tensor = torch.as_tensor(normalized, dtype=torch.float32, device=self.device)
         a_hat = self.model.predict(tensor.reshape(1, -1))[0].cpu().numpy()
