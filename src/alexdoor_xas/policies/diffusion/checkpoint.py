@@ -10,6 +10,8 @@ payload so ``torch.load(weights_only=True)`` stays safe).
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -204,12 +206,10 @@ def _validate_training_provenance(
     for key, value in required.items():
         if provenance.get(key) != value:
             raise ValueError(f"checkpoint training provenance mismatch: {key}")
-    from alexdoor_xas.cluster_sweep.config import canonical_resolved_config_sha256
-
-    split_digest = canonical_resolved_config_sha256(expected_splits)
+    split_digest = _canonical_sha256(expected_splits)
     if provenance.get("split_fingerprint_sha256") != split_digest:
         raise ValueError("checkpoint training provenance mismatch: split fingerprint")
-    config_digest = canonical_resolved_config_sha256(config)
+    config_digest = _canonical_sha256(config)
     if provenance.get("resolved_training_config_sha256") != config_digest:
         raise ValueError("checkpoint training provenance mismatch: resolved config")
     for key, pattern in (
@@ -236,6 +236,11 @@ def _validate_training_provenance(
         raise ValueError(
             "checkpoint training provenance mismatch: master_dataset_fingerprint_sha256"
         )
+
+
+def _canonical_sha256(payload: Any) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def _stats_payload(stats: DatasetNormStats) -> dict[str, Any]:

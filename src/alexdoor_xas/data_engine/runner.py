@@ -88,7 +88,8 @@ def run_baseline(
     # Posed runs never export directly: a re-export replaces the version dir,
     # so one posed run with export=True would silently overwrite the official
     # default-pose dataset (and its splits/norm stats) the trained checkpoints
-    # depend on. Multi-pose datasets go through scripts/export_merged_dataset.py.
+    # depend on. Posed runs remain output-only unless a future dataset workflow
+    # explicitly defines how multiple poses are selected and published.
     non_default_pose = (
         engine_cfg.door_pose_id is not None
         or engine_cfg.door_yaw_rad != 0.0
@@ -100,8 +101,7 @@ def run_baseline(
             f"(door_pose_id={engine_cfg.door_pose_id!r}, "
             f"door_yaw_rad={engine_cfg.door_yaw_rad}, "
             f"door_offset_xy={tuple(engine_cfg.door_offset_xy)}); rerun with "
-            "export disabled (--no-export / run.export=false) and merge via "
-            "scripts/export_merged_dataset.py"
+            "export disabled (--no-export / run.export=false)"
         )
 
     run_dir = Path(outputs_root) / experiment / run_id

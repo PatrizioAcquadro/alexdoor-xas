@@ -237,34 +237,10 @@ def checkpoint_provenance(
         "val": list(data.val_ids),
         "test": list(data.test_ids),
     }
-    from alexdoor_xas.cluster_sweep.config import canonical_resolved_config_sha256
-
     if not data.master_dataset_fingerprint or not data.action_dataset_fingerprint:
         raise PolicyDataError("view-selected training requires dual dataset fingerprints")
     if data.action_dataset_fingerprint != data.stats.dataset_fingerprint:
         raise PolicyDataError("action dataset fingerprint does not match normalization dataset")
-    if data.view_id.startswith("v3_scale_n"):
-        from alexdoor_xas.cluster_sweep.config import (
-            load_sweep_config,
-            validate_resolved_sweep_cell_config,
-        )
-
-        sweep = load_sweep_config(paths.REPO_ROOT / "configs/cluster_sweep.v1.json")
-        run_id = ((resolved_config.get("run") or {}).get("run_id"))
-        matches = [
-            cell
-            for cell in sweep.cells
-            if cell.run_id == run_id
-            and cell.policy == policy
-            and cell.space == data.dataset.action_space
-            and cell.view_id == data.view_id
-        ]
-        if len(matches) != 1:
-            raise PolicyDataError("resolved config does not identify one configured sweep cell")
-        try:
-            validate_resolved_sweep_cell_config(sweep, matches[0], resolved_config)
-        except ValueError as error:
-            raise PolicyDataError(str(error)) from error
     return {
         "schema": "alexdoor_xas.training_provenance.v2",
         "master_dataset_fingerprint_sha256": data.master_dataset_fingerprint,
@@ -280,8 +256,13 @@ def checkpoint_provenance(
         "action_space": data.dataset.action_space,
         "obs_preset": data.stats.obs_preset,
         "source_git_commit": source_git_commit,
-        "resolved_training_config_sha256": canonical_resolved_config_sha256(resolved_config),
+        "resolved_training_config_sha256": _canonical_sha256(resolved_config),
     }
+
+
+def _canonical_sha256(payload: Any) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def _sha256_file(path: Path) -> str:
