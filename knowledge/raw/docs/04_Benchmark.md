@@ -920,15 +920,16 @@ The apparent order between steps 4 and 5 depends on the source:
 Therefore, “convert to USD” and “make simulable” are connected but not identical operations. Importing is reading an asset into a stage; conversion is translating and usually saving a different representation; a reference leaves the source in place and composes it into another USD.
 
 #### Door
-The benchmark door is both a reusable external asset and a task-specific physical object. The source asset supplies its reusable hierarchy and geometry; AlexDoor-XAS adds a stronger task layer that fixes its experimental pose and physical contract.
+The benchmark door is both a reusable external asset and a task-specific physical object. The source asset supplies its reusable hierarchy and geometry; 
+AlexDoor-XAS adds a stronger task layer that fixes its experimental pose and physical contract.
 ##### Source, Format, and Provenance
 The source is:
 ```text
 ~/Desktop/CombinedScene/Door.usd
 ```
 The canonical path is `paths.DOOR_USD` in [`src/alexdoor_xas/paths.py`](../../../src/alexdoor_xas/paths.py). `ALEXDOOR_ASSETS_ROOT` can override the external asset root.
-The file extension is `.usd`, but direct inspection on the authoritative workstation shows that its serialization is binary **USDC crate 0.9.0**. It is Z-up, uses one meter per unit, and declares `/DoorObject` as its default prim.
-This source is an existing external asset. AlexDoor-XAS does not model its mesh from zero and does not destructively modify it. The repository does not contain sufficient provenance to claim which DCC or CAD tool originally modeled it, so that origin remains unspecified rather than inferred.
+The file extension is `.usd`, but direct inspection on the authoritative workstation shows that its serialization is binary **USDC crate 0.9.0**. 
+It is Z-up, uses one meter per unit, and declares **`/DoorObject` as its default prim.**
 ##### Source Structure and Physical Semantics
 The relevant source hierarchy is:
 ```text
@@ -1370,6 +1371,7 @@ Force is accepted as task evidence only when it comes from contact between the t
 
 ### Scene
 A simulated scene is not only a visual 3D model. It is an executable description of a world: which objects exist, where they are placed, which can move, how bodies are connected, how they collide, which physical properties they have, and which robots and sensors can interact with them.
+
 Graphics are one part of that description. A robotics scene can also require:
 - collision geometry;
 - rigid bodies;
@@ -1379,21 +1381,24 @@ Graphics are one part of that description. A robotics scene can also require:
 - actuator and drive properties;
 - sensors;
 - units and coordinate conventions;
-- environment rules that initialize, reset, and step the world.
-The scene and the environment are related but not identical. The scene says *what the world contains and how it is arranged*. The environment says *what the method observes and commands, how episodes reset, how time advances, and when execution terminates*.
+- environment rules that initialize, reset, and step the world
 
+**The scene and the environment are related but not identical.** 
+- The scene says *what the world contains and how it is arranged*. 
+- The environment says *what the method observes and commands, how episodes reset, how time advances, and when execution terminates*.
 #### Scene Content Is Not the Observation
-A scene and an observation are separate layers. The fact that an object belongs to the scene does not mean that all information about that object is provided to the policy. Scene membership determines what exists in the simulated world and can participate in rendering or physics; the observation interface selects only the state that the evaluated method is allowed to receive.
+Scene membership determines what exists in the simulated world and can participate in rendering or physics; The scene defines the simulated world;
+The fact that an object belongs to the scene does not mean that all information about that object is provided to the policy.  
+An observation selects only the state that the evaluated method is allowed to receive; the observation defines the selected information exposed from that world.
+The reverse distinction also matters: an observation can contain a derived quantity (sin-cos of the door yaw), even though that quantity is not a separate object in the scene.  
 
 For example, in AlexDoor-XAS:
 - the door panel, frame, handle, robot, and floor are all present in the scene;
 - the learned policy can receive only selected quantities such as the tool-point position, door angle, and door-frame pose;
 - the handle continues to exist, move with the panel, and participate in collision handling even though its pose is not included in the policy observation.
-
-The reverse distinction also matters: an observation can contain a derived quantity, such as the sine and cosine of the door yaw, even though that quantity is not a separate object in the scene. The scene defines the simulated world; the observation defines the selected information exposed from that world.
-
 #### OpenUSD Use in This Scene
-The general OpenUSD data model and composition concepts are defined in the Environment section. In this Scene section, the relevant point is how AlexDoor-XAS uses them to assemble its specific runtime world.
+The general OpenUSD data model and composition concepts are defined in the Environment section. 
+AlexDoor-XAS uses them to assemble its specific runtime world.
 
 The composed Stage combines three sources without requiring one file that contains the entire simulation:
 ```text
@@ -1425,16 +1430,19 @@ A scene can be created in several ways:
 - **composition from existing scenes:** references, sublayers, payloads, and variants combine reusable asset or environment layers;
 - **real-world reconstruction:** lidar, photogrammetry, CAD, Gaussian splatting, or another digital-twin process reconstructs a physical location.
 These methods can be combined. For example, a deterministic script can compose existing assets and then apply seeded episode randomization.
-**What “deterministically generated” means.** Given the same source assets, code, and pose parameters, the generator authors the same task description. It does not automatically guarantee:
+
+**What “deterministically generated” means.** 
+Given the same source assets, code, and pose parameters, the generator authors the same task description. It does not automatically guarantee:
 - bit-identical PhysX trajectories across different software or hardware versions;
 - deterministic neural-policy sampling;
 - no episode-level randomization;
 - identical results after changing a source asset or calibration.
 Scene construction and physical execution are different reproducibility layers.
-
 #### How AlexDoor-XAS Builds Its Scene
 AlexDoor-XAS uses a hybrid method:
-> The door is an existing USD asset; the task fixture is composed around it procedurally and deterministically; Alex is imported from an existing URDF into the runtime Stage; seeded randomization changes only approved episode conditions.
+> The door is an existing USD asset; the task fixture is composed around it procedurally and deterministically; 
+> Alex is imported from an existing URDF into the runtime Stage; seeded randomization changes only approved episode conditions.
+
 There is no single file containing the entire simulation. The final runtime comes from:
 - `~/Desktop/Alex/urdf/alex_v2.urdf`;
 - `~/Desktop/CombinedScene/Door.usd`;
@@ -1445,6 +1453,7 @@ There is no single file containing the entire simulation. The final runtime come
 - PhysX's internal simulation objects;
 - the controller or policy and its adapter;
 - the data engine and recorder.
+
 [`src/alexdoor_xas/assets/door_task.py`](../../../src/alexdoor_xas/assets/door_task.py) creates:
 ```text
 outputs/door_task/door_task.usda
@@ -1454,6 +1463,7 @@ for D0, and pose-specific files such as:
 outputs/door_task/door_task_yaw+0.0500_dx+0.020_dy+0.000.usda
 ```
 for non-default poses. These files are generated runtime artifacts, not manually edited source assets.
+
 The generated layer:
 1. creates `/World` and makes it the default prim;
 2. sets Z as the up axis;
@@ -1466,6 +1476,7 @@ The generated layer:
 9. authors a fixed joint that anchors the composed frame pose to the world;
 10. applies task-layer panel and handle mass/inertia opinions;
 11. saves and validates the result.
+
 The generator first writes a temporary USDA, compares it with any existing destination, and replaces the destination only when the content changes. D0 is required to remain byte-identical for unchanged inputs. Validation checks:
 - `/World` as default prim;
 - Z-up and meter units;

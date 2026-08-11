@@ -1,8 +1,4 @@
 # AlexDoor-XAS package metadata.
-#
-# Isaac Sim / Isaac Lab / PyTorch are provided by the official local installs
-# (see docs/development.md) and are intentionally NOT listed as dependencies
-# here -- this package installs light and never pulls the sim stack.
 
 [build-system]
 requires = ["hatchling"]
