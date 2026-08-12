@@ -179,3 +179,8 @@ handling in A4 with the last valid pre-reset state retained.
 
 Documented exact Boolean/0/1 contact decoding and geometric contact bounds over
 the complete panel width, height, and face depth.
+
+## 2026-08-12 — update : Shared learned-policy checkpoint payload
+
+Documented the common checkpoint v2 serialization, validation, robot identity,
+and atomic I/O layer while retaining policy-specific ACT and Diffusion loaders.

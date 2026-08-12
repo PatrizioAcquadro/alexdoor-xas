@@ -30,6 +30,11 @@ An exact protocol match may publish the first closed-loop result into the source
 
 ACT and Diffusion accept only self-contained checkpoint v2 files whose robot-asset identity exactly matches the active Alex V2 runtime. Older or unfingerprinted checkpoint formats and cross-model transfer evaluation are unsupported. `scripts/verify_policy_rollout.py` remains the compact A2/A3 runtime gate and writes temporary evidence under `~/.cache/alexdoor-xas/verification/`.
 
+Both policy families use `policies/common/checkpoint.py` for the shared payload,
+normalization, robot-identity, and atomic I/O contract. Their policy-specific
+modules retain the public loaders and construct the corresponding model config
+and model without changing either checkpoint format.
+
 ## Limits
 
 - Only A2 and A3 have learned policies.
@@ -39,6 +44,8 @@ ACT and Diffusion accept only self-contained checkpoint v2 files whose robot-ass
 
 ## Version Notes
 
+- 2026-08-12 — Consolidated model-neutral checkpoint v2 serialization and
+  validation while preserving the ACT and Diffusion public loaders and formats.
 - 2026-08-12 — Consolidated policy execution into `train_policy.py` and `eval_policy.py`; evaluation now detects the policy family from the frozen source run.
 - 2026-08-12 — Removed pre-v2 checkpoint loading and cross-model transfer; runtime evaluation now requires an exact Alex V2 robot-asset identity match.
 - 2026-08-12 — Replaced repository-owned W&B configuration, wrappers, artifact gates, and simulated tests with direct optional SDK initialization and aggregate logging.
