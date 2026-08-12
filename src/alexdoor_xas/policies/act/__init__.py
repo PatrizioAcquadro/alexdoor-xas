@@ -14,6 +14,7 @@ from .config import (
     ActRolloutCfg,
     ActRunCfg,
     ActTrainCfg,
+    act_config_from_dict,
     load_act_config,
 )
 
@@ -25,5 +26,6 @@ __all__ = [
     "ActRolloutCfg",
     "ActRunCfg",
     "ActTrainCfg",
+    "act_config_from_dict",
     "load_act_config",
 ]

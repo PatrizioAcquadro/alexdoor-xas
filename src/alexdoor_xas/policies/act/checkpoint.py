@@ -19,6 +19,7 @@ from alexdoor_xas.policies.common.checkpoint import (
     stats_payload,
     validate_checkpoint_contract,
 )
+from alexdoor_xas.policies.common.runs import torch_save_atomic
 
 CHECKPOINT_FORMAT = "alexdoor_xas.act.v2"
 LEGACY_CHECKPOINT_FORMAT = "alexdoor_xas.act.v1"
@@ -68,7 +69,8 @@ def save_checkpoint(
     )
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(
+    torch_save_atomic(
+        target,
         {
             "format": CHECKPOINT_FORMAT,
             "state_dict": state_dict,
@@ -80,7 +82,6 @@ def save_checkpoint(
             "robot_asset": robot_asset.to_dict() if robot_asset is not None else None,
             "meta": dict(meta or {}),
         },
-        target,
     )
     return target
 

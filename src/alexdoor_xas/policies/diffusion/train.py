@@ -15,11 +15,13 @@ import copy
 import math
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
+from time import perf_counter
 from typing import Any
 
 import torch
 
 from alexdoor_xas.dataset import collate_torch
+from alexdoor_xas.policies.common.runs import capture_rng_states, restore_rng_states
 from alexdoor_xas.policies.diffusion.config import DiffusionModelCfg, DiffusionTrainCfg
 from alexdoor_xas.policies.diffusion.model import DiffusionTransformer, diffusion_loss
 from alexdoor_xas.policies.diffusion.schedulers import (
@@ -76,6 +78,19 @@ class EmaModel:
         for shadow, buffer in zip(self.module.buffers(), model.buffers(), strict=True):
             shadow.copy_(buffer)
 
+    def state_dict(self) -> dict[str, Any]:
+        return {
+            "model_state": self.module.state_dict(),
+            "decay": self.decay,
+            "n_updates": self.n_updates,
+        }
+
+    def load_state_dict(self, payload: dict[str, Any]) -> None:
+        if float(payload["decay"]) != self.decay:
+            raise ValueError("resume EMA decay conflicts with the frozen configuration")
+        self.module.load_state_dict(payload["model_state"])
+        self.n_updates = int(payload["n_updates"])
+
 
 @dataclass(frozen=True)
 class EpochStats:
@@ -86,14 +101,16 @@ class EpochStats:
     n_batches: int
     lr: float
     val_sampled_l1: float | None = None
+    duration_s: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "epoch": self.epoch,
             "train_mse": self.train_mse,
-            "n_batches": self.n_batches,
-            "lr": self.lr,
-            "val_sampled_l1": self.val_sampled_l1,
+            "batch_count": self.n_batches,
+            "learning_rate": self.lr,
+            "sampled_validation_l1": self.val_sampled_l1,
+            "duration_s": self.duration_s,
         }
 
 
@@ -104,13 +121,43 @@ class TrainHistory:
     epochs: list[EpochStats] = field(default_factory=list)
     best_epoch: int = -1
     best_val_l1: float = float("inf")
+    duration_s: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "epochs": [stats.to_dict() for stats in self.epochs],
             "best_epoch": self.best_epoch,
-            "best_val_l1": self.best_val_l1 if self.best_epoch >= 0 else None,
+            "best_value": self.best_val_l1 if self.best_epoch >= 0 else None,
+            "duration_s": self.duration_s,
         }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> TrainHistory:
+        epochs = [
+            EpochStats(
+                epoch=int(entry["epoch"]),
+                train_mse=float(entry["train_mse"]),
+                n_batches=int(entry.get("batch_count", entry.get("n_batches"))),
+                lr=float(entry.get("learning_rate", entry.get("lr"))),
+                val_sampled_l1=(
+                    None
+                    if entry.get("sampled_validation_l1", entry.get("val_sampled_l1")) is None
+                    else float(
+                        entry.get("sampled_validation_l1", entry.get("val_sampled_l1"))
+                    )
+                ),
+                duration_s=float(entry.get("duration_s", 0.0)),
+            )
+            for entry in payload.get("epochs", [])
+        ]
+        best_epoch = int(payload.get("best_epoch", -1))
+        best_value = payload.get("best_value", payload.get("best_val_l1"))
+        return cls(
+            epochs=epochs,
+            best_epoch=best_epoch,
+            best_val_l1=float("inf") if best_value is None else float(best_value),
+            duration_s=float(payload.get("duration_s", 0.0)),
+        )
 
 
 def train_diffusion(
@@ -121,6 +168,8 @@ def train_diffusion(
     make_val_batches: ValBatchFactory | None = None,
     on_epoch: Callable[[EpochStats, bool], None] | None = None,
     ema: EmaModel | None = None,
+    resume_state: dict[str, Any] | None = None,
+    on_checkpoint: Callable[[dict[str, Any]], None] | None = None,
 ) -> TrainHistory:
     """Train ``model`` in place; returns the loss history.
 
@@ -132,7 +181,8 @@ def train_diffusion(
     (evaluated every ``cfg.val_every`` epochs and on the final epoch; without
     a validation factory the train MSE stands in).
     """
-    torch.manual_seed(cfg.seed)
+    if resume_state is None:
+        torch.manual_seed(cfg.seed)
     device = torch.device(cfg.device)
     model.to(device)
     if ema is not None:
@@ -151,8 +201,37 @@ def train_diffusion(
         _lr_lambda(cfg, total_steps=cfg.epochs * steps_per_epoch),
     )
 
-    history = TrainHistory()
-    for epoch in range(cfg.epochs):
+    history = (
+        TrainHistory.from_dict(resume_state["history"])
+        if resume_state is not None
+        else TrainHistory()
+    )
+    start_epoch = int(resume_state["next_epoch"]) if resume_state is not None else 0
+    global_step = int(resume_state["global_step"]) if resume_state is not None else 0
+    if resume_state is not None:
+        optimizer.load_state_dict(resume_state["optimizer_state"])
+        lr_scheduler.load_state_dict(resume_state["lr_scheduler_state"])
+        if ema is None and resume_state.get("ema_state") is not None:
+            raise ValueError("resume state contains EMA but the frozen config disables it")
+        if ema is not None:
+            if resume_state.get("ema_state") is None:
+                raise ValueError("resume state is missing Diffusion EMA")
+            ema.load_state_dict(resume_state["ema_state"])
+        restore_rng_states(resume_state["rng_states"])
+    elif on_checkpoint is not None:
+        on_checkpoint(
+            _training_state(
+                optimizer,
+                lr_scheduler,
+                ema,
+                history,
+                next_epoch=0,
+                global_step=0,
+            )
+        )
+
+    for epoch in range(start_epoch, cfg.epochs):
+        epoch_started = perf_counter()
         model.train()
         mse_sum = 0.0
         n_batches = 0
@@ -166,6 +245,7 @@ def train_diffusion(
             torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
             optimizer.step()
             lr_scheduler.step()
+            global_step += 1
             if ema is not None:
                 ema.update(model)
             mse_sum += float(losses["mse"].detach())
@@ -190,8 +270,10 @@ def train_diffusion(
             n_batches=n_batches,
             lr=float(optimizer.param_groups[0]["lr"]),
             val_sampled_l1=val_sampled_l1,
+            duration_s=perf_counter() - epoch_started,
         )
         history.epochs.append(stats)
+        history.duration_s += stats.duration_s
 
         selection = (
             val_sampled_l1
@@ -204,7 +286,38 @@ def train_diffusion(
             history.best_epoch = epoch
         if on_epoch is not None:
             on_epoch(stats, is_best)
+        if on_checkpoint is not None:
+            on_checkpoint(
+                _training_state(
+                    optimizer,
+                    lr_scheduler,
+                    ema,
+                    history,
+                    next_epoch=epoch + 1,
+                    global_step=global_step,
+                )
+            )
     return history
+
+
+def _training_state(
+    optimizer,
+    lr_scheduler,
+    ema: EmaModel | None,
+    history: TrainHistory,
+    *,
+    next_epoch: int,
+    global_step: int,
+) -> dict[str, Any]:
+    return {
+        "optimizer_state": optimizer.state_dict(),
+        "lr_scheduler_state": lr_scheduler.state_dict(),
+        "next_epoch": next_epoch,
+        "global_step": global_step,
+        "history": history.to_dict(),
+        "rng_states": capture_rng_states(),
+        "ema_state": ema.state_dict() if ema is not None else None,
+    }
 
 
 def evaluate_sampled_l1(

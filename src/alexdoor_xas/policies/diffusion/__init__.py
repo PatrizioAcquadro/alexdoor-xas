@@ -14,6 +14,7 @@ from alexdoor_xas.policies.diffusion.config import (
     DiffusionRolloutCfg,
     DiffusionRunCfg,
     DiffusionTrainCfg,
+    diffusion_config_from_dict,
     load_diffusion_config,
 )
 
@@ -25,5 +26,6 @@ __all__ = [
     "DiffusionRolloutCfg",
     "DiffusionRunCfg",
     "DiffusionTrainCfg",
+    "diffusion_config_from_dict",
     "load_diffusion_config",
 ]

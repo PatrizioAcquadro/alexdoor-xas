@@ -7,6 +7,7 @@ so a bare environment degrades gracefully instead of erroring at collection.
 from __future__ import annotations
 
 import math
+from copy import deepcopy
 
 import numpy as np
 import pytest
@@ -376,6 +377,79 @@ def test_train_diffusion_rejects_empty_factory() -> None:
         train_diffusion(model, scheduler, lambda epoch: [], TINY_TRAIN_CFG)
 
 
+def test_train_diffusion_resume_matches_uninterrupted_state_and_ema() -> None:
+    batch = _constant_mapping_batch(batch_size=4)
+    cfg = DiffusionTrainCfg(
+        epochs=4,
+        batch_size=4,
+        lr=1e-3,
+        weight_decay=0.0,
+        lr_schedule="cosine",
+        lr_warmup_steps=0,
+        use_ema=True,
+        ema_decay=0.99,
+        seed=19,
+        device="cpu",
+        val_every=10,
+        val_inference_steps=2,
+    )
+    full_model = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=19)
+    full_ema = EmaModel(full_model, cfg.ema_decay)
+    full_history = train_diffusion(
+        full_model,
+        make_train_scheduler(TINY_MODEL_CFG),
+        lambda epoch: [batch],
+        cfg,
+        ema=full_ema,
+    )
+
+    interrupted_model = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=19)
+    interrupted_ema = EmaModel(interrupted_model, cfg.ema_decay)
+    captured: dict = {}
+
+    class StopAfterEpoch(RuntimeError):
+        pass
+
+    def interrupt_after_two_epochs(state) -> None:
+        if state["next_epoch"] == 2:
+            captured["training_state"] = deepcopy(state)
+            captured["model_state"] = {
+                key: value.detach().clone()
+                for key, value in interrupted_model.state_dict().items()
+            }
+            raise StopAfterEpoch
+
+    with pytest.raises(StopAfterEpoch):
+        train_diffusion(
+            interrupted_model,
+            make_train_scheduler(TINY_MODEL_CFG),
+            lambda epoch: [batch],
+            cfg,
+            ema=interrupted_ema,
+            on_checkpoint=interrupt_after_two_epochs,
+        )
+
+    resumed_model = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=19)
+    resumed_model.load_state_dict(captured["model_state"])
+    resumed_ema = EmaModel(resumed_model, cfg.ema_decay)
+    resumed_history = train_diffusion(
+        resumed_model,
+        make_train_scheduler(TINY_MODEL_CFG),
+        lambda epoch: [batch],
+        cfg,
+        ema=resumed_ema,
+        resume_state=captured["training_state"],
+    )
+    for key, value in full_model.state_dict().items():
+        torch.testing.assert_close(value, resumed_model.state_dict()[key], rtol=0, atol=0)
+    for key, value in full_ema.module.state_dict().items():
+        torch.testing.assert_close(value, resumed_ema.module.state_dict()[key], rtol=0, atol=0)
+    assert resumed_ema.n_updates == full_ema.n_updates
+    assert [entry.train_mse for entry in resumed_history.epochs] == pytest.approx(
+        [entry.train_mse for entry in full_history.epochs]
+    )
+
+
 def test_ema_shadow_tracks_the_model() -> None:
     model = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=0)
     ema = EmaModel(model, decay=0.999)
@@ -724,9 +798,8 @@ def test_open_loop_report_with_receding_horizon_stride(tmp_path) -> None:
     report = open_loop_report(policy, [record], json_path=tmp_path / "open_loop.json", stride=4)
 
     assert report["stride"] == 4
-    assert report["chunk_size"] == TINY_MODEL_CFG.horizon
-    assert report["n_episodes"] == 1
-    assert np.isfinite(report["aggregate"]["l1_mean"])
+    assert len(report["per_episode"]) == 1
+    assert np.isfinite(report["aggregate_l1_mean"])
     # The frozen invariant the gate also asserts: denormalized position deltas
     # stay far inside the adapter clamp.
-    assert max(abs(v) for v in report["aggregate"]["l1_per_dim"][:3]) < 0.04
+    assert max(abs(v) for v in report["l1_by_dimension"].values()) < 0.04

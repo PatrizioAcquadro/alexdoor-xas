@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -98,8 +97,6 @@ class DiffusionTrainCfg:
 class DiffusionRunCfg:
     """Output naming for one training run."""
 
-    experiment: str = "diffusion_door_push"
-    run_id: str | None = None
     output_root: str | None = None
 
 
@@ -108,9 +105,6 @@ class DiffusionRolloutCfg:
     """Closed-loop evaluation settings (Isaac side)."""
 
     checkpoint: str | None = None
-    episodes_fixed: int = 5
-    episodes_randomized: int = 15
-    base_seed: int = 100
     max_ticks: int = 600
     success_angle_deg: float = 45.0
     n_action_steps: int = 8  # Ta: executed prefix of each predicted chunk (receding horizon)
@@ -119,10 +113,6 @@ class DiffusionRolloutCfg:
     policy_device: str = "cuda"
     reference_metrics: str | None = None
     matched_scripted_reference: bool = False
-    door_yaw_deg: float = 0.0
-    door_offset_x: float = 0.0
-    door_offset_y: float = 0.0
-    door_pose_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -135,13 +125,6 @@ class DiffusionConfig:
     run: DiffusionRunCfg
     rollout: DiffusionRolloutCfg
     wandb_overrides: dict[str, Any]
-
-    def resolved_run_id(self) -> str:
-        if self.run.run_id is not None:
-            return self.run.run_id
-        stamp = datetime.now(UTC).strftime("%Y%m%d")
-        return f"{stamp}_{self.dataset.space}_seed{self.train.seed}"
-
 
 def load_diffusion_config(
     hydra_overrides: list[str] | tuple[str, ...] | None = None,
@@ -183,7 +166,34 @@ def load_diffusion_config(
         wandb_overrides=_build_wandb_overrides(nodes["wandb"]),
     )
 
-    # Cross-section constraints (need both nodes resolved).
+    return _validate_cross_section(resolved)
+
+
+def diffusion_config_from_dict(payload: dict[str, Any]) -> DiffusionConfig:
+    """Rebuild a checked config from an immutable resolved-run payload."""
+    payload = dict(payload)
+    if "wandb_overrides" in payload:
+        payload["wandb"] = payload.pop("wandb_overrides")
+    unknown_sections = sorted(set(payload) - CONFIG_SECTIONS)
+    if unknown_sections:
+        raise DiffusionConfigError(
+            "unknown config section(s): " + ", ".join(unknown_sections)
+        )
+    nodes = {name: dict(payload.get(name) or {}) for name in CONFIG_SECTIONS}
+    return _validate_cross_section(
+        DiffusionConfig(
+            dataset=_build_dataset_cfg(nodes["dataset"]),
+            model=_build_model_cfg(nodes["model"]),
+            train=_build_train_cfg(nodes["train"]),
+            run=_build_run_cfg(nodes["run"]),
+            rollout=_build_rollout_cfg(nodes["rollout"]),
+            wandb_overrides=_build_wandb_overrides(nodes["wandb"]),
+        )
+    )
+
+
+def _validate_cross_section(resolved: DiffusionConfig) -> DiffusionConfig:
+    # Cross-section constraints need both nodes resolved.
     if resolved.rollout.n_action_steps > resolved.model.horizon:
         raise DiffusionConfigError(
             f"rollout.n_action_steps ({resolved.rollout.n_action_steps}) must not exceed "
@@ -397,12 +407,8 @@ def _build_train_cfg(node: dict[str, Any]) -> DiffusionTrainCfg:
 
 
 def _build_run_cfg(node: dict[str, Any]) -> DiffusionRunCfg:
-    _reject_unknown("run", node, {"experiment", "run_id", "output_root"})
+    _reject_unknown("run", node, {"output_root"})
     return DiffusionRunCfg(
-        experiment=_required_str(
-            "run.experiment", node.get("experiment", "diffusion_door_push")
-        ),
-        run_id=_optional_str("run.run_id", node.get("run_id")),
         output_root=_optional_str("run.output_root", node.get("output_root")),
     )
 
@@ -410,9 +416,6 @@ def _build_run_cfg(node: dict[str, Any]) -> DiffusionRunCfg:
 def _build_rollout_cfg(node: dict[str, Any]) -> DiffusionRolloutCfg:
     field_names = {
         "checkpoint",
-        "episodes_fixed",
-        "episodes_randomized",
-        "base_seed",
         "max_ticks",
         "success_angle_deg",
         "n_action_steps",
@@ -421,40 +424,9 @@ def _build_rollout_cfg(node: dict[str, Any]) -> DiffusionRolloutCfg:
         "policy_device",
         "reference_metrics",
         "matched_scripted_reference",
-        "door_yaw_deg",
-        "door_offset_x",
-        "door_offset_y",
-        "door_pose_id",
     }
     _reject_unknown("rollout", node, field_names)
     defaults = DiffusionRolloutCfg()
-
-    door_yaw_deg = _coerce_float(
-        "rollout.door_yaw_deg", node.get("door_yaw_deg", defaults.door_yaw_deg)
-    )
-    door_offset_x = _coerce_float(
-        "rollout.door_offset_x", node.get("door_offset_x", defaults.door_offset_x)
-    )
-    door_offset_y = _coerce_float(
-        "rollout.door_offset_y", node.get("door_offset_y", defaults.door_offset_y)
-    )
-    for name, value in (
-        ("rollout.door_yaw_deg", door_yaw_deg),
-        ("rollout.door_offset_x", door_offset_x),
-        ("rollout.door_offset_y", door_offset_y),
-    ):
-        if not math.isfinite(value):
-            raise DiffusionConfigError(f"{name} must be finite")
-
-    episodes_fixed = _coerce_int(
-        "rollout.episodes_fixed", node.get("episodes_fixed", defaults.episodes_fixed)
-    )
-    episodes_randomized = _coerce_int(
-        "rollout.episodes_randomized",
-        node.get("episodes_randomized", defaults.episodes_randomized),
-    )
-    if episodes_fixed < 0 or episodes_randomized < 0:
-        raise DiffusionConfigError("rollout episode counts must be non-negative")
 
     max_ticks = _coerce_int("rollout.max_ticks", node.get("max_ticks", defaults.max_ticks))
     if max_ticks <= 0:
@@ -488,9 +460,6 @@ def _build_rollout_cfg(node: dict[str, Any]) -> DiffusionRolloutCfg:
 
     return DiffusionRolloutCfg(
         checkpoint=_optional_str("rollout.checkpoint", node.get("checkpoint")),
-        episodes_fixed=episodes_fixed,
-        episodes_randomized=episodes_randomized,
-        base_seed=_coerce_int("rollout.base_seed", node.get("base_seed", defaults.base_seed)),
         max_ticks=max_ticks,
         success_angle_deg=success_angle_deg,
         n_action_steps=n_action_steps,
@@ -506,10 +475,6 @@ def _build_rollout_cfg(node: dict[str, Any]) -> DiffusionRolloutCfg:
             "rollout.matched_scripted_reference",
             node.get("matched_scripted_reference", defaults.matched_scripted_reference),
         ),
-        door_yaw_deg=door_yaw_deg,
-        door_offset_x=door_offset_x,
-        door_offset_y=door_offset_y,
-        door_pose_id=_optional_str("rollout.door_pose_id", node.get("door_pose_id")),
     )
 
 
@@ -580,5 +545,6 @@ __all__ = [
     "DiffusionRolloutCfg",
     "DiffusionRunCfg",
     "DiffusionTrainCfg",
+    "diffusion_config_from_dict",
     "load_diffusion_config",
 ]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import math
+from copy import deepcopy
 
 import numpy as np
 import pytest
@@ -348,6 +349,57 @@ def test_train_act_rejects_empty_batch_factory() -> None:
     cfg = ActTrainCfg(epochs=1, device="cpu")
     with pytest.raises(ValueError, match="no batches"):
         train_act(model, make_train_batches=lambda epoch: [], cfg=cfg)
+
+
+def test_train_act_resume_matches_uninterrupted_state() -> None:
+    batch = _constant_mapping_batch(batch=4)
+    cfg = ActTrainCfg(
+        epochs=4,
+        batch_size=4,
+        lr=1e-3,
+        seed=17,
+        val_every=1,
+        device="cpu",
+    )
+    full_model = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=17)
+    full_history = train_act(full_model, lambda epoch: [batch], cfg)
+
+    interrupted_model = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=17)
+    captured: dict = {}
+
+    class StopAfterEpoch(RuntimeError):
+        pass
+
+    def interrupt_after_two_epochs(state) -> None:
+        if state["next_epoch"] == 2:
+            captured["training_state"] = deepcopy(state)
+            captured["model_state"] = {
+                key: value.detach().clone()
+                for key, value in interrupted_model.state_dict().items()
+            }
+            raise StopAfterEpoch
+
+    with pytest.raises(StopAfterEpoch):
+        train_act(
+            interrupted_model,
+            lambda epoch: [batch],
+            cfg,
+            on_checkpoint=interrupt_after_two_epochs,
+        )
+
+    resumed_model = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=17)
+    resumed_model.load_state_dict(captured["model_state"])
+    resumed_history = train_act(
+        resumed_model,
+        lambda epoch: [batch],
+        cfg,
+        resume_state=captured["training_state"],
+    )
+    for key, value in full_model.state_dict().items():
+        torch.testing.assert_close(value, resumed_model.state_dict()[key], rtol=0, atol=0)
+    assert [entry.train_loss for entry in resumed_history.epochs] == pytest.approx(
+        [entry.train_loss for entry in full_history.epochs]
+    )
 
 
 # --- policy wrapper ----------------------------------------------------------
@@ -777,23 +829,30 @@ def test_open_loop_report_numerics(tmp_path) -> None:
     report = open_loop_report(policy, [record], json_path=json_path)
 
     assert json_path.is_file()
-    assert report["n_episodes"] == 1
-    assert report["aggregate"]["n_steps"] == record.n_steps
-    np.testing.assert_allclose(report["aggregate"]["l1_per_dim"], [0.25] * ACTION_DIM)
-    assert report["aggregate"]["l1_mean"] == pytest.approx(0.25)
-    np.testing.assert_allclose(
-        report["episodes"][record.episode_id]["mse_per_dim"], [0.0625] * ACTION_DIM
+    assert report["evaluated_steps"] == record.n_steps
+    assert report["aggregate_l1_mean"] == pytest.approx(0.25)
+    assert report["l1_by_dimension"] == pytest.approx(
+        {"dx": 0.25, "dy": 0.25, "dz": 0.25}
     )
+    assert report["per_episode"] == [
+        {
+            "episode_id": record.episode_id,
+            "l1_mean": pytest.approx(0.25),
+            "evaluated_steps": record.n_steps,
+        }
+    ]
+    assert "mse" not in json_path.read_text().lower()
 
 
 @pytest.mark.skipif(
     importlib.util.find_spec("matplotlib") is None, reason="matplotlib is not installed"
 )
-def test_open_loop_report_writes_plots(tmp_path) -> None:
+def test_open_loop_report_writes_one_summary(tmp_path) -> None:
     record = _stub_record(n_steps=TINY_MODEL_CFG.chunk_size)
     policy = _OffsetPolicy(record, offset=0.1)
 
-    open_loop_report(policy, [record], plots_dir=tmp_path / "plots")
+    summary = tmp_path / "open_loop" / "summary.png"
+    open_loop_report(policy, [record], summary_path=summary)
 
-    plots = list((tmp_path / "plots").glob("open_loop_*.png"))
-    assert len(plots) == 1
+    assert summary.is_file() and summary.stat().st_size > 0
+    assert list(tmp_path.rglob("*.png")) == [summary]

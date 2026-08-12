@@ -53,7 +53,6 @@ def test_act_hydra_overrides_flow_through_all_sections() -> None:
             "model.d_model=64",
             "train.epochs=3",
             "train.overfit_episodes=2",
-            "run.run_id=test_run",
             "run.output_root=/tmp/act-pilot",
             "rollout.temporal_ensemble=true",
             "rollout.matched_scripted_reference=true",
@@ -67,9 +66,7 @@ def test_act_hydra_overrides_flow_through_all_sections() -> None:
     assert cfg.model.d_model == 64
     assert cfg.train.epochs == 3
     assert cfg.train.overfit_episodes == 2
-    assert cfg.run.run_id == "test_run"
     assert cfg.run.output_root == "/tmp/act-pilot"
-    assert cfg.resolved_run_id() == "test_run"
     assert cfg.rollout.temporal_ensemble is True
     assert cfg.rollout.matched_scripted_reference is True
     assert cfg.wandb_overrides == {"mode": "offline"}
@@ -88,12 +85,6 @@ def test_act_cli_overrides_take_precedence_over_hydra() -> None:
     assert cfg.train.epochs == 9
     assert cfg.rollout.checkpoint == "outputs/x/best.pt"
     assert cfg.rollout.max_ticks == 100
-
-
-def test_act_default_run_id_names_space_and_seed() -> None:
-    cfg = load_act_config(["train.seed=7"])
-    run_id = cfg.resolved_run_id()
-    assert run_id.endswith(f"_{A2_EE_DELTA}_seed7")
 
 
 @pytest.mark.parametrize(
@@ -176,7 +167,6 @@ def test_diffusion_hydra_overrides_flow_through_all_sections() -> None:
             "train.lr_schedule=constant",
             "train.use_ema=false",
             "train.overfit_episodes=2",
-            "run.run_id=test_run",
             "run.output_root=/tmp/diffusion-pilot",
             "rollout.n_action_steps=4",
             "rollout.sampler=ddim",
@@ -195,9 +185,7 @@ def test_diffusion_hydra_overrides_flow_through_all_sections() -> None:
     assert cfg.train.lr_schedule == "constant"
     assert cfg.train.use_ema is False
     assert cfg.train.overfit_episodes == 2
-    assert cfg.run.run_id == "test_run"
     assert cfg.run.output_root == "/tmp/diffusion-pilot"
-    assert cfg.resolved_run_id() == "test_run"
     assert cfg.rollout.n_action_steps == 4
     assert cfg.rollout.sampler == "ddim"
     assert cfg.rollout.num_inference_steps == 10
@@ -218,12 +206,6 @@ def test_diffusion_cli_overrides_take_precedence_over_hydra() -> None:
     assert cfg.train.epochs == 9
     assert cfg.rollout.checkpoint == "outputs/x/best.pt"
     assert cfg.rollout.max_ticks == 100
-
-
-def test_diffusion_default_run_id_names_space_and_seed() -> None:
-    cfg = load_diffusion_config(["train.seed=7"])
-    run_id = cfg.resolved_run_id()
-    assert run_id.endswith(f"_{A2_EE_DELTA}_seed7")
 
 
 @pytest.mark.parametrize(
