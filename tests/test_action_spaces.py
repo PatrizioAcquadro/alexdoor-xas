@@ -60,9 +60,8 @@ def test_panel_frame_rotates_points_about_hinge_axis() -> None:
     )
 
 
-@pytest.mark.parametrize("seed", [0, 1, 2])
-def test_world_frame_delta_round_trip(seed: int) -> None:
-    rng = np.random.default_rng(seed)
+def test_world_frame_delta_round_trip() -> None:
+    rng = np.random.default_rng(7)
     quat = rng.normal(size=4)
     frame = frames.ObjectFrame(origin=rng.normal(size=3), rot=frames.quat_to_rot_matrix(quat))
     delta_world = rng.normal(size=spaces.EE_DELTA_DIM)

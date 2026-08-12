@@ -26,7 +26,7 @@ def test_status_and_path_registry_use_the_official_wiki() -> None:
     assert not (REPO_ROOT / "docs").exists()
 
 
-def test_wikilinks_resolve_and_index_lists_every_canonical_page() -> None:
+def test_documentation_links_resolve_and_index_is_complete() -> None:
     pages = _wiki_pages()
     by_stem: dict[str, list[Path]] = {}
     for page in pages:
@@ -41,6 +41,13 @@ def test_wikilinks_resolve_and_index_lists_every_canonical_page() -> None:
                 continue
             if len(by_stem.get(relative.stem, [])) != 1:
                 failures.append(f"{page.relative_to(REPO_ROOT)}: {target}")
+    for document in (REPO_ROOT / "README.md", REPO_ROOT / "datasets" / "README.md"):
+        for raw_target in MARKDOWN_LINK_RE.findall(document.read_text()):
+            target = raw_target.split("#", 1)[0]
+            if not target or "://" in target or target.startswith("mailto:"):
+                continue
+            if not (document.parent / target).resolve().exists():
+                failures.append(f"{document.relative_to(REPO_ROOT)}: {raw_target}")
     assert failures == []
 
     index = (WIKI_ROOT / "index.md").read_text()
@@ -52,19 +59,6 @@ def test_wikilinks_resolve_and_index_lists_every_canonical_page() -> None:
         if f"[[{target}|" not in index and f"[[{target}]]" not in index:
             missing.append(target)
     assert missing == []
-    assert len(list((WIKI_ROOT / "implementation_phases").glob("*.md"))) == 9
-
-
-def test_repository_markdown_links_resolve() -> None:
-    failures = []
-    for document in (REPO_ROOT / "README.md", REPO_ROOT / "datasets" / "README.md"):
-        for raw_target in MARKDOWN_LINK_RE.findall(document.read_text()):
-            target = raw_target.split("#", 1)[0]
-            if not target or "://" in target or target.startswith("mailto:"):
-                continue
-            if not (document.parent / target).resolve().exists():
-                failures.append(f"{document.relative_to(REPO_ROOT)}: {raw_target}")
-    assert failures == []
 
 
 def test_active_surfaces_do_not_reference_removed_legacy_documents() -> None:
@@ -114,9 +108,7 @@ def test_active_config_and_curated_evidence_surfaces_are_minimal() -> None:
     }
     curated = REPO_ROOT / "outputs" / "curated"
     assert {
-        path.relative_to(curated).as_posix()
-        for path in curated.rglob("*")
-        if path.is_file()
+        path.relative_to(curated).as_posix() for path in curated.rglob("*") if path.is_file()
     } == {
         "phase3_seed112_force_diagnostic/report.md",
         "phase3_seed112_force_diagnostic/results.json",

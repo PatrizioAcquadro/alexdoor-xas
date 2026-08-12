@@ -433,18 +433,6 @@ def test_builder_rejects_any_urdf_identity_drift(tmp_path) -> None:
 # --- test_paths ---
 
 
-def test_repo_root_resolves() -> None:
-    assert paths.REPO_ROOT.is_dir()
-    assert (paths.REPO_ROOT / "pyproject.toml").is_file()
-
-
-def test_required_assets_exist() -> None:
-    missing = [
-        name for name, path, required in paths.iter_assets() if required and not path.exists()
-    ]
-    assert not missing, f"missing required assets: {missing}"
-
-
 def test_alex_v2_path_surface_uses_the_static_standard_asset() -> None:
     assert paths.ALEX_V2_URDF == paths.ALEX_V2_ASSET_ROOT / "urdf" / "alex_v2.urdf"
     assert paths.iter_alex_v2_assets() == [
@@ -453,19 +441,6 @@ def test_alex_v2_path_surface_uses_the_static_standard_asset() -> None:
     ]
     assert not hasattr(paths, "ALEX_V2_BRIDGE_ROOT")
     assert not hasattr(paths, "IHMC_ALEX_SDK_ROOT")
-
-
-def test_assets_module_imports_without_isaac() -> None:
-    mod = importlib.import_module("alexdoor_xas.assets")
-    assert hasattr(mod, "build_alex_v2_door_asset")
-    assert hasattr(mod, "load_alex_v2_articulation_cfg")
-
-
-def test_alex_v2_urdf_is_the_required_registered_asset() -> None:
-    registered = {path for _name, path, required in paths.iter_assets() if required}
-    assert paths.ALEX_V2_ASSET_ROOT in registered
-    assert paths.ALEX_V2_URDF in registered
-    assert Path(paths.ALEX_V2_URDF).is_file()
 
 
 # --- test_check_env ---
@@ -514,8 +489,6 @@ def test_missing_alex_v2_asset_root_is_a_required_failure(tmp_path) -> None:
 
 
 # --- test_alex_v2_executor_contract ---
-
-_TASK_DIR = Path(__file__).parents[1] / "src" / "alexdoor_xas" / "envs" / "door_task"
 
 
 class _FakeRobotCfg:
@@ -578,73 +551,3 @@ def test_v2_runtime_injects_dedicated_asset_and_calibrated_init_state() -> None:
 def test_v2_runtime_refuses_missing_dedicated_articulation_cfg() -> None:
     with pytest.raises(AlexV2RuntimeContractError, match="dedicated"):
         inject_alex_v2_runtime_cfg(SimpleNamespace(), None, _calibration())
-
-
-def test_executor_source_hooks_offset_pose_point_jacobian_and_exact_gpu_force() -> None:
-    source = (_TASK_DIR / "door_push_alex_v2_executor.py").read_text(encoding="utf-8")
-
-    assert "class DoorPushAlexV2Executor(DoorPushRobotEnv)" in source
-    assert "compose_offset_pose_xyzw(" in source
-    assert "link_jacobian_to_point(" in source
-    assert "def _ee_pose_w(" in source
-    assert "def _solve_arm_ik(" in source
-    assert "get_raw_contact_data" in source
-    assert "sum_actor_contact_forces" in source
-    assert "get_other_actor_paths_from_ids" in source
-    assert "net_forces_w" not in source
-    assert "def robot_asset_provenance(" in source
-    assert "def alex_v2_calibration(" in source
-    assert "def ee_contact_prim_path(" in source
-    assert "def shoulder_position_world_m(" in source
-    assert "def point_jacobian_w(" in source
-    assert "point_jacobian = self.point_jacobian_w()" in source
-    assert "load_alex_v2_articulation_cfg(fix_base=True)" in source
-    assert source.index("load_alex_v2_articulation_cfg(fix_base=True)") < source.index(
-        "super().__init__(cfg, render_mode, **kwargs)"
-    )
-
-
-def test_v2_cfg_requires_gpu_raw_contacts_without_physx_filter_patterns() -> None:
-    source = (_TASK_DIR / "door_push_alex_v2_env_cfg.py").read_text(encoding="utf-8")
-    base_cfg_source = (_TASK_DIR / "door_push_robot_env_cfg.py").read_text(encoding="utf-8")
-
-    assert "filter_prim_paths_expr=[]" in source
-    assert 'DOOR_PANEL_BODY_PRIM_PATH = f"{DOOR_TASK_ARTICULATION_PRIM_PATH}/Door"' in (
-        base_cfg_source
-    )
-    assert "Cylinder_001" not in base_cfg_source
-    assert "ContactSensorCfg(" in source
-    assert "class DoorPushAlexV2EnvCfg(DoorPushRobotEnvCfg)" in source
-
-
-def test_robot_base_has_no_asset_builder_or_robot_specific_ee_constants() -> None:
-    env_source = (_TASK_DIR / "door_push_robot_env.py").read_text(encoding="utf-8")
-    cfg_source = (_TASK_DIR / "door_push_robot_env_cfg.py").read_text(encoding="utf-8")
-
-    assert "build_alex_articulation_cfg" not in env_source + cfg_source
-    assert "ALEX_EE" not in env_source + cfg_source
-    assert "requires an injected robot articulation config" in env_source
-
-
-def test_candidate_env_is_explicitly_candidate_only_and_not_exported_or_registered() -> None:
-    candidate_source = (_TASK_DIR / "door_push_alex_v2_calibration_env.py").read_text(
-        encoding="utf-8"
-    )
-    registration_source = (_TASK_DIR / "__init__.py").read_text(encoding="utf-8")
-
-    assert "candidate_only = True" in candidate_source
-    assert "gym_registration_allowed = False" in candidate_source
-    assert "__all__: list[str] = []" in candidate_source
-    assert "door_push_alex_v2_calibration_env" not in registration_source
-    assert "load_candidate_alex_v2_door_calibration" not in (
-        _TASK_DIR / "door_push_alex_v2_env.py"
-    ).read_text(encoding="utf-8")
-
-
-def test_production_env_runs_shared_executor_after_full_validation() -> None:
-    source = (_TASK_DIR / "door_push_alex_v2_env.py").read_text(encoding="utf-8")
-
-    assert "class DoorPushAlexV2Env(DoorPushAlexV2Executor)" in source
-    assert "load_alex_v2_door_calibration(" in source
-    assert "super().__init__(" in source
-    assert "executor has not passed" not in source

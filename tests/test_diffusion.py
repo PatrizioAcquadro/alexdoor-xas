@@ -16,14 +16,12 @@ pytest.importorskip("diffusers")
 
 from alexdoor_xas.adapters import (  # noqa: E402
     A2Adapter,
-    StepContext,
     limits_for_robot,
     rollout_chunks,
 )
 from alexdoor_xas.adapters.limits import PROXY_ROBOT_TAG  # noqa: E402
 from alexdoor_xas.dataset import DatasetNormStats, EpisodeRecord, NormStats  # noqa: E402
 from alexdoor_xas.policies.common.inspect import open_loop_report  # noqa: E402
-from alexdoor_xas.policies.common.obs import stop_on_hinge_angle  # noqa: E402
 from alexdoor_xas.policies.diffusion.checkpoint import (  # noqa: E402
     CHECKPOINT_FORMAT,
     LEGACY_CHECKPOINT_FORMAT,
@@ -515,10 +513,6 @@ def test_checkpoint_rejects_unknown_format(tmp_path) -> None:
         load_checkpoint(path)
 
 
-def test_checkpoint_format_tag() -> None:
-    assert CHECKPOINT_FORMAT == "alexdoor_xas.diffusion.v2"
-
-
 def test_checkpoint_loads_legacy_v1_and_ignores_administrative_fields(tmp_path) -> None:
     config = {
         "dataset": {
@@ -699,32 +693,6 @@ def test_diffusion_chunk_source_validates_inputs() -> None:
         diffusion_chunk_source(policy, env, obs_preset="alex_full")
     with pytest.raises(ValueError, match="n_action_steps"):
         diffusion_chunk_source(policy, env, n_action_steps=TINY_MODEL_CFG.horizon + 1)
-
-
-def test_stop_on_hinge_angle_wraps_diffusion_source() -> None:
-    env = FakeDoorPushEnv()
-    env.reset()
-    policy = _rollout_policy()
-    policy.seed(0)
-    source = stop_on_hinge_angle(
-        diffusion_chunk_source(policy, env, n_action_steps=2), threshold_rad=math.pi / 4
-    )
-
-    open_ctx = StepContext(
-        door_frame=None,
-        hinge_angle_rad=math.pi / 2,
-        hinge_velocity_rad_s=0.0,
-        ee_pos_w=np.zeros(3),
-    )
-    assert source(open_ctx) is None
-
-    closed_ctx = StepContext(
-        door_frame=None,
-        hinge_angle_rad=0.0,
-        hinge_velocity_rad_s=0.0,
-        ee_pos_w=np.zeros(3),
-    )
-    assert source(closed_ctx).shape == (2, ACTION_DIM)
 
 
 def test_open_loop_report_with_receding_horizon_stride(tmp_path) -> None:

@@ -223,3 +223,5 @@ def test_save_splits_round_trips_metadata(tmp_path) -> None:
     assert payload["metadata"]["n_groups"] == meta["n_groups"]
     reloaded = load_splits(path, episode_ids=[e.episode_id for e in entries])
     assert reloaded == splits
+    with pytest.raises(ValueError, match="re-exported"):
+        load_splits(path, episode_ids=["stale-episode"])

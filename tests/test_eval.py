@@ -79,22 +79,18 @@ def test_force_metrics_details_and_aggregate_block() -> None:
     assert "contact_force_n" not in proxy_summary
 
 
-def test_label_episode_success_is_none() -> None:
-    assert (
-        label_episode(
-            final_angle_rad=1.0,
-            success_angle_rad=math.pi / 4,
-            controller_done=True,
-            timed_out=False,
-            last_phase="done",
-        )
-        is None
-    )
-
-
 @pytest.mark.parametrize(
     ("kwargs", "expected"),
     [
+        (
+            dict(
+                final_angle_rad=1.0,
+                controller_done=True,
+                timed_out=False,
+                last_phase="done",
+            ),
+            None,
+        ),
         (
             dict(
                 final_angle_rad=float("nan"),
@@ -128,10 +124,11 @@ def test_label_episode_success_is_none() -> None:
         ),
     ],
 )
-def test_label_episode_failure_cases(kwargs, expected) -> None:
+def test_label_episode_cases(kwargs, expected) -> None:
     label = label_episode(success_angle_rad=math.pi / 4, **kwargs)
     assert label == expected
-    assert label in FAILURE_LABELS
+    if label is not None:
+        assert label in FAILURE_LABELS
 
 
 def test_episode_and_aggregate_metrics_on_success_and_timeout() -> None:

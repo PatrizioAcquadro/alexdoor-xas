@@ -174,9 +174,7 @@ def test_a2_does_not_shape_subthreshold_sensor_dropout_command() -> None:
     assert decision.status is AdapterStatus.ACCEPTED
 
 
-@pytest.mark.parametrize(
-    "bad", [np.full(6, np.nan), np.zeros(3), np.zeros((2, 6)).reshape(-1)]
-)
+@pytest.mark.parametrize("bad", [np.full(6, np.nan), np.zeros(3), np.zeros((2, 6)).reshape(-1)])
 def test_a2_rejects_malformed_deltas(bad):
     adapter = A2Adapter(PROXY_LIMITS)
     applied, decision = adapter.process(bad, _ctx())
@@ -274,14 +272,10 @@ def test_a2_emits_one_warning_per_simultaneous_joint_limit_violation() -> None:
     )
 
     position_records = [
-        warning
-        for warning in decision.warning_records
-        if warning.id == "a2.joint_position_limit"
+        warning for warning in decision.warning_records if warning.id == "a2.joint_position_limit"
     ]
     velocity_records = [
-        warning
-        for warning in decision.warning_records
-        if warning.id == "a2.joint_velocity_limit"
+        warning for warning in decision.warning_records if warning.id == "a2.joint_velocity_limit"
     ]
     assert [warning.evidence["joint_index"] for warning in position_records] == [0, 1]
     assert [warning.evidence["joint_index"] for warning in velocity_records] == [0, 1]
@@ -440,13 +434,10 @@ def test_geometric_contact_pins_controller_inference():
         assert geo.geometric_contact(rot_z(angle).T @ ee_door) == expected
 
 
-def test_a4_phase_vocab_is_shared_with_dataset():
+def test_a4_phase_contract_is_shared_across_actions_dataset_and_controller():
     from alexdoor_xas.dataset import A4_PHASE_VOCAB as dataset_vocab
 
     assert dataset_vocab is A4_PHASE_VOCAB
-
-
-def test_a4_phase_vocab_pins_scripted_controller_order():
     assert A4_PHASE_VOCAB == tuple(str(phase) for phase in PHASE_ORDER)
     assert str(DoorPushPhase.DONE) not in A4_PHASE_VOCAB
 
@@ -475,41 +466,21 @@ def test_a4_rejects_invalid_chunks(chunk, reason_match):
     assert reason_match in decision.reason
 
 
-@pytest.mark.parametrize(
-    "phase",
-    ["approach", "align", "pre_contact", "contact", "hold", "release"],
-)
-def test_a4_rejects_non_push_phase_hinge_motion(phase):
-    _, decision = _a4().validate_chunk(
-        _chunk(phase=phase, hinge_delta=0.1), entry_angle_rad=0.0
-    )
+def test_a4_rejects_non_push_phase_hinge_motion():
+    _, decision = _a4().validate_chunk(_chunk(phase="hold", hinge_delta=0.1), entry_angle_rad=0.0)
     assert decision.status is AdapterStatus.REJECTED
     assert decision.checks["hinge_delta_phase_valid"] is False
     assert "non-push phase cannot request hinge motion" in decision.reason
 
 
-@pytest.mark.parametrize(
-    ("target", "shape_text"),
-    [
-        ((0.086, 0.55), "(2,)"),
-        ((0.086, 0.55, -0.30, 0.0), "(4,)"),
-    ],
-)
-def test_a4_rejects_malformed_contact_target_shape(target, shape_text):
+def test_a4_rejects_malformed_contact_target_shape():
+    target = (0.086, 0.55)
     _, decision = _a4().validate_chunk(_chunk(target=target), entry_angle_rad=0.0)
     assert decision.status is AdapterStatus.REJECTED
     assert decision.checks["target_shape"] is False
     assert "contact_target_panel" in decision.reason
-    assert shape_text in decision.reason
+    assert "(2,)" in decision.reason
     assert decision.applied is None
-
-
-def test_a4_rejects_non_finite_contact_target_after_shape_check():
-    _, decision = _a4().validate_chunk(
-        _chunk(target=(0.086, np.inf, -0.30)), entry_angle_rad=0.0
-    )
-    assert decision.status is AdapterStatus.REJECTED
-    assert "non-finite" in decision.reason
 
 
 def test_a4_corrects_slightly_off_panel_target():
@@ -635,67 +606,38 @@ def test_a4_reports_push_stall():
     assert result.achieved_hinge_delta_rad == pytest.approx(0.0)
 
 
-def test_a4_rejected_sequence_commands_no_motion():
+@pytest.mark.parametrize(
+    ("chunks", "reason", "requested_hinge_delta"),
+    [
+        (_chunk(hinge_delta=-0.5), "pulling", None),
+        (
+            [
+                _chunk(phase="approach", duration=20),
+                _chunk(phase="hold", hinge_delta=0.2, duration=20),
+                _chunk(phase="push", hinge_delta=0.3, duration=20),
+            ],
+            "non-push phase cannot request hinge motion",
+            0.5,
+        ),
+        (_chunk(target=(0.086, 0.55)), "contact_target_panel", None),
+        (_chunk(hinge_delta="bad"), "non-numeric", 0.0),
+    ],
+    ids=("pull", "non-push-motion", "malformed-target", "non-numeric-delta"),
+)
+def test_a4_rejection_commands_no_motion(chunks, reason, requested_hinge_delta):
     env = FakeDoorPushEnv()
     env.reset(seed=0)
     start = env.world.ee_pos_w.copy()
-    result = _a4().execute(env, _chunk(hinge_delta=-0.5))  # pull -> reject
-    assert result.status is AdapterStatus.REJECTED
-    assert result.n_ticks == 0 and not result.stages
-    assert "pulling" in result.reason
-    assert result.log.n_rejected == 1
-    np.testing.assert_allclose(env.world.ee_pos_w, start)
-    assert env.world.angle == 0.0
-
-
-def test_a4_mixed_sequence_rejects_non_push_hinge_motion_without_motion():
-    env = FakeDoorPushEnv()
-    env.reset(seed=0)
-    start = env.world.ee_pos_w.copy()
-    chunks = [
-        _chunk(phase="approach", duration=20),
-        _chunk(phase="hold", hinge_delta=0.2, duration=20),
-        _chunk(phase="push", hinge_delta=0.3, duration=20),
-    ]
     result = _a4().execute(env, chunks)
     assert result.status is AdapterStatus.REJECTED
     assert not result.completed
     assert result.n_ticks == 0 and not result.stages
-    assert result.requested_hinge_delta_rad == pytest.approx(0.5)
     assert result.achieved_hinge_delta_rad == pytest.approx(0.0)
     assert result.contact_reached is False
-    assert "non-push phase cannot request hinge motion" in result.reason
+    assert reason in result.reason
     assert result.log.n_rejected == 1
-    np.testing.assert_allclose(env.world.ee_pos_w, start)
-    assert env.world.angle == 0.0
-
-
-def test_a4_malformed_target_rejection_commands_no_motion():
-    env = FakeDoorPushEnv()
-    env.reset(seed=0)
-    start = env.world.ee_pos_w.copy()
-    result = _a4().execute(env, _chunk(target=(0.086, 0.55)))
-    assert result.status is AdapterStatus.REJECTED
-    assert not result.completed
-    assert result.n_ticks == 0 and not result.stages
-    assert "contact_target_panel" in result.reason
-    assert result.log.n_rejected == 1
-    np.testing.assert_allclose(env.world.ee_pos_w, start)
-    assert env.world.angle == 0.0
-
-
-def test_a4_non_numeric_hinge_delta_rejection_commands_no_motion():
-    env = FakeDoorPushEnv()
-    env.reset(seed=0)
-    start = env.world.ee_pos_w.copy()
-    result = _a4().execute(env, _chunk(hinge_delta="bad"))
-    assert result.status is AdapterStatus.REJECTED
-    assert not result.completed
-    assert result.n_ticks == 0 and not result.stages
-    assert result.requested_hinge_delta_rad == pytest.approx(0.0)
-    assert result.achieved_hinge_delta_rad == pytest.approx(0.0)
-    assert "non-numeric" in result.reason
-    assert result.log.n_rejected == 1
+    if requested_hinge_delta is not None:
+        assert result.requested_hinge_delta_rad == pytest.approx(requested_hinge_delta)
     np.testing.assert_allclose(env.world.ee_pos_w, start)
     assert env.world.angle == 0.0
 

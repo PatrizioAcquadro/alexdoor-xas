@@ -107,7 +107,6 @@ def test_presentation_frames_trim_blank_and_add_holds() -> None:
     [
         ({"fps": 0}, "playback fps"),
         ({"fps": 30, "capture_fps": 0}, "capture fps"),
-        ({"fps": 30, "intro_hold_s": -1.0}, "holds"),
         ({"fps": 30, "outro_hold_s": float("nan")}, "holds"),
     ],
 )

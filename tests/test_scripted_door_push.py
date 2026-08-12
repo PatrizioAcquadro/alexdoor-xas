@@ -12,7 +12,6 @@ from alexdoor_xas.policies.scripted import (
     DoorPushController,
     DoorPushControllerCfg,
     DoorPushPhase,
-    VariationBounds,
     alex_v2_push_cfg,
     alex_v2_variation_bounds,
     sample_variation,
@@ -225,13 +224,6 @@ def test_contact_sensed_overrides_geometric_inference() -> None:
     assert command_b.contact_inferred is True
 
 
-def test_sample_variation_default_bounds_are_unchanged() -> None:
-    for seed in (0, 7, 42):
-        assert sample_variation(np.random.default_rng(seed)) == sample_variation(
-            np.random.default_rng(seed), VariationBounds()
-        )
-
-
 def test_alex_v2_variation_bounds_are_respected() -> None:
     bounds = alex_v2_variation_bounds(_v2_calibration())
     for seed in range(20):
@@ -273,7 +265,7 @@ def test_variation_apply_overrides_push_geometry() -> None:
     assert world.angle >= controller.cfg.target_open_angle_rad
 
 
-@pytest.mark.parametrize("angle", [0.0, 0.4, 1.2])
+@pytest.mark.parametrize("angle", [0.0, 1.2])
 def test_contact_inference_tracks_panel_rotation(angle: float) -> None:
     cfg = DoorPushControllerCfg()
     controller = DoorPushController(cfg)

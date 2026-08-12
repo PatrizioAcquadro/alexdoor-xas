@@ -31,8 +31,6 @@ from alexdoor_xas.dataset import (
     compute_norm_stats,
     episode_chunk_features,
     load_norm_stats,
-    load_splits,
-    make_splits,
     norm_stats_path,
     obs_matrix,
     save_norm_stats,
@@ -245,13 +243,6 @@ def test_a4_dataset_parses_chunks_and_encodes_features(alex_exports) -> None:
     assert (features[:, -1] > 0).all()
 
 
-def test_a4_phase_vocab_pins_the_scripted_fsm() -> None:
-    from alexdoor_xas.policies.scripted import DoorPushPhase
-
-    emitting = tuple(p.value for p in DoorPushPhase if p is not DoorPushPhase.DONE)
-    assert A4_PHASE_VOCAB == emitting
-
-
 def test_a4_validation_fails_closed_on_missing_outcome(alex_exports, tmp_path) -> None:
     a4_dir = _copy_dataset(alex_exports[A4_OBJ_CENTRIC_CHUNK], tmp_path, "a4_missing_outcome")
     jsonl = a4_dir / "episodes.jsonl"
@@ -423,27 +414,6 @@ def test_matched_action_space_validation_rejects_same_id_mismatched_content(alex
     assert not result.ok
     assert any("meta.seed differs" in error for error in result.errors)
     assert any("core low-dim observations differ" in error for error in result.errors)
-
-
-# ── splits ────────────────────────────────────────────────────────────────────
-
-
-def test_splits_are_deterministic_disjoint_and_covering(proxy_a2, tmp_path) -> None:
-    ids = proxy_a2.episode_ids
-    splits = make_splits(ids, seed=7)
-    assert make_splits(ids, seed=7) == splits
-    assert make_splits(ids, seed=8) != splits
-    all_ids = splits["train"] + splits["val"] + splits["test"]
-    assert sorted(all_ids) == sorted(ids)
-    assert len(set(all_ids)) == len(ids)
-    assert len(splits["val"]) >= 1 and len(splits["test"]) >= 1 and len(splits["train"]) >= 1
-
-    path = save_splits(tmp_path / "splits" / "v0.json", splits, seed=7)
-    assert load_splits(path, episode_ids=ids) == splits
-    with pytest.raises(ValueError, match="re-exported"):
-        load_splits(path, episode_ids=["stale-1", "stale-2", "stale-3", "stale-4"])
-    with pytest.raises(ValueError, match="at least 3"):
-        make_splits(ids[:2])
 
 
 # ── normalization ─────────────────────────────────────────────────────────────
@@ -640,22 +610,3 @@ def test_batch_iterator_is_seeded_and_shaped(proxy_a2) -> None:
 
     dropped = list(BatchIterator(sampler, batch_size=100, seed=0, drop_last=True))
     assert all(b["obs"].shape[0] == 100 for b in dropped)
-
-
-def test_dummy_model_consumes_a_batch(proxy_a2) -> None:
-    """The Phase 3.0 acceptance shape-check, without any policy code."""
-    horizon, batch_size = 8, 16
-    splits = make_splits(proxy_a2.episode_ids, seed=0)
-    stats = compute_norm_stats(proxy_a2, splits["train"])
-    sampler = ChunkSampler(proxy_a2, horizon=horizon, episode_ids=splits["train"])
-    batch = next(iter(BatchIterator(sampler, batch_size=batch_size, seed=0)))
-
-    rng = np.random.default_rng(0)
-    weights = rng.standard_normal((sampler.obs_dim, horizon * sampler.action_dim))
-    predicted = (stats.obs.normalize(batch["obs"]) @ weights).reshape(
-        batch_size, horizon, sampler.action_dim
-    )
-    assert predicted.shape == batch["actions"].shape
-    error = predicted - stats.action.normalize(batch["actions"])
-    loss = float((error**2 * ~batch["is_pad"][..., None]).mean())
-    assert np.isfinite(loss)

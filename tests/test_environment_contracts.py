@@ -8,28 +8,57 @@ import pytest
 
 from alexdoor_xas.envs import door_task
 
-# --- test_door_push_env ---
+SUPPORTED_ENVIRONMENTS = (
+    (
+        "AlexDoor-DoorTask-Direct-v0",
+        "alexdoor_xas.envs.door_task.door_env:DoorTaskEnv",
+        "alexdoor_xas.envs.door_task.door_env_cfg:DoorTaskEnvCfg",
+    ),
+    (
+        "AlexDoor-DoorPush-Proxy-v0",
+        "alexdoor_xas.envs.door_task.door_push_env:DoorPushEnv",
+        "alexdoor_xas.envs.door_task.door_push_env_cfg:DoorPushEnvCfg",
+    ),
+    (
+        "AlexDoor-DoorPush-AlexV2-v0",
+        "alexdoor_xas.envs.door_task.door_push_alex_v2_env:DoorPushAlexV2Env",
+        "alexdoor_xas.envs.door_task.door_push_alex_v2_env_cfg:DoorPushAlexV2EnvCfg",
+    ),
+)
 
 
-def test_door_push_env_package_imports_without_isaac_runtime() -> None:
-    from alexdoor_xas.envs.door_task import DOOR_PUSH_ENV_ID
+def test_supported_environment_entry_points_are_explicit() -> None:
+    actual = (
+        (
+            door_task.DOOR_TASK_ENV_ID,
+            door_task.DOOR_TASK_ENV_ENTRY_POINT,
+            door_task.DOOR_TASK_ENV_CFG_ENTRY_POINT,
+        ),
+        (
+            door_task.DOOR_PUSH_ENV_ID,
+            door_task.DOOR_PUSH_ENV_ENTRY_POINT,
+            door_task.DOOR_PUSH_ENV_CFG_ENTRY_POINT,
+        ),
+        (
+            door_task.DOOR_PUSH_ALEX_V2_ENV_ID,
+            door_task.DOOR_PUSH_ALEX_V2_ENV_ENTRY_POINT,
+            door_task.DOOR_PUSH_ALEX_V2_ENV_CFG_ENTRY_POINT,
+        ),
+    )
+    assert actual == SUPPORTED_ENVIRONMENTS
 
-    assert DOOR_PUSH_ENV_ID == "AlexDoor-DoorPush-Proxy-v0"
 
-
-def test_door_push_gym_registration_if_gymnasium_available() -> None:
+def test_supported_environments_are_registered_if_gymnasium_available() -> None:
     if importlib.util.find_spec("gymnasium") is None:
         pytest.skip("gymnasium is not installed in this Python environment")
 
     import gymnasium as gym
 
-    import alexdoor_xas.envs.door_task as door_task
-
-    spec = gym.spec(door_task.DOOR_PUSH_ENV_ID)
-
-    assert spec.entry_point == door_task.DOOR_PUSH_ENV_ENTRY_POINT
-    assert spec.kwargs["env_cfg_entry_point"] == door_task.DOOR_PUSH_ENV_CFG_ENTRY_POINT
-    assert spec.disable_env_checker is True
+    for env_id, entry_point, cfg_entry_point in SUPPORTED_ENVIRONMENTS:
+        spec = gym.spec(env_id)
+        assert spec.entry_point == entry_point
+        assert spec.kwargs["env_cfg_entry_point"] == cfg_entry_point
+        assert spec.disable_env_checker is True
 
 
 def test_door_push_env_cfg_contract_if_isaaclab_available() -> None:
@@ -74,30 +103,6 @@ def test_door_push_env_cfg_contract_if_isaaclab_available() -> None:
     assert PROXY_EE_ROBOT_TAG == "proxy_ee_sphere_v0"
 
 
-# --- test_door_task_env ---
-
-
-def test_door_task_env_package_imports_without_isaac_runtime() -> None:
-    from alexdoor_xas.envs.door_task import DOOR_TASK_ENV_ID
-
-    assert DOOR_TASK_ENV_ID == "AlexDoor-DoorTask-Direct-v0"
-
-
-def test_door_task_gym_registration_if_gymnasium_available() -> None:
-    if importlib.util.find_spec("gymnasium") is None:
-        pytest.skip("gymnasium is not installed in this Python environment")
-
-    import gymnasium as gym
-
-    import alexdoor_xas.envs.door_task as door_task
-
-    spec = gym.spec(door_task.DOOR_TASK_ENV_ID)
-
-    assert spec.entry_point == door_task.DOOR_TASK_ENV_ENTRY_POINT
-    assert spec.kwargs["env_cfg_entry_point"] == door_task.DOOR_TASK_ENV_CFG_ENTRY_POINT
-    assert spec.disable_env_checker is True
-
-
 def test_door_task_env_cfg_contract_if_isaaclab_available() -> None:
     if importlib.util.find_spec("isaaclab") is None:
         pytest.skip("isaaclab is not installed in this Python environment")
@@ -132,16 +137,3 @@ def test_door_task_env_cfg_contract_if_isaaclab_available() -> None:
     assert cfg.door.actuators == {}
     assert DOOR_TASK_SCENE_SOURCE_PRIM_PATH == "/World/envs/env_0/DoorTaskScene"
     assert DOOR_TASK_SCENE_PRIM_PATH == "/World/envs/env_.*/DoorTaskScene"
-
-
-# --- test_alex_v2_task_registration ---
-
-
-def test_alex_v2_task_has_distinct_entry_points() -> None:
-    assert door_task.DOOR_PUSH_ALEX_V2_ENV_ID == "AlexDoor-DoorPush-AlexV2-v0"
-    assert "door_push_alex_v2_env:DoorPushAlexV2Env" in (
-        door_task.DOOR_PUSH_ALEX_V2_ENV_ENTRY_POINT
-    )
-    assert "door_push_alex_v2_env_cfg:DoorPushAlexV2EnvCfg" in (
-        door_task.DOOR_PUSH_ALEX_V2_ENV_CFG_ENTRY_POINT
-    )

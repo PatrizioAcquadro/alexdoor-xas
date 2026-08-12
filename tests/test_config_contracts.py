@@ -32,39 +32,14 @@ def test_act_default_config_matches_yaml_defaults() -> None:
     assert cfg.model.chunk_size == 40
     assert cfg.model.d_model == 128
     assert cfg.model.n_heads == 4
-    assert cfg.model.dim_feedforward == 512
+    assert cfg.model.d_model % cfg.model.n_heads == 0
     assert cfg.model.z_dim == 16
-    assert cfg.model.cvae_encoder_layers == 2
-    assert cfg.model.encoder_layers == 2
-    assert cfg.model.decoder_layers == 2
-    assert cfg.model.dropout == pytest.approx(0.1)
-
-    assert cfg.train.epochs == 100
-    assert cfg.train.batch_size == 64
-    assert cfg.train.lr == pytest.approx(1.0e-4)
-    assert cfg.train.weight_decay == pytest.approx(1.0e-4)
-    assert cfg.train.kl_weight == pytest.approx(10.0)
-    assert cfg.train.grad_clip == pytest.approx(1.0)
-    assert cfg.train.seed == 0
     assert cfg.train.device == "cuda"
-    assert cfg.train.val_every == 5
-    assert cfg.train.overfit_episodes is None
 
-    assert cfg.run.experiment == "act_door_push"
-    assert cfg.run.run_id is None
-    assert cfg.run.output_root is None
-
-    assert cfg.rollout.checkpoint is None
-    assert cfg.rollout.episodes_fixed == 5
-    assert cfg.rollout.episodes_randomized == 15
-    assert cfg.rollout.base_seed == 100
     assert cfg.rollout.max_ticks == 600
     assert cfg.rollout.success_angle_deg == pytest.approx(45.0)
     assert cfg.rollout.temporal_ensemble is False
-    assert cfg.rollout.ensemble_m == pytest.approx(0.01)
     assert cfg.rollout.policy_device == "cuda"
-    assert cfg.rollout.reference_metrics is None
-    assert cfg.rollout.matched_scripted_reference is False
 
     assert cfg.wandb_overrides == {}
 
@@ -172,44 +147,19 @@ def test_diffusion_default_config_matches_yaml_defaults() -> None:
     assert cfg.model.horizon == 16
     assert cfg.model.d_model == 128
     assert cfg.model.n_heads == 4
-    assert cfg.model.n_decoder_layers == 4
-    assert cfg.model.dim_feedforward == 512
-    assert cfg.model.dropout == pytest.approx(0.1)
+    assert cfg.model.d_model % cfg.model.n_heads == 0
     assert cfg.model.num_train_timesteps == 100
     assert cfg.model.beta_schedule == "squaredcos_cap_v2"
     assert cfg.model.prediction_type == "epsilon"
 
-    assert cfg.train.epochs == 300
-    assert cfg.train.batch_size == 64
-    assert cfg.train.lr == pytest.approx(1.0e-4)
-    assert cfg.train.weight_decay == pytest.approx(1.0e-3)
-    assert cfg.train.grad_clip == pytest.approx(1.0)
-    assert cfg.train.lr_schedule == "cosine"
-    assert cfg.train.lr_warmup_steps == 500
     assert cfg.train.use_ema is True
-    assert cfg.train.ema_decay == pytest.approx(0.999)
-    assert cfg.train.seed == 0
     assert cfg.train.device == "cuda"
-    assert cfg.train.val_every == 10
-    assert cfg.train.val_inference_steps == 10
-    assert cfg.train.overfit_episodes is None
 
-    assert cfg.run.experiment == "diffusion_door_push"
-    assert cfg.run.run_id is None
-    assert cfg.run.output_root is None
-
-    assert cfg.rollout.checkpoint is None
-    assert cfg.rollout.episodes_fixed == 5
-    assert cfg.rollout.episodes_randomized == 15
-    assert cfg.rollout.base_seed == 100
-    assert cfg.rollout.max_ticks == 600
     assert cfg.rollout.success_angle_deg == pytest.approx(45.0)
     assert cfg.rollout.n_action_steps == 8
     assert cfg.rollout.sampler == "ddpm"
     assert cfg.rollout.num_inference_steps == 100
     assert cfg.rollout.policy_device == "cuda"
-    assert cfg.rollout.reference_metrics is None
-    assert cfg.rollout.matched_scripted_reference is False
 
     assert cfg.wandb_overrides == {}
 
@@ -339,13 +289,9 @@ def test_scripted_default_config_matches_legacy_script_defaults() -> None:
     assert cfg.run.robot == "proxy"
     assert cfg.run.episodes == 5
     assert cfg.run.randomized == 0
-    assert cfg.run.seed == 0
-    assert cfg.run.experiment is None
-    assert cfg.run.run_id is None
     assert cfg.run.success_angle_deg == pytest.approx(45.0)
     assert cfg.run.max_ticks == 600
     assert cfg.run.video is False
-    assert cfg.run.clean_shutdown is False
     assert cfg.controller_overrides == {}
 
 

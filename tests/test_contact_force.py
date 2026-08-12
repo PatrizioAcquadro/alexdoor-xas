@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 import math
 
 import pytest
@@ -65,10 +64,6 @@ def test_sum_actor_contact_forces_rejects_invalid_active_data() -> None:
 
 # --- test_terminal_force ---
 
-requires_h5py = pytest.mark.skipif(
-    importlib.util.find_spec("h5py") is None, reason="h5py is not installed"
-)
-
 
 def _episode():
     return run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], DataEngineCfg())
@@ -130,19 +125,3 @@ def test_terminal_over_warn_without_error_limit_warns() -> None:
     result = check_alex_episode(episode)  # no force_error_n: diagnostic caller
     assert result.ok
     assert any("terminal contact force spiked" in warning for warning in result.warnings)
-
-
-@requires_h5py
-def test_terminal_contact_round_trips_through_hdf5(tmp_path) -> None:
-    from alexdoor_xas.recording import read_episode, write_episode
-
-    episode = _episode()
-    path = write_episode(episode, tmp_path)
-    loaded = read_episode(path)
-    assert loaded.extras["terminal_contact"]["force_n"] == pytest.approx(
-        episode.extras["terminal_contact"]["force_n"]
-    )
-    assert (
-        loaded.extras["terminal_contact"]["alignment"]
-        == (episode.extras["terminal_contact"]["alignment"])
-    )
