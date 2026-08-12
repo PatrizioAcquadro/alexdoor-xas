@@ -90,13 +90,10 @@ import gymnasium as gym  # noqa: E402
 
 import alexdoor_xas.envs.door_task as door_task  # noqa: E402
 from alexdoor_xas.action.spaces import A2_EE_DELTA, A3_OBJ_REL_EE_DELTA  # noqa: E402
-from alexdoor_xas.adapters import (  # noqa: E402
-    A2Adapter,
-    A3Adapter,
-    limits_for_robot,
-    read_door_frame,
-    rollout_chunks,
-)
+from alexdoor_xas.adapters.a2 import A2Adapter  # noqa: E402
+from alexdoor_xas.adapters.a3 import A3Adapter  # noqa: E402
+from alexdoor_xas.adapters.limits import limits_for_robot  # noqa: E402
+from alexdoor_xas.adapters.rollout import read_door_frame, rollout_chunks  # noqa: E402
 from alexdoor_xas.assets.alex_v2_contract import RobotAssetRef  # noqa: E402
 from alexdoor_xas.data_engine import apply_start_offset, plan_randomized_seeds  # noqa: E402
 from alexdoor_xas.envs.door_task.door_push_alex_v2_env_cfg import (  # noqa: E402

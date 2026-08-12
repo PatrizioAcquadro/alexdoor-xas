@@ -12,25 +12,20 @@ import torch
 
 from alexdoor_xas.action.frames import ObjectFrame, frame_delta_to_world, rot_z
 from alexdoor_xas.action.spaces import A4_PHASE_VOCAB, EE_DELTA_DIM, ObjectCentricChunk
-from alexdoor_xas.adapters import (
+from alexdoor_xas.adapters.a2 import A2Adapter
+from alexdoor_xas.adapters.a3 import A3Adapter, validate_object_frame
+from alexdoor_xas.adapters.a4 import A4Adapter, A4AdapterCfg, alex_v2_a4_cfg
+from alexdoor_xas.adapters.base import AdapterStatus, StepContext
+from alexdoor_xas.adapters.limits import (
     ALEX_V2_ROBOT_TAG,
     MAX_HINGE_ANGLE_RAD,
-    A2Adapter,
-    A3Adapter,
-    A4Adapter,
-    A4AdapterCfg,
-    AdapterStatus,
     DoorPanelGeometry,
     RobotLimitsCfg,
-    StepContext,
     WorkspaceSphere,
-    alex_v2_a4_cfg,
     alex_v2_limits,
     limits_for_robot,
-    replay_source,
-    rollout_chunks,
-    validate_object_frame,
 )
+from alexdoor_xas.adapters.rollout import replay_source, rollout_chunks
 from alexdoor_xas.data_engine import plan_episodes, run_episode
 from alexdoor_xas.policies.scripted import DoorPushController, DoorPushControllerCfg
 from alexdoor_xas.policies.scripted.door_push import PHASE_ORDER, DoorPushPhase

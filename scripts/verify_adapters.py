@@ -67,17 +67,12 @@ import numpy as np  # noqa: E402
 import alexdoor_xas.envs.door_task as door_task  # noqa: E402
 from alexdoor_xas import paths  # noqa: E402
 from alexdoor_xas.action.spaces import ObjectCentricChunk  # noqa: E402
-from alexdoor_xas.adapters import (  # noqa: E402
-    A2Adapter,
-    A3Adapter,
-    A4Adapter,
-    AdapterStatus,
-    DoorPanelGeometry,
-    alex_v2_a4_cfg,
-    limits_for_robot,
-    replay_source,
-    rollout_chunks,
-)
+from alexdoor_xas.adapters.a2 import A2Adapter  # noqa: E402
+from alexdoor_xas.adapters.a3 import A3Adapter  # noqa: E402
+from alexdoor_xas.adapters.a4 import A4Adapter, alex_v2_a4_cfg  # noqa: E402
+from alexdoor_xas.adapters.base import AdapterStatus  # noqa: E402
+from alexdoor_xas.adapters.limits import DoorPanelGeometry, limits_for_robot  # noqa: E402
+from alexdoor_xas.adapters.rollout import replay_source, rollout_chunks  # noqa: E402
 from alexdoor_xas.data_engine import (  # noqa: E402
     DEFAULT_SUCCESS_ANGLE_RAD,
     DataEngineCfg,

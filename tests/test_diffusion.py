@@ -15,10 +15,8 @@ import torch
 
 pytest.importorskip("diffusers")
 
-from alexdoor_xas.adapters import (  # noqa: E402
-    A2Adapter,
-    rollout_chunks,
-)
+from alexdoor_xas.adapters.a2 import A2Adapter  # noqa: E402
+from alexdoor_xas.adapters.rollout import rollout_chunks  # noqa: E402
 from alexdoor_xas.assets.alex_v2_contract import RobotAssetRef  # noqa: E402
 from alexdoor_xas.dataset import DatasetNormStats, EpisodeRecord, NormStats  # noqa: E402
 from alexdoor_xas.policies.common.inspect import open_loop_report  # noqa: E402

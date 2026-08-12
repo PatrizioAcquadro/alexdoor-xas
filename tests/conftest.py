@@ -20,7 +20,7 @@ if str(WORKTREE_SRC) not in sys.path:
 import numpy as np  # noqa: E402
 
 from alexdoor_xas.action.frames import ObjectFrame, rot_z  # noqa: E402
-from alexdoor_xas.adapters import RobotLimitsCfg  # noqa: E402
+from alexdoor_xas.adapters.limits import RobotLimitsCfg  # noqa: E402
 from alexdoor_xas.data_engine import DataEngineCfg  # noqa: E402
 from alexdoor_xas.policies.scripted import DoorPushControllerCfg  # noqa: E402
 

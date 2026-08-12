@@ -8,15 +8,11 @@ import numpy as np
 import pytest
 import torch
 
-from alexdoor_xas.adapters import (
-    A2Adapter,
-    A3Adapter,
-    AdapterStatus,
-    RobotLimitsCfg,
-    RolloutResult,
-    WorkspaceSphere,
-    rollout_chunks,
-)
+from alexdoor_xas.adapters.a2 import A2Adapter
+from alexdoor_xas.adapters.a3 import A3Adapter
+from alexdoor_xas.adapters.base import AdapterStatus
+from alexdoor_xas.adapters.limits import RobotLimitsCfg, WorkspaceSphere
+from alexdoor_xas.adapters.rollout import RolloutResult, rollout_chunks
 from conftest import TEST_ROBOT_LIMITS, FakeDoorPushEnv, FakeForceDoorPushEnv
 
 SUCCESS_RAD = 0.3
@@ -442,7 +438,7 @@ def test_nonbinary_contact_stops_before_adapter_execution() -> None:
 def test_calibrated_first_contact_correction_is_enforced_in_execution() -> None:
     from types import SimpleNamespace
 
-    from alexdoor_xas.adapters import alex_v2_limits
+    from alexdoor_xas.adapters.limits import alex_v2_limits
 
     env = FirstContactImpactEnv()
     env.reset(seed=112)

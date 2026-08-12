@@ -10,7 +10,8 @@ import numpy as np
 import pytest
 import torch
 
-from alexdoor_xas.adapters import A2Adapter, rollout_chunks
+from alexdoor_xas.adapters.a2 import A2Adapter
+from alexdoor_xas.adapters.rollout import rollout_chunks
 from alexdoor_xas.assets.alex_v2_contract import RobotAssetRef
 from alexdoor_xas.dataset import DatasetNormStats, EpisodeRecord, NormStats
 from alexdoor_xas.policies.act.checkpoint import (

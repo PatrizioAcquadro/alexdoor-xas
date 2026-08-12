@@ -156,7 +156,7 @@ def test_apply_start_offset_returns_settle_report_when_exposed() -> None:
     variation = DoorPushVariation(
         start_offset_door_frame=(0.01, -0.01, 0.0), push_radius_frac=0.8, push_height_m=1.0
     )
-    from alexdoor_xas.adapters import read_door_frame
+    from alexdoor_xas.adapters.rollout import read_door_frame
 
     report = apply_start_offset(env, read_door_frame(env), variation)
     assert report is not None
