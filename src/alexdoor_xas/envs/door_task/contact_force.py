@@ -55,8 +55,6 @@ def sum_actor_contact_forces(
         active_slots = active.any(dim=0)
         if not bool(torch.isfinite(force_magnitudes[active_slots]).all()):
             raise ValueError("raw contact force contains non-finite values")
-        if bool((force_magnitudes[active_slots] < 0).any()):
-            raise ValueError("raw contact force magnitude must be non-negative")
         if not bool(torch.isfinite(normals_w[active_slots]).all()):
             raise ValueError("raw contact normal contains non-finite values")
 
@@ -65,6 +63,8 @@ def sum_actor_contact_forces(
         & target_known.unsqueeze(1)
         & (other_actor_ids.to(dtype=torch.long).unsqueeze(0) == target_actor_ids.unsqueeze(1))
     )
+    # PhysX exposes a signed scalar coefficient relative to each contact normal.
+    # Preserve that sign when reconstructing the world-space force vector.
     vectors_w = force_magnitudes.unsqueeze(1) * normals_w
     return (matches.unsqueeze(2) * vectors_w.unsqueeze(0)).sum(dim=1)
 

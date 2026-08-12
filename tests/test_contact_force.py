@@ -45,15 +45,19 @@ def test_sum_actor_contact_forces_ignores_unknown_target_and_other_contacts() ->
     assert torch.equal(result, torch.tensor([[0.0, 0.0, 0.0], [-5.0, 0.0, 0.0]]))
 
 
+def test_sum_actor_contact_forces_preserves_signed_physx_scalars() -> None:
+    inputs = list(_inputs())
+    inputs[0][0] = -2.0
+
+    result = sum_actor_contact_forces(*inputs)
+
+    assert torch.equal(result, torch.tensor([[-2.0, 0.0, 0.0], [-5.0, 0.0, 0.0]]))
+
+
 def test_sum_actor_contact_forces_rejects_invalid_active_data() -> None:
     inputs = list(_inputs())
     inputs[0][0] = float("nan")
     with pytest.raises(ValueError, match="non-finite"):
-        sum_actor_contact_forces(*inputs)
-
-    inputs = list(_inputs())
-    inputs[0][0] = -1.0
-    with pytest.raises(ValueError, match="non-negative"):
         sum_actor_contact_forces(*inputs)
 
     inputs = list(_inputs())
