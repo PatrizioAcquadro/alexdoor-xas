@@ -1,12 +1,11 @@
 #!/usr/bin/env python
-"""Phase-1 environment readiness check (fast, no Isaac app launch).
+"""Environment readiness preflight (fast, no Isaac app launch).
 
 Reports the official Isaac install paths, Python / package versions, and CUDA
 availability, then confirms every registered external asset exists. Exits
-non-zero if a required package, install path, or asset is missing.
+non-zero if CUDA, a required package, install path, or asset is unavailable.
 
-Run through the official Isaac Lab Python (see
-knowledge/wiki/implementation_phases/phase-1-project-and-simulation-readiness.md)::
+Run through the official Isaac Lab Python::
 
     PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/check_env.py
 """
@@ -80,6 +79,16 @@ def _isaac_sim_version_failure(build: str, app_version: str) -> str | None:
         f"Isaac Sim identity is build={build!r}, app={app_version!r}; expected "
         f"official GA build={EXPECTED_ISAAC_SIM_BUILD!r}, app={EXPECTED_ISAAC_SIM_VERSION!r}"
     )
+
+
+def _cuda_failure(available: bool, probe_error: BaseException | None = None) -> str | None:
+    """Require a visible CUDA device for the supported simulator and policy workflows."""
+
+    if probe_error is not None:
+        return f"CUDA probe failed: {probe_error.__class__.__name__}: {probe_error}"
+    if not available:
+        return "CUDA is not available from the supported Isaac Lab Python"
+    return None
 
 
 def _check_provenance() -> tuple[list[str], list[str]]:
@@ -199,6 +208,7 @@ def main() -> int:
     print(f"isaaclab dir: {OFFICIAL_ISAAC_LAB_ROOT}")
 
     # CUDA (importing torch is cheap enough and is the only reliable probe).
+    cuda_failure = None
     try:
         import torch
 
@@ -206,8 +216,10 @@ def main() -> int:
             print(f"cuda        : available ({torch.cuda.get_device_name(0)})")
         else:
             print("cuda        : NOT available")
-    except Exception as exc:  # noqa: BLE001
-        print(f"cuda        : could not probe ({exc.__class__.__name__}: {exc})")
+            cuda_failure = _cuda_failure(False)
+    except Exception as error:  # noqa: BLE001
+        print(f"cuda        : could not probe ({error.__class__.__name__}: {error})")
+        cuda_failure = _cuda_failure(False, error)
 
     print(f"assets_root : {paths.ASSETS_ROOT}")
     print("-- install paths --")
@@ -252,11 +264,13 @@ def main() -> int:
         print(f"MISSING install paths: {missing_paths}")
     if missing_assets:
         print(f"MISSING required assets: {missing_assets}")
+    if cuda_failure is not None:
+        print(f"CUDA FAIL: {cuda_failure}")
     for warning in provenance_warnings:
         print(f"WARN: {warning}")
     for failure in provenance_failures:
         print(f"PROVENANCE FAIL: {failure}")
-    if missing_pkgs or missing_paths or missing_assets or provenance_failures:
+    if cuda_failure or missing_pkgs or missing_paths or missing_assets or provenance_failures:
         print("FAIL")
         return 1
     print("PASS")

@@ -34,7 +34,6 @@ from alexdoor_xas.dataset import (
     norm_stats_path,
     obs_matrix,
     save_norm_stats,
-    save_splits,
     splits_path,
     validate_dataset,
     validate_dataset_dir,
@@ -480,14 +479,14 @@ def test_norm_stats_validation_rejects_stale_or_wrong_dimension_stats(synthetic_
 
 
 def test_verify_dataset_interface_default_does_not_rewrite_artifacts(
-    synthetic_exports, tmp_path
+    alex_exports, tmp_path
 ) -> None:
     verify = _load_script("scripts/verify_dataset_interface.py")
-    root = synthetic_exports[A2_EE_DELTA].parents[2]
+    root = alex_exports[A2_EE_DELTA].parents[2]
     split_file = splits_path(root, "door_push", "v0")
     split_file.parent.mkdir(parents=True, exist_ok=True)
     split_file.write_text("sentinel split\n")
-    stats_file = norm_stats_path(synthetic_exports[A2_EE_DELTA])
+    stats_file = norm_stats_path(alex_exports[A2_EE_DELTA])
     stats_file.write_text("sentinel stats\n")
 
     args = argparse.Namespace(
@@ -497,7 +496,6 @@ def test_verify_dataset_interface_default_does_not_rewrite_artifacts(
         batch_size=8,
         seed=0,
         write_artifacts=False,
-        allow_missing_a4=False,
         artifacts_root=tmp_path / "gate_tmp",
     )
 
@@ -508,9 +506,9 @@ def test_verify_dataset_interface_default_does_not_rewrite_artifacts(
     assert stats_file.read_text() == "sentinel stats\n"
 
 
-def test_verify_dataset_interface_requires_a4_by_default(synthetic_exports, tmp_path) -> None:
+def test_verify_dataset_interface_requires_a4_by_default(alex_exports, tmp_path) -> None:
     verify = _load_script("scripts/verify_dataset_interface.py")
-    source_root = synthetic_exports[A2_EE_DELTA].parents[2]
+    source_root = alex_exports[A2_EE_DELTA].parents[2]
     root = tmp_path / "datasets"
     shutil.copytree(source_root, root)
     shutil.rmtree(root / "door_push" / A4_OBJ_CENTRIC_CHUNK)
@@ -521,7 +519,6 @@ def test_verify_dataset_interface_requires_a4_by_default(synthetic_exports, tmp_
         batch_size=8,
         seed=0,
         write_artifacts=False,
-        allow_missing_a4=False,
         artifacts_root=tmp_path / "gate_tmp",
     )
 
@@ -530,33 +527,6 @@ def test_verify_dataset_interface_requires_a4_by_default(synthetic_exports, tmp_
     assert any(
         "missing required" in failure and A4_OBJ_CENTRIC_CHUNK in failure for failure in failures
     )
-
-
-def test_inspect_dataset_uses_split_episode_and_masks_padded_actions(
-    synthetic_a2, tmp_path
-) -> None:
-    inspect = _load_script("scripts/inspect_dataset.py")
-    ids = synthetic_a2.episode_ids
-    splits = {"train": [ids[1], ids[2]], "val": [ids[3]], "test": [ids[0]]}
-    save_splits(splits_path(synthetic_a2.dataset_dir.parents[2], synthetic_a2.task, "v0"), splits)
-    args = argparse.Namespace(dataset=synthetic_a2.dataset_dir, split="train")
-
-    selected = inspect._selected_episode_ids(args, synthetic_a2.episode_ids)
-    record = inspect._plot_record(synthetic_a2, selected)
-
-    assert selected == splits["train"]
-    assert record.episode_id == ids[1]
-
-    sampler = ChunkSampler(synthetic_a2, horizon=synthetic_a2[0].n_steps + 5, episode_ids=[ids[0]])
-    sample = sampler.sample(synthetic_a2[0].n_steps - 1)
-    batch = {
-        "actions": sample.actions.reshape(1, *sample.actions.shape),
-        "is_pad": sample.is_pad.reshape(1, *sample.is_pad.shape),
-    }
-    valid = inspect._valid_batch_actions(batch)
-    assert valid.shape == (1, synthetic_a2.action_dim)
-    np.testing.assert_array_equal(valid[0], synthetic_a2[0].actions[-1])
-
 
 # ── chunk sampling + batching ─────────────────────────────────────────────────
 

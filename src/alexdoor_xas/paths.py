@@ -33,7 +33,6 @@ DIAGNOSTIC_SCENES_DIR: Path = RUNTIME_CACHE_ROOT / "door_scenes"
 CALIBRATION_CACHE_DIR: Path = RUNTIME_CACHE_ROOT / "calibration"
 VERIFICATION_CACHE_DIR: Path = RUNTIME_CACHE_ROOT / "verification"
 SCRIPTED_RUNS_CACHE_DIR: Path = RUNTIME_CACHE_ROOT / "scripted_runs"
-DATASET_INSPECTION_CACHE_DIR: Path = RUNTIME_CACHE_ROOT / "dataset_inspection"
 LEGACY_RUNS_CACHE_DIR: Path = RUNTIME_CACHE_ROOT / "legacy_runs"
 
 # ── External asset root (referenced in place, overridable) ───────────────────

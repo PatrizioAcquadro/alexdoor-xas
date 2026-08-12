@@ -89,11 +89,6 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="write splits/<version>.json and norm_stats.json into datasets/",
     )
-    parser.add_argument(
-        "--allow-missing-a4",
-        action="store_true",
-        help="compatibility escape hatch for legacy task/version dirs without A4",
-    )
     return parser.parse_args()
 
 
@@ -118,10 +113,7 @@ def verify_task(args: argparse.Namespace, task: str) -> list[str]:
     for space in ALL_ACTION_SPACES:
         dataset_dir = root / task / space / args.version
         if not dataset_dir.is_dir():
-            if task == paths.ALEX_V2_TASK and (
-                space != A4_OBJ_CENTRIC_CHUNK or not args.allow_missing_a4
-            ):
-                failures.append(f"{task}: missing required {space} dataset")
+            failures.append(f"{task}: missing required {space} dataset")
             continue
         try:
             if space == A4_OBJ_CENTRIC_CHUNK:
@@ -145,9 +137,6 @@ def verify_task(args: argparse.Namespace, task: str) -> list[str]:
     if not hdf5_datasets:
         failures.append(f"{task}: no HDF5 action-space datasets found")
         return failures
-    if a4_dataset is None and not args.allow_missing_a4:
-        failures.append(f"{task}: missing required {A4_OBJ_CENTRIC_CHUNK} dataset")
-
     # -- validation, per action space --------------------------------------
     for space, dataset in hdf5_datasets.items():
         result = validate_dataset(dataset)

@@ -493,6 +493,9 @@ def test_environment_gate_requires_official_ga_archive_identity() -> None:
         "6.0.1-rc.6+release.older",
         "6.0.1",
     )
+    assert check_env._cuda_failure(True) is None
+    assert "CUDA is not available" in check_env._cuda_failure(False)
+    assert "CUDA probe failed" in check_env._cuda_failure(False, RuntimeError("probe"))
 
 
 def test_missing_alex_v2_asset_root_is_a_required_failure(tmp_path) -> None:

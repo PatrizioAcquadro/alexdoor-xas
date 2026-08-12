@@ -28,7 +28,7 @@ The canonical experiment pages preserve these conclusions. The former compact ev
 
 ## Output boundary
 
-`outputs/` contains only `README.md`, `door_scene/D0.usda`-`D4.usda`, learned ACT/Diffusion runs under `door_push_alex_v2/{act,diffusion}/<run_id>/`, and optional standard W&B state under `wandb/`. Reusable datasets remain in `datasets/`; verifier evidence, calibration probes, scripted staging, arbitrary scenes, and inspection figures belong under `~/.cache/alexdoor-xas/`.
+`outputs/` contains only `README.md`, `door_scene/D0.usda`-`D4.usda`, learned ACT/Diffusion runs under `door_push_alex_v2/{act,diffusion}/<run_id>/`, and optional standard W&B state under `wandb/`. Reusable datasets remain in `datasets/`; verifier evidence, calibration probes, scripted staging, and arbitrary scenes belong under `~/.cache/alexdoor-xas/`.
 
 ## Retired workflows
 
