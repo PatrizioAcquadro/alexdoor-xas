@@ -1,118 +1,109 @@
 # AlexDoor-XAS
 
-AlexDoor-XAS compares action representations for contact-rich humanoid manipulation. Its first benchmark is simulated door pushing with the fixed-base IHMC Alex V2 torso in NVIDIA Isaac Sim and Isaac Lab.
+AlexDoor-XAS studies how action representation affects learning and execution in
+contact-rich humanoid manipulation. Its first benchmark is simulated door
+pushing with the fixed-base IHMC Alex V2 torso in NVIDIA Isaac Sim and Isaac
+Lab.
 
-## Current product
+The benchmark records matched episodes in four action representations (A1-A4),
+allowing the representation to change while the robot, task, and underlying
+experience remain fixed.
 
-The maintained path includes:
+## Current scope
 
-- the calibrated Alex V2 door benchmark and scripted baseline;
-- matched A1-A4 episode export, with learned-policy datasets for A2 and A3;
-- content-grouped splits and train-only normalization;
-- state-only ACT and Diffusion training and closed-loop evaluation;
-- A2/A3/A4 adapters, force checks, and execution safety controls;
-- optional vanilla W&B tracking for training and evaluation metrics.
+The maintained workflows are:
 
-The only operational path is:
+```text
+scripted Alex V2 door baseline -> matched v2_pose A1-A4 exports
+A2/A3 datasets -> ACT or Diffusion -> adapter-v1 -> closed-loop evaluation
+```
 
-`Door + Alex V2 -> v2_pose A1-A4 -> training -> adapter-v1 -> evaluation`
+- A1 is export-only.
+- A2 and A3 support learned policies.
+- A4 is recorded and adapter-executable but does not have a learned policy.
+- Policies are state-only, the benchmark is simulation-only, and no command
+  controls a physical Alex robot.
+- Phase 4 VLA work has not started.
 
-The completed Gilbreth pilot, cluster sweep, smoke-matrix aggregation, and unified-evaluation orchestration are no longer executable product workflows. Their scientific conclusions remain in the wiki; Git owns their source and artifact history.
+The completed Phase 3 evaluation was success-saturated and did not identify a
+winning policy, representation, or dataset size. See [Project
+Status](knowledge/wiki/status.md) for maintained capabilities, results, and
+current boundaries.
 
-The Phase 3 matrix was success-saturated and did not identify a winning policy, representation, or dataset size. One ACT-A3-N50 rollout remains `REVIEW_REQUIRED` after a reproducible force-watch event. Phase 4 VLA work has not started. See [Project Status](knowledge/wiki/status.md).
+## Requirements
 
-## Quick start
+- Python 3.11 or newer through the supported Isaac Lab runtime.
+- Isaac Sim 6.0.1 at `/home/pacquadr/isaacsim`.
+- Isaac Lab `release/3.0.0-beta2` at `/home/pacquadr/IsaacLab`.
+- The external Alex extension at
+  `/home/pacquadr/Desktop/Alex/source/ihmc_alex_isaaclab`.
+- The machine-local Alex V2, door, and hallway assets checked by
+  `scripts/check_env.py`. Use `ALEX_V2_ASSET_ROOT` and
+  `ALEXDOOR_ASSETS_ROOT` to override their default locations.
+
+Do not use bare system `python3` for Isaac code.
+
+## Installation and validation
 
 ```bash
 /home/pacquadr/IsaacLab/isaaclab.sh -p -m pip install -e \
   /home/pacquadr/Desktop/Alex/source/ihmc_alex_isaaclab
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p -m pip install -e .
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p -m pytest -q
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p -m pip install -e ".[dev]"
 PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/check_env.py
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p -m pytest -q
 ```
 
-The supported stack is stable Isaac Sim 6.0.1 plus the official Isaac Lab
-`release/3.0.0-beta2` checkout. Alex is a separately installed external
-extension; this repository keeps its fixed-base Door controller, manifests,
-calibration, scene, and contact logic. Do not use bare system `python3` for
-Isaac code.
+The complete simulator, dataset, adapter, and policy verification surface is
+listed in [Project Status](knowledge/wiki/status.md).
 
-W&B is disabled by default and remains optional. Install it only when tracking is needed:
+## Minimal workflow
 
-```bash
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p -m pip install -e ".[tracking]"
-```
-
-## Operational workflow
-
-Generate matched Alex V2 episodes and export A1-A4 under the active
-`v2_pose` dataset version:
+Generate matched Alex V2 episodes and A1-A4 exports:
 
 ```bash
 PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p \
   scripts/run_scripted_baseline.py --viz none --device cuda:0
 ```
 
-Train ACT or Diffusion on A2 or A3; both active configs default to
-`door_push_alex_v2/v2_pose` and GPU training:
+Train ACT on A2 or Diffusion on A3:
 
 ```bash
 PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/train_act.py --space A2_ee_delta
 PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/train_diffusion.py --space A3_obj_rel_ee_delta
 ```
 
-Set the official `WANDB_MODE=offline` or `WANDB_MODE=online` environment variable to enable
-tracking; `WANDB_PROJECT`, `WANDB_ENTITY`, `WANDB_NAME`, `WANDB_RUN_GROUP`,
-`WANDB_JOB_TYPE`, `WANDB_TAGS`, `WANDB_API_KEY`, `WANDB_RUN_ID`, and `WANDB_RESUME`
-are passed through to the SDK. Unset or `WANDB_MODE=disabled` performs no W&B import or
-write. Enabled runs use `outputs/wandb/` and log one aggregate per epoch plus one final
-training or evaluation aggregate; no artifacts or media are uploaded automatically.
-
-Training runs are allocated under `outputs/door_push_alex_v2/{act,diffusion}/<run_id>/`. Resume only an incomplete run with `--resume <run-directory>`. Evaluate a completed self-contained checkpoint with its frozen protocol:
+Evaluate a completed self-contained checkpoint:
 
 ```bash
 PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/eval_act.py --checkpoint outputs/door_push_alex_v2/act/<run_id>/checkpoints/best.pt --device cuda:0
 PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/eval_diffusion.py --checkpoint outputs/door_push_alex_v2/diffusion/<run_id>/checkpoints/best.pt --device cuda:0
 ```
 
-The default scene is `outputs/door_scene/D0.usda`; D0-D4 are the only scene layers allowed under `outputs/door_scene/`. See [the output contract](outputs/README.md).
-
-The supported verification surface contains exactly five gates:
-
-```bash
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_benchmark_scene.py --viz none --device cuda:0
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_scripted_baseline.py --viz none --device cuda:0
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_dataset_interface.py
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_adapters.py --viz none --device cuda:0
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_policy_rollout.py --policy act --viz none --device cuda:0 --checkpoint-a2 <a2.pt> --checkpoint-a3 <a3.pt>
-```
-
-Use `--policy diffusion` for Diffusion checkpoints; only that selection accepts `--sampler`, `--inference-steps`, and `--n-action-steps`. Verifier artifacts are written under `~/.cache/alexdoor-xas/verification/`.
-
-`scripts/author_alex_v2_door_calibration.py` is a mutating maintenance command,
-not a verifier, and is never part of routine validation.
-
 ## Repository layout
 
 ```text
-src/alexdoor_xas/   assets, environments, actions, adapters, data, policies, evaluation
-scripts/            supported verification, generation, inspection, training, evaluation
-configs/            four active calibration, policy, and scripted configs
+src/alexdoor_xas/   package code for the benchmark, data, policies, and evaluation
+scripts/            supported generation, training, evaluation, and verification entry points
+configs/            active calibration, scripted-baseline, and policy configuration
 tests/              deterministic regression and contract tests
 knowledge/          user-owned raw research and the official technical wiki
-datasets/           reusable local datasets (ignored except README)
-outputs/            canonical D0-D4 scenes, learned-policy runs, optional W&B state
+datasets/           reusable local episodes, splits, and normalization artifacts
+outputs/            canonical D0-D4 scenes and learned-policy runs
 ```
 
-Machine-local assets, datasets, learned checkpoints, videos, logs, W&B state, and runtime caches stay out of Git. Historical Phase 3 conclusions are preserved in the wiki and detailed removed artifacts remain available through Git history.
+Machine-local assets, datasets, checkpoints, videos, logs, and runtime caches
+remain outside Git.
 
 ## Documentation
 
-- [Technical wiki](knowledge/wiki/index.md)
+- [Technical Wiki](knowledge/wiki/index.md)
+- [Project Status](knowledge/wiki/status.md)
 - [System Architecture](knowledge/wiki/topics/system-architecture.md)
+- [Action Representations and Adapters](knowledge/wiki/topics/action-representations-and-adapters.md)
 - [Episode and Dataset Contracts](knowledge/wiki/topics/episode-and-dataset-contracts.md)
 - [Learned Policy Stack](knowledge/wiki/topics/learned-policy-stack.md)
 - [Alex V2 Benchmark](knowledge/wiki/topics/alex-v2-benchmark.md)
+- [Output Contract](outputs/README.md)
 
 ## License
 
