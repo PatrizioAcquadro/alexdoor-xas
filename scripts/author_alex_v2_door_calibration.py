@@ -1,10 +1,13 @@
 #!/usr/bin/env python
-"""Author the Alex V2 door calibration only after all seven live gates pass.
+"""Author the Alex V2 door calibration after its internal safety checks pass.
+
+This is a mutating maintenance command, not a supported verifier: on success it
+writes the production calibration. Do not run it as part of routine validation.
 
 Run through the official Isaac Lab launcher::
 
     PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p \
-        scripts/verify_alex_v2_door_baseline.py --viz none --device cpu
+        scripts/author_alex_v2_door_calibration.py --viz none --device cuda:0
 """
 
 from __future__ import annotations
@@ -26,10 +29,10 @@ if str(SRC_ROOT) not in sys.path:
 from isaaclab.app import AppLauncher  # noqa: E402
 
 EVIDENCE_DIR = Path("outputs/door_push_alex_v2/calibration/v0")
-EVIDENCE_PATH = EVIDENCE_DIR / "verify_alex_v2_door_baseline.evidence.json"
+EVIDENCE_PATH = EVIDENCE_DIR / "author_alex_v2_door_calibration.evidence.json"
 CANDIDATE_PATH = EVIDENCE_DIR / "alex_v2_door_calibration.candidate.json"
 
-parser = argparse.ArgumentParser(description="Alex V2 door calibration author/validation gate")
+parser = argparse.ArgumentParser(description="Author the Alex V2 door calibration")
 parser.add_argument("--fixed-seed", type=int, default=0)
 parser.add_argument("--max-ticks", type=int, default=600)
 parser.add_argument(
@@ -47,7 +50,7 @@ def _write_json(path: Path, payload: Any) -> None:
 
 
 evidence: dict[str, Any] = {
-    "schema_version": "alexdoor.verify_alex_v2_door_baseline.evidence.v1",
+    "schema_version": "alexdoor.author_alex_v2_door_calibration.evidence.v1",
     "status": "starting",
     "production_calibration_written": False,
     "candidate_path": str(CANDIDATE_PATH),
@@ -485,7 +488,7 @@ def main() -> int:
             }
         )
         traceback.print_exc()
-        print("FAIL: Alex V2 calibration/baseline gate failed.", flush=True)
+        print("FAIL: Alex V2 calibration authoring failed.", flush=True)
         return 1
     finally:
         if env is not None:

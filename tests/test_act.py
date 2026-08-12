@@ -312,6 +312,7 @@ def test_train_act_overfits_a_constant_mapping() -> None:
     assert len(history.epochs) == cfg.epochs
     first, last = history.epochs[0], history.epochs[-1]
     assert last.train_l1 < 0.3 * first.train_l1
+    assert last.train_l1 < 0.15
     assert last.val_l1 is not None and math.isfinite(last.val_l1)
     assert 0 <= history.best_epoch < cfg.epochs
     assert history.best_val_l1 <= last.val_l1 + 1e-12
@@ -554,6 +555,10 @@ def test_act_chunk_source_drives_a2_adapter_rollout() -> None:
     assert len(result.decisions_per_tick) == 20
     assert len(adapter.log.decisions) == 20
     assert math.isfinite(result.final_angle_rad)
+
+    chunk = policy.predict(np.zeros(OBS_DIM))
+    assert np.isfinite(chunk).all()
+    assert np.abs(chunk[:, :3]).max() < 0.04
 
 
 def test_act_chunk_source_rejects_presets_without_live_reader() -> None:

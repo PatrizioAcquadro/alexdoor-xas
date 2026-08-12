@@ -1,14 +1,11 @@
 #!/usr/bin/env python
 """Phase 3.0 gate: the dataset/model interface consumes Phase 2 episodes.
 
-For every exported dataset (task x action space) this verifies, without any
-policy code: episodes load and validate against the frozen schema; same-ID
-episodes match in provenance/content across action spaces; train/val/test splits
-generate deterministically; action + observation normalization stats compute,
-round-trip, and match the dataset fingerprint; seeded chunk batches sample
-reproducibly; and a dummy linear "policy" (numpy, plus a torch Linear when torch
-is importable) consumes a batch end-to-end — proving an ACT/Diffusion-style
-trainer can train on the data shapes.
+For the active Alex V2 dataset this verifies, without policy code: exact A1-A4
+availability and schemas; matched episode provenance/content; exact A2/A3
+door-frame conversion and non-identity for yawed poses; deterministic grouped
+splits; normalization round-trips; reproducible chunk batches; and end-to-end
+consumption by a dummy linear model.
 
 By default, split/stat artifacts are written to a temporary directory. Pass
 ``--write-artifacts`` to refresh official files under ``datasets/``. No Kit
@@ -22,12 +19,16 @@ from __future__ import annotations
 import argparse
 import sys
 import tempfile
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
 
 from alexdoor_xas import paths
+from alexdoor_xas.action.frames import door_frame_from_body_pose
 from alexdoor_xas.action.spaces import (
+    A2_EE_DELTA,
+    A3_OBJ_REL_EE_DELTA,
     A4_OBJ_CENTRIC_CHUNK,
     ALL_ACTION_SPACES,
 )
@@ -59,6 +60,10 @@ from alexdoor_xas.dataset.robot_asset import (
     validate_dataset_episode_robot_asset,
 )
 
+YAW_IDENTITY_TOL_RAD = 1e-9
+CONVERSION_TOL = 1e-9
+MIN_DISTINCT_DELTA = 1e-4
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -68,10 +73,14 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--task",
-        default=None,
-        help="verify only this task (default: discover every task with the requested version)",
+        default=paths.ALEX_V2_TASK,
+        help=f"task to verify (default: {paths.ALEX_V2_TASK})",
     )
-    parser.add_argument("--version", default="v0", help="dataset version to verify")
+    parser.add_argument(
+        "--version",
+        default=paths.ALEX_V2_DATASET_VERSION,
+        help=f"dataset version (default: {paths.ALEX_V2_DATASET_VERSION})",
+    )
     parser.add_argument("--horizon", type=int, default=20, help="action chunk horizon")
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--seed", type=int, default=0, help="split + batch seed")
@@ -109,6 +118,10 @@ def verify_task(args: argparse.Namespace, task: str) -> list[str]:
     for space in ALL_ACTION_SPACES:
         dataset_dir = root / task / space / args.version
         if not dataset_dir.is_dir():
+            if task == paths.ALEX_V2_TASK and (
+                space != A4_OBJ_CENTRIC_CHUNK or not args.allow_missing_a4
+            ):
+                failures.append(f"{task}: missing required {space} dataset")
             continue
         try:
             if space == A4_OBJ_CENTRIC_CHUNK:
@@ -171,6 +184,14 @@ def verify_task(args: argparse.Namespace, task: str) -> list[str]:
         print(f"  WARN [matched] {warning}")
     for error in matched.errors:
         failures.append(f"{task}: {error}")
+    if A2_EE_DELTA in hdf5_datasets and A3_OBJ_REL_EE_DELTA in hdf5_datasets:
+        failures.extend(
+            _verify_a2_a3_distinct(
+                task,
+                hdf5_datasets[A2_EE_DELTA],
+                hdf5_datasets[A3_OBJ_REL_EE_DELTA],
+            )
+        )
 
     # -- splits: shared per task, grouped + pose-stratified, deterministic --
     ids = hdf5_datasets[reference_space].episode_ids
@@ -211,6 +232,68 @@ def verify_task(args: argparse.Namespace, task: str) -> list[str]:
             failures.extend(_verify_space_consumption(args, task, space, dataset, splits))
         except Exception as exc:  # noqa: BLE001 - gate reports, never crashes
             failures.append(f"{task}/{space}: consumption check crashed: {exc}")
+    return failures
+
+
+def _verify_a2_a3_distinct(
+    task: str,
+    a2: EpisodeDataset,
+    a3: EpisodeDataset,
+) -> list[str]:
+    """Check the exact posed-door conversion ``A3 = R_door^T A2``."""
+    failures: list[str] = []
+    if sorted(a2.episode_ids) != sorted(a3.episode_ids):
+        return [f"{task}: A2 and A3 exports do not share episode ids"]
+
+    per_pose: dict[str, dict[str, float | int]] = defaultdict(
+        lambda: {"n": 0, "max_pair_diff": 0.0, "max_conversion_err": 0.0}
+    )
+    yawed_episodes = 0
+    for episode_id in a2.episode_ids:
+        rec2 = a2.by_id(episode_id)
+        rec3 = a3.by_id(episode_id)
+        frame = door_frame_from_body_pose(
+            np.asarray(rec2.extras["door_frame_pos_w"], dtype=np.float64),
+            np.asarray(rec2.extras["door_frame_quat_w_xyzw"], dtype=np.float64),
+        )
+        yaw = float(np.arctan2(frame.rot[1, 0], frame.rot[0, 0]))
+        pose_id = str(rec2.extras.get("door_pose_id"))
+        label = f"episode {episode_id[:8]} (pose {pose_id}, seed {rec2.meta['seed']})"
+        pair_diff = float(np.abs(rec2.actions - rec3.actions).max())
+        expected_a3 = np.concatenate(
+            [rec2.actions[:, :3] @ frame.rot, rec2.actions[:, 3:] @ frame.rot],
+            axis=1,
+        )
+        conversion_err = float(np.abs(rec3.actions - expected_a3).max())
+        stats = per_pose[pose_id]
+        stats["n"] += 1
+        stats["max_pair_diff"] = max(stats["max_pair_diff"], pair_diff)
+        stats["max_conversion_err"] = max(stats["max_conversion_err"], conversion_err)
+
+        if conversion_err > CONVERSION_TOL:
+            failures.append(f"{task}/{label}: A2/A3 conversion error {conversion_err:.3e}")
+        if abs(yaw) <= YAW_IDENTITY_TOL_RAD:
+            if pair_diff > CONVERSION_TOL:
+                failures.append(
+                    f"{task}/{label}: yaw=0 exports differ by {pair_diff:.3e}"
+                )
+        else:
+            yawed_episodes += 1
+            if pair_diff < MIN_DISTINCT_DELTA:
+                failures.append(
+                    f"{task}/{label}: yaw={yaw:+.4f} but A2/A3 max diff is only "
+                    f"{pair_diff:.3e}"
+                )
+
+    if task == paths.ALEX_V2_TASK and yawed_episodes == 0:
+        failures.append(f"{task}: A2/A3 gate found no yawed door episodes")
+    for pose_id in sorted(per_pose):
+        stats = per_pose[pose_id]
+        print(
+            f"  [{'ok ' if not failures else 'CHK'}] A2/A3 pose {pose_id}: "
+            f"episodes={stats['n']} max|A2-A3|={stats['max_pair_diff']:.6f} "
+            f"max_conversion_err={stats['max_conversion_err']:.2e}"
+        )
     return failures
 
 
