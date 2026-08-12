@@ -1,16 +1,21 @@
-"""Pure tests for metrics, failure labeling, and plot generation."""
+"""Pure metrics, report, sanity, and checkpoint-evaluation metadata contracts."""
 
 from __future__ import annotations
 
 import importlib.util
 import math
+from types import SimpleNamespace
 
 import pytest
 
 from alexdoor_xas.data_engine import DataEngineCfg, plan_episodes, run_episode
 from alexdoor_xas.eval import FAILURE_LABELS, aggregate_metrics, episode_metrics, label_episode
+from alexdoor_xas.policies.act.config import ActModelCfg
+from alexdoor_xas.policies.common.eval_metadata import checkpoint_metadata
 from alexdoor_xas.policies.scripted import DoorPushControllerCfg
 from conftest import FakeDoorPushEnv, FakeForceDoorPushEnv
+
+# --- test_eval ---
 
 
 def _episode(controller_cfg: DoorPushControllerCfg | None = None, seed: int = 0):
@@ -57,9 +62,7 @@ def test_force_metrics_details_and_aggregate_block() -> None:
     assert m["mean_contact_force_n"] <= m["p95_contact_force_n"] <= m["max_contact_force_n"]
     assert 0.0 <= m["first_contact_t_s"] <= m["max_force_t_s"]
     assert m["max_force_phase"] in m["phase_ticks"]
-    assert m["contact_force_impulse_ns"] == pytest.approx(
-        sum(sensed) * episode.meta.control_dt
-    )
+    assert m["contact_force_impulse_ns"] == pytest.approx(sum(sensed) * episode.meta.control_dt)
 
     # The force peaks while the arm is actually driving the door.
     assert m["max_force_phase"] in ("contact", "push", "hold")
@@ -92,16 +95,37 @@ def test_label_episode_success_is_none() -> None:
 @pytest.mark.parametrize(
     ("kwargs", "expected"),
     [
-        (dict(final_angle_rad=float("nan"), controller_done=False, timed_out=False,
-              last_phase="push"), "non_finite_state"),
-        (dict(final_angle_rad=0.1, controller_done=False, timed_out=True,
-              last_phase="contact"), "phase_timeout_contact"),
-        (dict(final_angle_rad=0.1, controller_done=False, timed_out=False,
-              last_phase="push"), "env_truncated_before_completion"),
-        (dict(final_angle_rad=0.1, controller_done=True, timed_out=False,
-              last_phase="done"), "insufficient_final_angle"),
-        (dict(final_angle_rad=0.2, controller_done=False, timed_out=False,
-              last_phase="push", notes="env.step failed: NaN"), "non_finite_state"),
+        (
+            dict(
+                final_angle_rad=float("nan"),
+                controller_done=False,
+                timed_out=False,
+                last_phase="push",
+            ),
+            "non_finite_state",
+        ),
+        (
+            dict(final_angle_rad=0.1, controller_done=False, timed_out=True, last_phase="contact"),
+            "phase_timeout_contact",
+        ),
+        (
+            dict(final_angle_rad=0.1, controller_done=False, timed_out=False, last_phase="push"),
+            "env_truncated_before_completion",
+        ),
+        (
+            dict(final_angle_rad=0.1, controller_done=True, timed_out=False, last_phase="done"),
+            "insufficient_final_angle",
+        ),
+        (
+            dict(
+                final_angle_rad=0.2,
+                controller_done=False,
+                timed_out=False,
+                last_phase="push",
+                notes="env.step failed: NaN",
+            ),
+            "non_finite_state",
+        ),
     ],
 )
 def test_label_episode_failure_cases(kwargs, expected) -> None:
@@ -294,14 +318,10 @@ def test_sanity_checks_pass_on_clean_episode_and_catch_bad_data() -> None:
     assert evidence["one_tick_over_limit"] is True
     assert evidence["sustained_over_limit"] is False
     assert evidence["peak"]["causal_action_tick"] == 2
-    assert evidence["peak"]["causal_action_phase"] == episode.steps[2].safety[
-        "controller_phase"
-    ]
+    assert evidence["peak"]["causal_action_phase"] == episode.steps[2].safety["controller_phase"]
 
     # The same threshold is a hard admission limit when a dataset/gate caller opts in.
-    result = check_alex_episode(
-        with_step(episode, 3, contact=spike_contact), force_error_n=200.0
-    )
+    result = check_alex_episode(with_step(episode, 3, contact=spike_contact), force_error_n=200.0)
     assert not result.ok
     assert any("exceeded the 200 N force admission limit" in error for error in result.errors)
 
@@ -377,3 +397,38 @@ def test_force_admission_accepts_exact_limit_and_preserves_lower_warning() -> No
     assert evidence["max_force_n"] == 200.0
     assert evidence["force_admission_passed"] is True
     assert evidence["ticks_over_limit"] == []
+
+
+# --- test_eval_metadata ---
+
+
+def test_checkpoint_metadata_is_self_contained_and_dataset_independent() -> None:
+    policy = SimpleNamespace(
+        checkpoint_format="alexdoor_xas.act.v2",
+        checkpoint_config={
+            "dataset": {
+                "task": "door_push_alex_v2",
+                "space": "A2_ee_delta",
+                "version": "v3_scale_master",
+                "view_id": "v3_scale_n50",
+                "obs_preset": "core_door_pose",
+            }
+        },
+        action_space="A2_ee_delta",
+        obs_preset="core_door_pose",
+        model=SimpleNamespace(
+            obs_dim=16,
+            action_dim=6,
+            cfg=ActModelCfg(chunk_size=8),
+        ),
+    )
+
+    result = checkpoint_metadata(policy, "act")
+
+    assert result["format"] == "alexdoor_xas.act.v2"
+    assert result["policy"] == "act"
+    assert result["dataset"]["view_id"] == "v3_scale_n50"
+    assert result["observation_dim"] == 16
+    assert result["action_dim"] == 6
+    assert result["model_config"]["chunk_size"] == 8
+    assert "dataset_provenance" not in result

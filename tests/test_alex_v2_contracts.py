@@ -1,9 +1,13 @@
-"""Pure acceptance tests for the additive Alex V2 artifact lineage."""
+"""Pure Alex V2 asset, manifest, readiness, and runtime contracts."""
 
 from __future__ import annotations
 
 import builtins
+import hashlib
+import importlib
+import importlib.util
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -25,12 +29,25 @@ from alexdoor_xas.assets.alex_v2_contract import (
     door_right_arm_pd_contract,
     validate_alex_v2_manifest,
 )
-from alexdoor_xas.assets.alex_v2_manifest import build_alex_v2_manifest
+from alexdoor_xas.assets.alex_v2_manifest import (
+    EXPECTED_ALEX_V2_URDF_SHA256,
+    EXPECTED_COLLISION_RECORD_COUNT,
+    AlexV2ManifestError,
+    build_alex_v2_manifest,
+)
+from alexdoor_xas.calibration.alex_v2_door import AlexV2DoorCalibration
 from alexdoor_xas.dataset.robot_asset import (
     dataset_robot_asset_payload,
     load_dataset_robot_asset,
 )
+from alexdoor_xas.envs.door_task.alex_v2_runtime import (
+    ALEX_V2_PRIM_PATH,
+    AlexV2RuntimeContractError,
+    inject_alex_v2_runtime_cfg,
+)
 from alexdoor_xas.recording import EpisodeMeta
+
+# --- test_alex_v2_infrastructure ---
 
 
 def _manifest() -> dict:
@@ -68,9 +85,7 @@ def test_manifest_freezes_all_29_runtime_joint_names_and_order() -> None:
 
 def test_manifest_rejects_nested_disagreement_and_rehashed_extra_inputs() -> None:
     forged_collision = _manifest()
-    forged_collision["collision_profile"]["links"]["RIGHT_GRIPPER_Z_LINK"][0][
-        "shape"
-    ] = "sphere"
+    forged_collision["collision_profile"]["links"]["RIGHT_GRIPPER_Z_LINK"][0]["shape"] = "sphere"
     with pytest.raises(AlexV2ContractError, match="pinned URDF-derived manifest"):
         validate_alex_v2_manifest(forged_collision)
 
@@ -137,9 +152,7 @@ def test_fixed_base_runtime_has_a_distinct_verified_identity() -> None:
         validate_alex_v2_manifest(forged_scale)
 
     forged_gain = derive_fixed_base_door_manifest(shared)
-    forged_gain["runtime_variant"]["right_arm_pd"]["ordered_gains"][3][
-        "damping"
-    ] = 39.0
+    forged_gain["runtime_variant"]["right_arm_pd"]["ordered_gains"][3]["damping"] = 39.0
     with pytest.raises(AlexV2ContractError, match="canonical static-asset variant"):
         validate_alex_v2_manifest(forged_gain)
 
@@ -249,16 +262,12 @@ def test_v2_loader_applies_production_damping_once_and_keeps_self_collision(
         )
     }
     right_arm = loaded.actuators[DOOR_RIGHT_ARM_ACTUATOR_NAME]
-    assert tuple(right_arm.joint_names_expr) == tuple(
-        item[0] for item in DOOR_RIGHT_ARM_PD_GAINS
-    )
+    assert tuple(right_arm.joint_names_expr) == tuple(item[0] for item in DOOR_RIGHT_ARM_PD_GAINS)
     assert right_arm.stiffness == {
-        joint_name: stiffness
-        for joint_name, stiffness, _damping in DOOR_RIGHT_ARM_PD_GAINS
+        joint_name: stiffness for joint_name, stiffness, _damping in DOOR_RIGHT_ARM_PD_GAINS
     }
     assert right_arm.damping == {
-        joint_name: damping
-        for joint_name, _stiffness, damping in DOOR_RIGHT_ARM_PD_GAINS
+        joint_name: damping for joint_name, _stiffness, damping in DOOR_RIGHT_ARM_PD_GAINS
     }
     assert tuple(right_arm.velocity_limit_sim) == tuple(right_arm.joint_names_expr)
     assert tuple(right_arm.effort_limit_sim) == tuple(right_arm.joint_names_expr)
@@ -285,9 +294,7 @@ def test_v2_loader_rejects_disabled_self_collision_or_scalar_damping(
         spawn=SimpleNamespace(
             asset_path="",
             self_collision=spawn_self_collision,
-            articulation_props=SimpleNamespace(
-                enabled_self_collisions=root_self_collision
-            ),
+            articulation_props=SimpleNamespace(enabled_self_collisions=root_self_collision),
         ),
         actuators={
             "legs": SimpleNamespace(damping=damping),
@@ -358,9 +365,7 @@ def test_checkpoint_runtime_gate_fails_closed_and_labels_explicit_transfer() -> 
     with pytest.raises(AlexV2ContractError, match="explicit cross-model evaluation flag"):
         assert_checkpoint_runtime_compatible(None, runtime)
     assert (
-        assert_checkpoint_runtime_compatible(
-            None, runtime, allow_cross_model_evaluation=True
-        )
+        assert_checkpoint_runtime_compatible(None, runtime, allow_cross_model_evaluation=True)
         == "v1_to_v2_transfer"
     )
 
@@ -382,3 +387,264 @@ def test_episode_meta_is_backward_compatible_but_can_carry_asset_identity() -> N
     assert EpisodeMeta(**base).robot_asset_id == ""
     enriched = EpisodeMeta(**base, robot_asset_id="v2", robot_asset_sha256="c" * 64)
     assert enriched.to_dict()["robot_asset_sha256"] == "c" * 64
+
+
+# --- test_alex_v2_manifest ---
+
+
+def test_builder_derives_identity_joints_and_primitive_collisions() -> None:
+    manifest = build_alex_v2_manifest()
+
+    assert hashlib.sha256(paths.ALEX_V2_URDF.read_bytes()).hexdigest() == (
+        EXPECTED_ALEX_V2_URDF_SHA256
+    )
+    assert manifest["urdf_sha256"] == EXPECTED_ALEX_V2_URDF_SHA256
+    assert manifest["robot_asset_sha256"] == EXPECTED_ALEX_V2_URDF_SHA256
+    assert manifest["movable_joint_count"] == 29
+    assert len(manifest["movable_joints"]) == len(set(manifest["movable_joints"]))
+    assert set(manifest["movable_joints"]) == set(EXPECTED_RUNTIME_JOINTS)
+
+    links = manifest["collision_profile"]["links"]
+    assert len(links) == 19
+    assert sum(len(records) for records in links.values()) == EXPECTED_COLLISION_RECORD_COUNT
+    right_gripper = links["RIGHT_GRIPPER_Z_LINK"]
+    assert [record["name"] for record in right_gripper] == [
+        "right_gripper_z_collision",
+        "right_fist_collision",
+        "right_finger_collision",
+        "right_thumb_collision",
+    ]
+    assert {record["shape"] for records in links.values() for record in records} == {
+        "box",
+        "capsule",
+        "cylinder",
+        "sphere",
+    }
+
+
+def test_builder_rejects_any_urdf_identity_drift(tmp_path) -> None:
+    changed = tmp_path / "alex_v2.urdf"
+    changed.write_bytes(paths.ALEX_V2_URDF.read_bytes() + b"\n")
+
+    with pytest.raises(AlexV2ManifestError, match="identity differs"):
+        build_alex_v2_manifest(changed)
+
+
+# --- test_paths ---
+
+
+def test_repo_root_resolves() -> None:
+    assert paths.REPO_ROOT.is_dir()
+    assert (paths.REPO_ROOT / "pyproject.toml").is_file()
+
+
+def test_required_assets_exist() -> None:
+    missing = [
+        name for name, path, required in paths.iter_assets() if required and not path.exists()
+    ]
+    assert not missing, f"missing required assets: {missing}"
+
+
+def test_alex_v2_path_surface_uses_the_static_standard_asset() -> None:
+    assert paths.ALEX_V2_URDF == paths.ALEX_V2_ASSET_ROOT / "urdf" / "alex_v2.urdf"
+    assert paths.iter_alex_v2_assets() == [
+        ("Alex V2 asset root", paths.ALEX_V2_ASSET_ROOT, True),
+        ("Alex V2 URDF", paths.ALEX_V2_URDF, True),
+    ]
+    assert not hasattr(paths, "ALEX_V2_BRIDGE_ROOT")
+    assert not hasattr(paths, "IHMC_ALEX_SDK_ROOT")
+
+
+def test_assets_module_imports_without_isaac() -> None:
+    mod = importlib.import_module("alexdoor_xas.assets")
+    assert hasattr(mod, "build_alex_v2_door_asset")
+    assert hasattr(mod, "load_alex_v2_articulation_cfg")
+
+
+def test_alex_v2_urdf_is_the_required_registered_asset() -> None:
+    registered = {path for _name, path, required in paths.iter_assets() if required}
+    assert paths.ALEX_V2_ASSET_ROOT in registered
+    assert paths.ALEX_V2_URDF in registered
+    assert Path(paths.ALEX_V2_URDF).is_file()
+
+
+# --- test_check_env ---
+
+
+def _check_env_module():
+    script = Path(__file__).parents[1] / "scripts" / "check_env.py"
+    spec = importlib.util.spec_from_file_location("alexdoor_check_env", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_alex_v2_factory_check_fails_loudly_with_branch_action(tmp_path) -> None:
+    check_env = _check_env_module()
+
+    failure = check_env._alex_v2_module_failure(
+        find_spec=lambda _name: None,
+        module_file=tmp_path / "missing" / "alex.py",
+    )
+
+    assert "isaaclab_assets.robots.alex is not importable" in failure
+    assert "pacquadr/alex-v2-asset" in failure
+    assert "isaaclab.sh" in failure
+
+
+def test_alex_v2_factory_check_accepts_discoverable_module(tmp_path) -> None:
+    check_env = _check_env_module()
+
+    failure = check_env._alex_v2_module_failure(
+        find_spec=lambda _name: SimpleNamespace(origin="alex.py"),
+        module_file=tmp_path / "unused.py",
+    )
+
+    assert failure is None
+
+
+def test_missing_alex_v2_asset_root_is_a_required_failure(tmp_path) -> None:
+    check_env = _check_env_module()
+    missing_root = tmp_path / "Desktop" / "Alex"
+
+    missing = check_env._missing_required_assets([("Alex V2 asset root", missing_root, True)])
+
+    assert missing == ["Alex V2 asset root"]
+
+
+# --- test_alex_v2_executor_contract ---
+
+_TASK_DIR = Path(__file__).parents[1] / "src" / "alexdoor_xas" / "envs" / "door_task"
+
+
+class _FakeRobotCfg:
+    def __init__(self) -> None:
+        self.prim_path = "/World/Wrong"
+        self.init_state = SimpleNamespace(pos=None, rot=None, joint_pos=None)
+
+    def replace(self, *, prim_path: str):
+        self.prim_path = prim_path
+        return self
+
+
+def _calibration() -> AlexV2DoorCalibration:
+    payload = {
+        "status": "validated",
+        "base_pose": {
+            "position_m": [-0.55, -0.25, 0.95],
+            "orientation_xyzw": [0.0, 0.0, 1.0, 0.0],
+        },
+        "ready_joint_pos": {
+            "RIGHT_SHOULDER_Y": 0.2,
+            "RIGHT_SHOULDER_X": -0.2,
+            "RIGHT_SHOULDER_Z": 0.1,
+            "RIGHT_ELBOW_Y": -0.8,
+            "RIGHT_WRIST_Z": 0.05,
+            "RIGHT_WRIST_X": 0.1,
+        },
+        # Synthetic test bounds only. Production values require a measured V2 arc.
+        "reach_shell_m": [0.2, 0.8],
+        "tool_frame": {
+            "translation_m": [0.11, 0.0, -0.06],
+            "orientation_xyzw": [0.0, 0.0, 0.0, 1.0],
+        },
+        "controller": {"contact_force_threshold_n": 2.5},
+        "randomization_bounds": {},
+    }
+    return AlexV2DoorCalibration(Path("candidate.json"), payload)
+
+
+def test_v2_runtime_injects_dedicated_asset_and_calibrated_init_state() -> None:
+    env_cfg = SimpleNamespace(robot=None, contact_force_threshold_n=0.0)
+    robot_cfg = _FakeRobotCfg()
+
+    result = inject_alex_v2_runtime_cfg(env_cfg, robot_cfg, _calibration())
+
+    assert result is env_cfg
+    assert env_cfg.robot is robot_cfg
+    assert robot_cfg.prim_path == ALEX_V2_PRIM_PATH
+    assert robot_cfg.init_state.pos == (-0.55, -0.25, 0.95)
+    assert robot_cfg.init_state.rot == (0.0, 0.0, 1.0, 0.0)
+    assert env_cfg.contact_force_threshold_n == 2.5
+    ready = robot_cfg.init_state.joint_pos
+    assert len(ready) == 7
+    assert ready["RIGHT_ELBOW_Y"] == -0.8
+    catch_all = next(name for name in ready if name.startswith("(?!(?:"))
+    assert ready[catch_all] == 0.0
+    assert all(name in catch_all for name in _calibration().ready_joint_pos)
+
+
+def test_v2_runtime_refuses_missing_dedicated_articulation_cfg() -> None:
+    with pytest.raises(AlexV2RuntimeContractError, match="dedicated"):
+        inject_alex_v2_runtime_cfg(SimpleNamespace(), None, _calibration())
+
+
+def test_executor_source_hooks_offset_pose_point_jacobian_and_exact_gpu_force() -> None:
+    source = (_TASK_DIR / "door_push_alex_v2_executor.py").read_text(encoding="utf-8")
+
+    assert "class DoorPushAlexV2Executor(DoorPushRobotEnv)" in source
+    assert "compose_offset_pose_xyzw(" in source
+    assert "link_jacobian_to_point(" in source
+    assert "def _ee_pose_w(" in source
+    assert "def _solve_arm_ik(" in source
+    assert "get_raw_contact_data" in source
+    assert "sum_actor_contact_forces" in source
+    assert "get_other_actor_paths_from_ids" in source
+    assert "net_forces_w" not in source
+    assert "def robot_asset_provenance(" in source
+    assert "def alex_v2_calibration(" in source
+    assert "def ee_contact_prim_path(" in source
+    assert "def shoulder_position_world_m(" in source
+    assert "def point_jacobian_w(" in source
+    assert "point_jacobian = self.point_jacobian_w()" in source
+    assert "load_alex_v2_articulation_cfg(fix_base=True)" in source
+    assert source.index("load_alex_v2_articulation_cfg(fix_base=True)") < source.index(
+        "super().__init__(cfg, render_mode, **kwargs)"
+    )
+
+
+def test_v2_cfg_requires_gpu_raw_contacts_without_physx_filter_patterns() -> None:
+    source = (_TASK_DIR / "door_push_alex_v2_env_cfg.py").read_text(encoding="utf-8")
+    base_cfg_source = (_TASK_DIR / "door_push_robot_env_cfg.py").read_text(encoding="utf-8")
+
+    assert "filter_prim_paths_expr=[]" in source
+    assert 'DOOR_PANEL_BODY_PRIM_PATH = f"{DOOR_TASK_ARTICULATION_PRIM_PATH}/Door"' in (
+        base_cfg_source
+    )
+    assert "Cylinder_001" not in base_cfg_source
+    assert "ContactSensorCfg(" in source
+    assert "class DoorPushAlexV2EnvCfg(DoorPushRobotEnvCfg)" in source
+
+
+def test_robot_base_has_no_asset_builder_or_robot_specific_ee_constants() -> None:
+    env_source = (_TASK_DIR / "door_push_robot_env.py").read_text(encoding="utf-8")
+    cfg_source = (_TASK_DIR / "door_push_robot_env_cfg.py").read_text(encoding="utf-8")
+
+    assert "build_alex_articulation_cfg" not in env_source + cfg_source
+    assert "ALEX_EE" not in env_source + cfg_source
+    assert "requires an injected robot articulation config" in env_source
+
+
+def test_candidate_env_is_explicitly_candidate_only_and_not_exported_or_registered() -> None:
+    candidate_source = (_TASK_DIR / "door_push_alex_v2_calibration_env.py").read_text(
+        encoding="utf-8"
+    )
+    registration_source = (_TASK_DIR / "__init__.py").read_text(encoding="utf-8")
+
+    assert "candidate_only = True" in candidate_source
+    assert "gym_registration_allowed = False" in candidate_source
+    assert "__all__: list[str] = []" in candidate_source
+    assert "door_push_alex_v2_calibration_env" not in registration_source
+    assert "load_candidate_alex_v2_door_calibration" not in (
+        _TASK_DIR / "door_push_alex_v2_env.py"
+    ).read_text(encoding="utf-8")
+
+
+def test_production_env_runs_shared_executor_after_full_validation() -> None:
+    source = (_TASK_DIR / "door_push_alex_v2_env.py").read_text(encoding="utf-8")
+
+    assert "class DoorPushAlexV2Env(DoorPushAlexV2Executor)" in source
+    assert "load_alex_v2_door_calibration(" in source
+    assert "super().__init__(" in source
+    assert "executor has not passed" not in source
