@@ -5,13 +5,14 @@ The selected policy and ``DoorPushAlexV2Env`` run on the same ``--device``.
 For A2 (required) and A3 (optional), the gate executes one fixed and one
 randomized rollout, requires complete adapter logs, and requires the fixed
 rollout to pass the door-angle success threshold. Artifacts are written to
-``outputs/verify_policy_rollout/<policy>/gate/``.
+``~/.cache/alexdoor-xas/verification/verify_policy_rollout/<policy>/gate/``.
 
 Example::
 
     PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p \
         scripts/verify_policy_rollout.py --policy act --viz none --device cuda:0 \
-        --checkpoint-a2 outputs/.../best.pt --checkpoint-a3 outputs/.../best.pt
+        --checkpoint-a2 outputs/door_push_alex_v2/act/<run_id>/checkpoints/best.pt \
+        --checkpoint-a3 outputs/door_push_alex_v2/act/<run_id>/checkpoints/best.pt
 """
 
 from __future__ import annotations
@@ -226,9 +227,7 @@ def _check_checkpoint(env, label: str, checkpoint: str, out_dir) -> None:
     bounds = alex_v2_variation_bounds(env.alex_v2_calibration())
     item = plan_episodes(0, 1, args.seed + 1, bounds)[0]
     randomized = _rollout(env, policy, item.seed, item.variation)
-    (out_dir / f"{label}_randomized.json").write_text(
-        json.dumps(randomized, indent=2) + "\n"
-    )
+    (out_dir / f"{label}_randomized.json").write_text(json.dumps(randomized, indent=2) + "\n")
     print(
         f"[{label}] fixed={math.degrees(fixed['final_angle_rad']):.1f} deg/"
         f"{fixed['n_ticks']} ticks a/c/r={fixed['n_accepted']}/{fixed['n_corrected']}/"
@@ -243,7 +242,7 @@ def main() -> int:
     rc = 0
     env = None
     try:
-        out_dir = paths.OUTPUTS_DIR / "verify_policy_rollout" / args.policy / "gate"
+        out_dir = paths.VERIFICATION_CACHE_DIR / "verify_policy_rollout" / args.policy / "gate"
         out_dir.mkdir(parents=True, exist_ok=True)
         env = _make_env()
         _check_checkpoint(env, "a2", args.checkpoint_a2, out_dir)

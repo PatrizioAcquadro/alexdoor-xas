@@ -42,7 +42,7 @@ class WandbConfig:
     name: str | None = None
     job_type: str | None = None
     tags: tuple[str, ...] = ()
-    dir: Path = paths.OUTPUTS_DIR / "wandb"
+    dir: Path = paths.WANDB_CACHE_DIR
     log_artifacts: bool = False
 
     @classmethod
@@ -68,9 +68,7 @@ class WandbConfig:
 
     def validate(self) -> None:
         if self.mode not in VALID_MODES:
-            raise WandbConfigError(
-                f"mode must be one of {sorted(VALID_MODES)}, got {self.mode!r}"
-            )
+            raise WandbConfigError(f"mode must be one of {sorted(VALID_MODES)}, got {self.mode!r}")
         _required_str("project", self.project)
         for name, value in (
             ("entity", self.entity),
@@ -250,7 +248,7 @@ def sanitize_wandb_config(value: Any) -> Any:
 
 
 def _prepare_wandb_local_dirs(root: Path) -> None:
-    """Keep W&B local state under the configured ignored output directory."""
+    """Keep W&B local state under the configured runtime cache directory."""
 
     root.mkdir(parents=True, exist_ok=True)
     local_dirs = {
@@ -271,7 +269,7 @@ def _import_wandb():
     except ImportError as error:
         raise RuntimeError(
             "W&B tracking requires the optional dependency: "
-            "`/home/pacquadr/IsaacLab/isaaclab.sh -p -m pip install -e \".[tracking]\"`"
+            '`/home/pacquadr/IsaacLab/isaaclab.sh -p -m pip install -e ".[tracking]"`'
         ) from error
 
 

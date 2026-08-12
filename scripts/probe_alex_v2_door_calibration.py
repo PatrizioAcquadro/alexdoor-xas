@@ -99,7 +99,10 @@ parser.add_argument(
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 if args.out is None:
-    args.out = Path(f"outputs/door_push_alex_v2/calibration/v0/{args.stage}_probe.json")
+    cache_root = Path(
+        os.environ.get("ALEXDOOR_CACHE_ROOT", str(Path.home() / ".cache" / "alexdoor-xas"))
+    ).expanduser()
+    args.out = cache_root / "calibration" / "v0" / f"{args.stage}_probe.json"
 
 app_launcher = AppLauncher(args)
 simulation_app = app_launcher.app
@@ -141,9 +144,7 @@ def _apply_candidate_settings(cfg) -> dict:
             "each named profile already contains exact final right-arm gains"
         )
     if args.right_arm_pd_profile != "none" and args.disable_self_collision:
-        raise ValueError(
-            "named right-arm PD candidates require self-collision to remain enabled"
-        )
+        raise ValueError("named right-arm PD candidates require self-collision to remain enabled")
     self_collision_enabled = not args.disable_self_collision
     cfg.spawn.self_collision = self_collision_enabled
     cfg.spawn.articulation_props.enabled_self_collisions = self_collision_enabled
@@ -160,9 +161,7 @@ def _apply_candidate_settings(cfg) -> dict:
         }
         scaled_damping[actuator_name] = dict(actuator_cfg.damping)
 
-    selection = apply_right_arm_pd_profile_selection(
-        cfg, profile_name=args.right_arm_pd_profile
-    )
+    selection = apply_right_arm_pd_profile_selection(cfg, profile_name=args.right_arm_pd_profile)
 
     return {
         "scope": "calibration_probe_only",
@@ -227,9 +226,7 @@ def main() -> int:
     try:
         minimum_steps = grace_steps + (RESET_MEASURED_STEPS if grace_steps else 1)
         if args.steps < minimum_steps:
-            raise ValueError(
-                f"--steps must be at least {minimum_steps} for stage {args.stage!r}"
-            )
+            raise ValueError(f"--steps must be at least {minimum_steps} for stage {args.stage!r}")
         asset, asset_ref = build_alex_v2_door_asset()
         cfg = load_alex_v2_articulation_cfg(fix_base=True).replace(
             prim_path="/World/AlexV2CalibrationProbe"
@@ -242,9 +239,7 @@ def main() -> int:
         simulation.reset()
         robot.reset()
         if args.stage == "pose":
-            robot.set_joint_position_target_index(
-                target=_tensor(robot.data.default_joint_pos)
-            )
+            robot.set_joint_position_target_index(target=_tensor(robot.data.default_joint_pos))
         actual_joints = tuple(robot.joint_names)
         if actual_joints != EXPECTED_RUNTIME_JOINTS:
             raise RuntimeError("runtime joint order differs from the 29-name V2 manifest contract")
@@ -332,10 +327,7 @@ def main() -> int:
                 grace_peak_joint_name = step_joint_name
                 grace_peak_joint_step = step_number
                 grace_peak_environment_index = step_environment_index
-            elif (
-                step_number > grace_steps
-                and step_peak_velocity > measured_peak_velocity
-            ):
+            elif step_number > grace_steps and step_peak_velocity > measured_peak_velocity:
                 measured_peak_velocity = step_peak_velocity
                 measured_peak_joint_name = step_joint_name
                 measured_peak_joint_step = step_number
@@ -376,16 +368,15 @@ def main() -> int:
             )
         body_ids, _ = robot.find_bodies(RIGHT_GRIPPER_BODY_NAME)
         if len(body_ids) != 1:
-            raise RuntimeError(
-                f"{RIGHT_GRIPPER_BODY_NAME} did not resolve to exactly one body"
-            )
+            raise RuntimeError(f"{RIGHT_GRIPPER_BODY_NAME} did not resolve to exactly one body")
         body_id = body_ids[0]
         body_idx = body_id - 1
         link_positions_w = _tensor(robot.data.body_link_pos_w)[:, body_id]
         link_orientations_w_xyzw = _tensor(robot.data.body_link_quat_w)[:, body_id]
-        if not torch.isfinite(link_positions_w).all() or not torch.isfinite(
-            link_orientations_w_xyzw
-        ).all():
+        if (
+            not torch.isfinite(link_positions_w).all()
+            or not torch.isfinite(link_orientations_w_xyzw).all()
+        ):
             raise RuntimeError("Alex V2 gripper link pose is non-finite")
         jacobians = _tensor(robot.data.body_link_jacobian_w)
         jacobian = jacobians[:, body_idx]
@@ -395,10 +386,7 @@ def main() -> int:
         shared_diagnostics = {
             "gripper_link_pose_world": {
                 "position_m": link_positions_w[0].detach().cpu().tolist(),
-                "orientation_xyzw": link_orientations_w_xyzw[0]
-                .detach()
-                .cpu()
-                .tolist(),
+                "orientation_xyzw": link_orientations_w_xyzw[0].detach().cpu().tolist(),
             },
             "link_jacobian": {
                 "shape": list(jacobian.shape),
@@ -443,17 +431,13 @@ def main() -> int:
             )
             point_jacobian_finite = bool(torch.isfinite(point_jacobian).all())
             if not point_jacobian_finite or float(point_jacobian.abs().max()) <= 1e-9:
-                raise RuntimeError(
-                    "Alex V2 tool-point Jacobian is non-finite or identically zero"
-                )
+                raise RuntimeError("Alex V2 tool-point Jacobian is non-finite or identically zero")
             shoulder_ids, _ = robot.find_bodies(RIGHT_SHOULDER_BODY_NAME)
             if len(shoulder_ids) != 1:
                 raise RuntimeError(
                     f"{RIGHT_SHOULDER_BODY_NAME} did not resolve to exactly one body"
                 )
-            shoulder_position_w = _tensor(robot.data.body_link_pos_w)[
-                :, shoulder_ids[0]
-            ]
+            shoulder_position_w = _tensor(robot.data.body_link_pos_w)[:, shoulder_ids[0]]
             if not torch.isfinite(shoulder_position_w).all():
                 raise RuntimeError("Alex V2 shoulder position is non-finite")
             shoulder_to_tool_reach = torch.linalg.vector_norm(
@@ -463,24 +447,13 @@ def main() -> int:
                 raise RuntimeError("Alex V2 shoulder-to-tool reach is non-finite")
             pose_diagnostics = {
                 "desired_contact_normal_world": list(POSE_CONTACT_NORMAL_WORLD),
-                "desired_contact_normal_link": desired_normal_link[0]
-                .detach()
-                .cpu()
-                .tolist(),
+                "desired_contact_normal_link": desired_normal_link[0].detach().cpu().tolist(),
                 "candidate_tool_world_pose": {
                     "position_m": tool_positions_w[0].detach().cpu().tolist(),
-                    "orientation_xyzw": tool_orientations_w_xyzw[0]
-                    .detach()
-                    .cpu()
-                    .tolist(),
+                    "orientation_xyzw": tool_orientations_w_xyzw[0].detach().cpu().tolist(),
                 },
-                "shoulder_position_world_m": shoulder_position_w[0]
-                .detach()
-                .cpu()
-                .tolist(),
-                "shoulder_to_tool_reach_m": float(
-                    shoulder_to_tool_reach[0].item()
-                ),
+                "shoulder_position_world_m": shoulder_position_w[0].detach().cpu().tolist(),
+                "shoulder_to_tool_reach_m": float(shoulder_to_tool_reach[0].item()),
                 "point_jacobian": {
                     "shape": list(point_jacobian.shape),
                     "finite": point_jacobian_finite,
@@ -488,9 +461,7 @@ def main() -> int:
                 },
             }
         else:
-            tool = derive_right_gripper_tool_frame(
-                asset.manifest, args.door_normal_link
-            )
+            tool = derive_right_gripper_tool_frame(asset.manifest, args.door_normal_link)
         evidence.update(
             {
                 "status": "passed",

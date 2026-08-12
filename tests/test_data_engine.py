@@ -65,7 +65,13 @@ def test_run_episode_succeeds_and_matches_schema() -> None:
     assert episode.extras["action_door_frame"].shape == (episode.n_steps, 6)
     chunk_phases = [chunk["phase"] for chunk in episode.extras["a4_chunks"]]
     assert chunk_phases == [
-        "approach", "align", "pre_contact", "contact", "push", "hold", "release",
+        "approach",
+        "align",
+        "pre_contact",
+        "contact",
+        "push",
+        "hold",
+        "release",
     ]
     step = episode.steps[0]
     assert set(step.obs_ref) >= {"door_angle_rad", "ee_pos_x_m"}
@@ -195,16 +201,12 @@ def test_a1_export_relabels_joint_target_deltas(tmp_path) -> None:
     # arm targets advance by TARGET_STEP_RAD per executed tick.
     arm = list(FakeForceDoorPushEnv().arm_joint_ids())
     held = [j for j in range(FakeForceDoorPushEnv.N_JOINTS) if j not in arm]
-    np.testing.assert_allclose(
-        actions[:, arm], FakeForceDoorPushEnv.TARGET_STEP_RAD, atol=1e-12
-    )
+    np.testing.assert_allclose(actions[:, arm], FakeForceDoorPushEnv.TARGET_STEP_RAD, atol=1e-12)
     np.testing.assert_allclose(actions[:, held], 0.0, atol=1e-12)
 
     targets = np.stack([step.proprio["joint_pos_target"] for step in a1.steps])
     expected = np.diff(
-        np.concatenate(
-            [targets, episode.extras["final_joint_pos_target"].reshape(1, -1)], axis=0
-        ),
+        np.concatenate([targets, episode.extras["final_joint_pos_target"].reshape(1, -1)], axis=0),
         axis=0,
     )
     np.testing.assert_allclose(actions, expected, atol=1e-12)
@@ -231,8 +233,9 @@ def test_traces_equal_covers_joint_and_contact_traces() -> None:
 
     def with_mutated_step(episode, index, **changes):
         mutated = dataclasses.replace(episode.steps[index], **changes)
-        clone = type(episode)(meta=episode.meta, steps=list(episode.steps),
-                              extras=dict(episode.extras))
+        clone = type(episode)(
+            meta=episode.meta, steps=list(episode.steps), extras=dict(episode.extras)
+        )
         clone.steps[index] = mutated
         clone.outcome = episode.outcome
         return clone
@@ -269,7 +272,7 @@ def test_run_baseline_same_run_id_is_idempotent(tmp_path) -> None:
     def run_once():
         return run_baseline(
             FakeDoorPushEnv(),
-            outputs_root=tmp_path / "outputs",
+            outputs_root=tmp_path / "cache",
             datasets_root=tmp_path / "datasets",
             experiment="idempotence",
             run_id="run",
@@ -395,7 +398,7 @@ def test_run_baseline_writes_sanity_summary_and_respects_no_export(tmp_path) -> 
 
     artifacts = run_baseline(
         FakeForceDoorPushEnv(),
-        outputs_root=tmp_path / "outputs",
+        outputs_root=tmp_path / "cache",
         datasets_root=tmp_path / "datasets",
         experiment="sanity",
         run_id="run",
@@ -432,7 +435,7 @@ def test_run_baseline_aborts_loudly_before_export_on_sanity_error(tmp_path) -> N
     with pytest.raises(RuntimeError, match="sanity checks failed"):
         run_baseline(
             WindupEnv(),
-            outputs_root=tmp_path / "outputs",
+            outputs_root=tmp_path / "cache",
             datasets_root=tmp_path / "datasets",
             experiment="sanity",
             run_id="bad",
@@ -442,7 +445,7 @@ def test_run_baseline_aborts_loudly_before_export_on_sanity_error(tmp_path) -> N
             engine_cfg=make_test_engine_cfg(),
         )
     # The summary is written for debugging, but nothing reached datasets/.
-    summary_path = tmp_path / "outputs" / "sanity" / "bad" / "metrics" / "sanity.json"
+    summary_path = tmp_path / "cache" / "sanity" / "bad" / "metrics" / "sanity.json"
     assert summary_path.exists()
     assert json.loads(summary_path.read_text())["n_episodes_with_errors"] == 1
     assert not (tmp_path / "datasets").exists()
@@ -461,7 +464,7 @@ def test_run_baseline_aborts_before_export_on_force_admission_error(tmp_path) ->
     with pytest.raises(RuntimeError, match="sanity checks failed"):
         run_baseline(
             ForceSpikeEnv(),
-            outputs_root=tmp_path / "outputs",
+            outputs_root=tmp_path / "cache",
             datasets_root=tmp_path / "datasets",
             experiment="force_gate",
             run_id="bad",
@@ -472,11 +475,9 @@ def test_run_baseline_aborts_before_export_on_force_admission_error(tmp_path) ->
             export=True,
         )
 
-    summary_path = tmp_path / "outputs/force_gate/bad/metrics/sanity.json"
+    summary_path = tmp_path / "cache/force_gate/bad/metrics/sanity.json"
     summary = json.loads(summary_path.read_text())
-    assert any(
-        "force admission limit" in error for error in summary["episodes"][0]["errors"]
-    )
+    assert any("force admission limit" in error for error in summary["episodes"][0]["errors"])
     assert not (tmp_path / "datasets").exists()
 
 
@@ -501,7 +502,7 @@ def test_run_baseline_aborts_before_export_on_negative_force(tmp_path, monkeypat
     with pytest.raises(RuntimeError, match="sanity checks failed"):
         run_baseline(
             FakeForceDoorPushEnv(),
-            outputs_root=tmp_path / "outputs",
+            outputs_root=tmp_path / "cache",
             datasets_root=tmp_path / "datasets",
             experiment="negative_force_gate",
             run_id="bad",
@@ -512,7 +513,7 @@ def test_run_baseline_aborts_before_export_on_negative_force(tmp_path, monkeypat
             export=True,
         )
 
-    summary_path = tmp_path / "outputs/negative_force_gate/bad/metrics/sanity.json"
+    summary_path = tmp_path / "cache/negative_force_gate/bad/metrics/sanity.json"
     summary = json.loads(summary_path.read_text())
     entry = summary["episodes"][0]
     assert any("force magnitude must be non-negative" in error for error in entry["errors"])
@@ -531,7 +532,7 @@ def test_run_baseline_refuses_direct_export_from_posed_runs(tmp_path) -> None:
     with pytest.raises(RuntimeError, match="non-default door pose"):
         run_baseline(
             FakeForceDoorPushEnv(),
-            outputs_root=tmp_path / "outputs",
+            outputs_root=tmp_path / "cache",
             datasets_root=tmp_path / "datasets",
             experiment="pose_guard",
             run_id="bad",
@@ -544,7 +545,7 @@ def test_run_baseline_refuses_direct_export_from_posed_runs(tmp_path) -> None:
     # export=False stays allowed for posed runs (the multi-pose flow).
     artifacts = run_baseline(
         FakeForceDoorPushEnv(),
-        outputs_root=tmp_path / "outputs",
+        outputs_root=tmp_path / "cache",
         datasets_root=tmp_path / "datasets",
         experiment="pose_guard",
         run_id="ok",

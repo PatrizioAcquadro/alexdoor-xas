@@ -3,7 +3,7 @@
 
 Rolls out the deterministic scripted controller in the door-push env, records
 episodes to the schema, exports A1/A2/A3/A4 datasets under ``datasets/``, and
-writes metrics/plots/videos/report under ``outputs/<experiment>/<run_id>/``.
+writes temporary run artifacts under ``~/.cache/alexdoor-xas/scripted_runs/<experiment>/<run_id>/``.
 Every run uses the calibrated fixed-base Alex V2 humanoid and the frozen
 ``door_push_alex_v2`` task identity.
 
@@ -48,8 +48,7 @@ parser.add_argument(
     "--candidate-pool",
     action="store_true",
     help=(
-        "Preserve failed candidate evidence for later fail-closed selection; "
-        "requires --no-export."
+        "Preserve failed candidate evidence for later fail-closed selection; requires --no-export."
     ),
 )
 parser.add_argument("--episodes", type=int, default=None, help="Fixed-start episodes.")
@@ -59,7 +58,7 @@ parser.add_argument(
     "--experiment",
     type=str,
     default=None,
-    help="outputs/<experiment>/ name (default: scripted_door_push or alex_v2_door_push).",
+    help="runtime-cache experiment name (default: alex_v2_door_push).",
 )
 parser.add_argument(
     "--run-id", type=str, default=None, help="Run id (default: <UTC date>_seed<seed>)."
@@ -78,7 +77,7 @@ parser.add_argument(
     "--no-export",
     action="store_true",
     default=None,
-    help="Record the run under outputs/ only; never write datasets/ (multi-pose passes).",
+    help="Record the run in the runtime cache only; never write datasets/ (multi-pose passes).",
 )
 parser.add_argument(
     "--door-pose-id",
@@ -149,9 +148,7 @@ def _make_env():
     cfg.seed = run_config.run.seed
     cfg.sim.device = args.device
     cfg.door_pose_id = run_config.run.door_pose_id
-    return gym.make(
-        door_task.DOOR_PUSH_ALEX_V2_ENV_ID, cfg=cfg, render_mode=render_mode
-    ).unwrapped
+    return gym.make(door_task.DOOR_PUSH_ALEX_V2_ENV_ID, cfg=cfg, render_mode=render_mode).unwrapped
 
 
 def main() -> int:
@@ -186,7 +183,7 @@ def main() -> int:
             explicit_plan = plan_randomized_seeds(seed_payload, variation_bounds)
         artifacts = run_baseline(
             env,
-            outputs_root=paths.OUTPUTS_DIR,
+            outputs_root=paths.SCRIPTED_RUNS_CACHE_DIR,
             datasets_root=paths.DATASETS_DIR,
             experiment=experiment,
             run_id=run_id,
@@ -207,7 +204,10 @@ def main() -> int:
         for action_space, directory in artifacts.exports.items():
             print(f"[export] {action_space} -> {directory}", flush=True)
         if not artifacts.exports:
-            print("[export] skipped (run.export=false); episodes stay under outputs/", flush=True)
+            print(
+                "[export] skipped (run.export=false); episodes stay in the runtime cache",
+                flush=True,
+            )
         if artifacts.sanity is not None:
             print(
                 f"[sanity] episodes_checked={artifacts.sanity['n_episodes_checked']} "

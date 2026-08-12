@@ -8,7 +8,7 @@ run:
   max_ticks: 600
   video: false
   clean_shutdown: false
-  export: true          # false: record under outputs/ only, never write datasets/
+  export: true          # false: retain episodes in the runtime cache, never write datasets/
   door_pose_id: D0      # canonical scene ID: D0-D4
 
 controller:

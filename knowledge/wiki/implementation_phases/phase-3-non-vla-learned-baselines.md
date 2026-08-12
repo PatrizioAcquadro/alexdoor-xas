@@ -2,34 +2,32 @@
 
 ## Objective
 
-Train and evaluate state-only ACT and Diffusion policies through shared dataset
-and adapter contracts.
+Train and evaluate state-only ACT and Diffusion policies through shared dataset, adapter, and artifact contracts.
 
 ## Focus
 
-### Subphase 3.1 — Data, adapters, and policies
+### Subphase 3.1 — Data, adapters, policies, and canonical runs
 
 #### Implementation
 
-Added validated dataset readers, content-grouped splits, train-only
-normalization, chunk sampling, A2/A3/A4 adapters, ACT, Diffusion, and
-closed-loop evaluation. New checkpoints use compact v2 contracts; Phase 3 v1
-checkpoints remain loadable without their former administrative fields.
+Added validated dataset readers, content-grouped splits, train-only normalization, chunk sampling, A2/A3/A4 adapters, ACT, Diffusion, and closed-loop evaluation. New inference checkpoints use compact v2 contracts; Phase 3 v1 checkpoints remain loadable without their former administrative fields.
+
+Training now allocates collision-safe UTC runs under `outputs/door_push_alex_v2/{act,diffusion}/`, freezes the complete evaluation protocol in immutable `resolved_config.json`, writes consolidated atomic resume state before epoch 0 and after each epoch, and publishes compact training/open-loop artifacts plus one narrative report. Successful completion removes the resume checkpoint; errors retain it and create `error.log`.
+
+Closed-loop evaluation runs the frozen 36-rollout D0-D4 protocol with a fresh environment per pose and publishes factual success, termination, time, force, adapter, and warning-family results. Exact protocol matches may complete the source training run; changed protocols create checkpoint-free sibling evaluation runs. Optional traces and media are selective and empty directories are never created.
 
 #### Key Decisions and Problems
 
 - Learned policies cover A2 and A3 only.
-- Evaluation uses checkpoint-owned model and normalization state, not the live
-  training dataset.
-- Training metrics do not substitute for closed-loop results.
+- Evaluation uses the source run's frozen configuration and self-contained checkpoint, not the live training dataset.
+- Training and open-loop metrics do not substitute for closed-loop results.
+- Completed runs and completed closed-loop results are never overwritten.
 
 #### Tests
 
-Deterministic tests cover data validation, normalization recomputation,
-checkpoint v1/v2 loading, model behavior, CPU overfit, adapters, and rollout
-semantics.
+Deterministic tests cover data validation, normalization, checkpoint v1/v2 loading, ACT/Diffusion behavior, uninterrupted-versus-resumed equivalence including RNG/EMA, exclusive run allocation, output schemas, lifecycle rules, 36-rollout aggregation, protocol routing, selective artifacts, adapters, and rollout semantics.
 
 ## Version Notes
 
-- 2026-08-11 — Removed Phase 3 provenance orchestration and introduced compact
-  checkpoint v2 while preserving legacy loading.
+- 2026-08-12 — Added canonical learned runs, complete resume state, compact output schemas, frozen multi-pose evaluation, and protocol-aware evaluation-only siblings.
+- 2026-08-11 — Removed Phase 3 provenance orchestration and introduced compact checkpoint v2 while preserving legacy loading.

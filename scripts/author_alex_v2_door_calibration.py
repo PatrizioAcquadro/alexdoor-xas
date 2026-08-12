@@ -28,7 +28,10 @@ if str(SRC_ROOT) not in sys.path:
 
 from isaaclab.app import AppLauncher  # noqa: E402
 
-EVIDENCE_DIR = Path("outputs/door_push_alex_v2/calibration/v0")
+CACHE_ROOT = Path(
+    os.environ.get("ALEXDOOR_CACHE_ROOT", str(Path.home() / ".cache" / "alexdoor-xas"))
+).expanduser()
+EVIDENCE_DIR = CACHE_ROOT / "calibration" / "v0"
 EVIDENCE_PATH = EVIDENCE_DIR / "author_alex_v2_door_calibration.evidence.json"
 CANDIDATE_PATH = EVIDENCE_DIR / "alex_v2_door_calibration.candidate.json"
 

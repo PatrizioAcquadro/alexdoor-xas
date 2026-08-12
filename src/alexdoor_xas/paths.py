@@ -18,8 +18,8 @@ from pathlib import Path
 # paths.py lives at <repo>/src/alexdoor_xas/paths.py → parents[2] is the repo root.
 REPO_ROOT: Path = Path(__file__).resolve().parents[2]
 
-DATASETS_DIR: Path = REPO_ROOT / "datasets"   # reusable exported episodes (Phase 2+)
-OUTPUTS_DIR: Path = REPO_ROOT / "outputs"     # canonical scenes + learned-policy runs
+DATASETS_DIR: Path = REPO_ROOT / "datasets"  # reusable exported episodes (Phase 2+)
+OUTPUTS_DIR: Path = REPO_ROOT / "outputs"  # canonical scenes + learned-policy runs
 KNOWLEDGE_DIR: Path = REPO_ROOT / "knowledge"
 WIKI_DIR: Path = KNOWLEDGE_DIR / "wiki"
 # Backward-compatible name for the canonical documentation directory.
@@ -35,6 +35,7 @@ VERIFICATION_CACHE_DIR: Path = RUNTIME_CACHE_ROOT / "verification"
 SCRIPTED_RUNS_CACHE_DIR: Path = RUNTIME_CACHE_ROOT / "scripted_runs"
 DATASET_INSPECTION_CACHE_DIR: Path = RUNTIME_CACHE_ROOT / "dataset_inspection"
 WANDB_CACHE_DIR: Path = RUNTIME_CACHE_ROOT / "wandb"
+LEGACY_RUNS_CACHE_DIR: Path = RUNTIME_CACHE_ROOT / "legacy_runs"
 
 # ── External asset root (referenced in place, overridable) ───────────────────
 ASSETS_ROOT: Path = Path(
@@ -42,9 +43,11 @@ ASSETS_ROOT: Path = Path(
 ).expanduser()
 
 # ── Alex V2 simulator-neutral asset ──────────────────────────────────────────
-ALEX_V2_ASSET_ROOT: Path = Path(
-    os.environ.get("ALEX_V2_ASSET_ROOT", str(Path.home() / "Desktop" / "Alex"))
-).expanduser().resolve()
+ALEX_V2_ASSET_ROOT: Path = (
+    Path(os.environ.get("ALEX_V2_ASSET_ROOT", str(Path.home() / "Desktop" / "Alex")))
+    .expanduser()
+    .resolve()
+)
 ALEX_V2_URDF: Path = ALEX_V2_ASSET_ROOT / "urdf" / "alex_v2.urdf"
 ALEX_V2_RUNTIME_CACHE_ROOT: Path = Path(
     os.environ.get(

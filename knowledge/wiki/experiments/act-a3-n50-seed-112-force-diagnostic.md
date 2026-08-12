@@ -20,12 +20,10 @@ position and contact-entry motion. The diagnostic does not prove root cause,
 validate a controller change, clear the original review status, or establish
 hardware safety.
 
-The retained evidence is:
-
-- `outputs/curated/phase3_seed112_force_diagnostic/report.md`
-- `outputs/curated/phase3_seed112_force_diagnostic/results.json`
+This page is the canonical narrative record. The former compact report and structured results are recoverable from Git history through commit `7f1fc8c`.
 
 ## Version Notes
 
+- 2026-08-12 — Removed the curated package after retaining its measurements here and its detailed files in Git history.
 - 2026-08-11 — Removed provenance and checksum packaging while preserving the
   measured cases and bounded interpretation.

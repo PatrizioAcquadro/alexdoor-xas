@@ -1,8 +1,6 @@
 # AlexDoor-XAS
 
-AlexDoor-XAS compares action representations for contact-rich humanoid
-manipulation. Its first benchmark is simulated door pushing with the fixed-base
-IHMC Alex V2 torso in NVIDIA Isaac Sim and Isaac Lab.
+AlexDoor-XAS compares action representations for contact-rich humanoid manipulation. Its first benchmark is simulated door pushing with the fixed-base IHMC Alex V2 torso in NVIDIA Isaac Sim and Isaac Lab.
 
 ## Current product
 
@@ -19,15 +17,9 @@ The only operational path is:
 
 `Door + Alex V2 -> v2_pose A1-A4 -> training -> adapter-v1 -> evaluation`
 
-The completed Gilbreth pilot, cluster sweep, smoke-matrix aggregation, and
-unified-evaluation orchestration are no longer executable product workflows.
-Their scientific conclusions remain in the wiki and curated reports; Git owns
-their source history.
+The completed Gilbreth pilot, cluster sweep, smoke-matrix aggregation, and unified-evaluation orchestration are no longer executable product workflows. Their scientific conclusions remain in the wiki; Git owns their source and artifact history.
 
-The Phase 3 matrix was success-saturated and did not identify a winning policy,
-representation, or dataset size. One ACT-A3-N50 rollout remains
-`REVIEW_REQUIRED` after a reproducible force-watch event. Phase 4 VLA work has
-not started. See [Project Status](knowledge/wiki/status.md).
+The Phase 3 matrix was success-saturated and did not identify a winning policy, representation, or dataset size. One ACT-A3-N50 rollout remains `REVIEW_REQUIRED` after a reproducible force-watch event. Phase 4 VLA work has not started. See [Project Status](knowledge/wiki/status.md).
 
 ## Quick start
 
@@ -57,6 +49,15 @@ PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/train_act.py --sp
 PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/train_diffusion.py --space A3_obj_rel_ee_delta
 ```
 
+Training runs are allocated under `outputs/door_push_alex_v2/{act,diffusion}/<run_id>/`. Resume only an incomplete run with `--resume <run-directory>`. Evaluate a completed self-contained checkpoint with its frozen protocol:
+
+```bash
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/eval_act.py --checkpoint outputs/door_push_alex_v2/act/<run_id>/checkpoints/best.pt --device cuda:0
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/eval_diffusion.py --checkpoint outputs/door_push_alex_v2/diffusion/<run_id>/checkpoints/best.pt --device cuda:0
+```
+
+The default scene is `outputs/door_scene/D0.usda`; D0-D4 are the only scene layers allowed under `outputs/door_scene/`. See [the output contract](outputs/README.md).
+
 The supported verification surface contains exactly five gates:
 
 ```bash
@@ -67,9 +68,7 @@ PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_adapters.p
 PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_policy_rollout.py --policy act --viz none --device cuda:0 --checkpoint-a2 <a2.pt> --checkpoint-a3 <a3.pt>
 ```
 
-Use `--policy diffusion` for Diffusion checkpoints; only that selection accepts
-`--sampler`, `--inference-steps`, and `--n-action-steps`. Rollout artifacts are
-written under `outputs/verify_policy_rollout/<policy>/gate/`.
+Use `--policy diffusion` for Diffusion checkpoints; only that selection accepts `--sampler`, `--inference-steps`, and `--n-action-steps`. Verifier artifacts are written under `~/.cache/alexdoor-xas/verification/`.
 
 `scripts/author_alex_v2_door_calibration.py` is a mutating maintenance command,
 not a verifier, and is never part of routine validation.
@@ -83,11 +82,10 @@ configs/            five active calibration, policy, scripted, and tracking conf
 tests/              deterministic regression and contract tests
 knowledge/          user-owned raw research and the official technical wiki
 datasets/           reusable local datasets (ignored except README)
-outputs/            local runs plus the small tracked curated evidence set
+outputs/            canonical D0-D4 scenes and learned-policy runs
 ```
 
-Machine-local assets, datasets, checkpoints, videos, logs, and ordinary run
-outputs stay out of Git.
+Machine-local assets, datasets, learned checkpoints, videos, logs, and runtime caches stay out of Git. Historical Phase 3 conclusions are preserved in the wiki and detailed removed artifacts remain available through Git history.
 
 ## Documentation
 

@@ -127,3 +127,11 @@ policy rollout gate, and separate mutating calibration-authoring command.
 Verified all 23 wiki pages, 31 internal links, complete index coverage, nine
 phase pages, repository-relative references, Markdown whitespace, and protected
 raw boundaries after the runtime and verifier consolidation.
+
+## 2026-08-12 — update : Canonical scenes and run-output contract
+
+Documented the exact D0-D4 registry, factual `phase2.v2` outcomes, collision-safe resumable ACT/Diffusion runs, compact training/open-loop artifacts, frozen-protocol closed-loop routing, selective optional artifacts, cache-only runtime outputs, and Git-backed historical evidence after removing curated packages.
+
+## 2026-08-12 — lint : Canonical output documentation
+
+Verified all 23 wiki pages, 31 internal links, complete index coverage, nine phase pages, allowed tree shape, repository-relative references, Markdown whitespace, protected raw boundaries, and removal of active legacy output-path references.

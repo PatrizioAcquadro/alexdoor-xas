@@ -1,4 +1,4 @@
-"""One-run orchestration: episodes -> outputs/<experiment>/<run_id>/ + datasets.
+"""One-run orchestration: episodes -> a caller-selected run cache + datasets.
 
 Used by both ``scripts/run_scripted_baseline.py`` (the engine CLI) and
 ``scripts/verify_scripted_baseline.py`` (the Phase 2 gate), so the gate
@@ -81,8 +81,8 @@ def run_baseline(
     *error* aborts the run loudly — bad data can no longer reach ``datasets/``
     silently and fail only at the Phase 3.0 gate.
 
-    ``export=False`` records the run under ``outputs/`` only and never writes
-    ``datasets/`` — the mode multi-pose generation uses so partial per-pose
+    ``export=False`` records the run under the caller's cache only and never
+    writes ``datasets/`` — the mode multi-pose generation uses so partial per-pose
     passes cannot masquerade as an official dataset version.
     """
     # Posed runs never export directly: a re-export replaces the version dir,
@@ -161,9 +161,7 @@ def run_baseline(
             f"(see metrics/sanity.json)"
         )
     if sanity is not None and sanity["n_episodes_with_errors"] and not preserve_candidate_failures:
-        failing = [
-            entry["seed"] for entry in sanity["episodes"] if entry["errors"]
-        ]
+        failing = [entry["seed"] for entry in sanity["episodes"] if entry["errors"]]
         raise RuntimeError(
             f"sanity checks failed on {sanity['n_episodes_with_errors']} episode(s) "
             f"(seeds {failing}); run aborted before export — see "
@@ -172,9 +170,7 @@ def run_baseline(
     if preserve_candidate_failures and export:
         raise RuntimeError("candidate-pool failure preservation requires export=false")
 
-    exports = (
-        export_datasets(episodes, datasets_root, version=dataset_version) if export else {}
-    )
+    exports = export_datasets(episodes, datasets_root, version=dataset_version) if export else {}
     plots = {
         "door_angle_vs_time": door_angle_plot(episodes, run_dir / "plots" / "door_angle.png"),
         "final_door_angle": final_angle_plot(episodes, run_dir / "plots" / "final_angle.png"),
@@ -208,9 +204,7 @@ def run_baseline(
     )
 
 
-def _run_sanity_checks(
-    episodes: list[EpisodeBuffer], metrics_dir: Path
-) -> dict[str, Any] | None:
+def _run_sanity_checks(episodes: list[EpisodeBuffer], metrics_dir: Path) -> dict[str, Any] | None:
     """Sanity-check force-sensing (Alex) episodes; write metrics/sanity.json.
 
     Same episode condition the Phase 3.0 dataset gate uses (joint proprio
@@ -229,9 +223,7 @@ def _run_sanity_checks(
         )
         if not is_alex:
             continue
-        result = check_alex_episode(
-            episode, force_error_n=FORCE_DATASET_LIMIT_N
-        )
+        result = check_alex_episode(episode, force_error_n=FORCE_DATASET_LIMIT_N)
         entries.append(
             {
                 "episode_id": episode.meta.episode_id,
@@ -328,9 +320,7 @@ def _write_run_config(
         json.dumps(
             {
                 "engine_cfg": engine_cfg.to_dict(),
-                "controller_cfg": dataclasses.asdict(
-                    controller_cfg or DoorPushControllerCfg()
-                ),
+                "controller_cfg": dataclasses.asdict(controller_cfg or DoorPushControllerCfg()),
                 "n_fixed": n_fixed,
                 "n_randomized": n_randomized,
                 "base_seed": base_seed,

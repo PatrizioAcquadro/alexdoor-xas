@@ -1,5 +1,4 @@
-"""Pure tests for rollout termination semantics (post-3.3 review WP: timing,
-truncation, termination reasons, repeat-same-seed determinism helpers)."""
+"""Pure tests for rollout timing, truncation, and factual termination semantics."""
 
 from __future__ import annotations
 
@@ -35,9 +34,7 @@ def _push_source(horizon: int):
 
 def _run(env, horizon: int, **kwargs) -> RolloutResult:
     env.reset(seed=0)
-    return rollout_chunks(
-        env, _push_source(horizon), A2Adapter(TEST_ROBOT_LIMITS), **kwargs
-    )
+    return rollout_chunks(env, _push_source(horizon), A2Adapter(TEST_ROBOT_LIMITS), **kwargs)
 
 
 class ScriptedAngleEnv(FakeDoorPushEnv):

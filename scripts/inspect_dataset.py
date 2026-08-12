@@ -34,11 +34,15 @@ from alexdoor_xas.dataset import (
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--dataset", type=Path, required=True,
+        "--dataset",
+        type=Path,
+        required=True,
         help="dataset version dir, e.g. datasets/door_push/A2_ee_delta/v0",
     )
     parser.add_argument(
-        "--split", default=None, choices=("train", "val", "test"),
+        "--split",
+        default=None,
+        choices=("train", "val", "test"),
         help="restrict to a split (needs the task's split file); default: all episodes",
     )
     parser.add_argument("--obs_preset", default="core")
@@ -46,7 +50,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
-        "--out_dir", type=Path, default=paths.OUTPUTS_DIR / "dataset_inspect",
+        "--out_dir",
+        type=Path,
+        default=paths.DATASET_INSPECTION_CACHE_DIR,
         help="where the inspection figure is written",
     )
     return parser.parse_args()
@@ -62,17 +68,23 @@ def _stat_line(name: str, array: np.ndarray) -> str:
 def inspect_a4(dataset: A4ChunkDataset, episode_ids: list[str] | None = None) -> int:
     print(f"A4 dataset: {len(dataset)} episodes, task {dataset.task}")
     record = dataset.by_id(episode_ids[0]) if episode_ids else dataset[0]
-    print(f"episode {record.episode_id[:8]} (success={record.success}, "
-          f"final angle {record.final_door_angle:.3f} rad):")
+    print(
+        f"episode {record.episode_id[:8]} (success={record.success}, "
+        f"final angle {record.final_door_angle:.3f} rad):"
+    )
     for chunk in record.chunks:
-        print(f"  {chunk.phase:<12} target_panel={chunk.contact_target_panel} "
-              f"hinge_delta={chunk.motion_hinge_delta_rad:+.3f} rad "
-              f"duration={chunk.duration_ticks} ticks")
+        print(
+            f"  {chunk.phase:<12} target_panel={chunk.contact_target_panel} "
+            f"hinge_delta={chunk.motion_hinge_delta_rad:+.3f} rad "
+            f"duration={chunk.duration_ticks} ticks"
+        )
     features = episode_chunk_features(record)
     print(_stat_line("features", features))
-    print("NOTE: A4 is symbolic per-phase data "
-          "(knowledge/wiki/topics/episode-and-dataset-contracts.md); "
-          "there is no per-tick batch view.")
+    print(
+        "NOTE: A4 is symbolic per-phase data "
+        "(knowledge/wiki/topics/episode-and-dataset-contracts.md); "
+        "there is no per-tick batch view."
+    )
     return 0
 
 
@@ -90,8 +102,10 @@ def main() -> int:
     batch = next(iter(BatchIterator(sampler, batch_size=args.batch_size, seed=args.seed)))
 
     print(f"dataset : {args.dataset} ({dataset.action_space}, task {dataset.task})")
-    print(f"episodes: {len(dataset)} total"
-          + (f", {len(episode_ids)} in split {args.split!r}" if episode_ids else ""))
+    print(
+        f"episodes: {len(dataset)} total"
+        + (f", {len(episode_ids)} in split {args.split!r}" if episode_ids else "")
+    )
     print(f"samples : {len(sampler)} (horizon {args.horizon}, obs preset {args.obs_preset!r})")
     print("batch:")
     for key in ("obs", "actions", "is_pad", "t"):
@@ -112,9 +126,7 @@ def _selected_episode_ids(
         return None
     # datasets/<task>/<space>/<version> -> the task's shared split file.
     version_dir = args.dataset.resolve()
-    split_file = splits_path(
-        version_dir.parents[2], version_dir.parents[1].name, version_dir.name
-    )
+    split_file = splits_path(version_dir.parents[2], version_dir.parents[1].name, version_dir.name)
     return load_splits(split_file, episode_ids=dataset_episode_ids)[args.split]
 
 

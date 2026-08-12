@@ -98,7 +98,7 @@ def test_active_surfaces_do_not_reference_removed_legacy_documents() -> None:
     assert failures == []
 
 
-def test_active_config_and_curated_evidence_surfaces_are_minimal() -> None:
+def test_active_config_and_output_surfaces_are_minimal() -> None:
     assert {path.name for path in (REPO_ROOT / "configs").iterdir()} == {
         "act.yaml",
         "alex_v2_door.json",
@@ -106,12 +106,15 @@ def test_active_config_and_curated_evidence_surfaces_are_minimal() -> None:
         "scripted_baseline.yaml",
         "wandb.yaml",
     }
-    curated = REPO_ROOT / "outputs" / "curated"
-    assert {
-        path.relative_to(curated).as_posix() for path in curated.rglob("*") if path.is_file()
-    } == {
-        "phase3_seed112_force_diagnostic/report.md",
-        "phase3_seed112_force_diagnostic/results.json",
-        "phase3_unified_evaluation/aggregate_summary.json",
-        "phase3_unified_evaluation/report.md",
+    outputs = REPO_ROOT / "outputs"
+    entries = {path.name for path in outputs.iterdir()}
+    assert {"README.md", "door_scene"} <= entries
+    assert entries <= {"README.md", "door_scene", "door_push_alex_v2"}
+    assert {path.name for path in (outputs / "door_scene").iterdir()} == {
+        "D0.usda",
+        "D1.usda",
+        "D2.usda",
+        "D3.usda",
+        "D4.usda",
     }
+    assert not (outputs / "curated").exists()

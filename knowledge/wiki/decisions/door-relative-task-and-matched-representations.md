@@ -19,6 +19,8 @@ distinct action arrays.
 The door-frame origin and +Z hinge axis are explicit. Door pose variants pivot
 around the hinge instead of redefining the task geometry independently.
 
+The executable registry is limited to D0 `(0.00, 0.00, 0.00)`, D1 `(+0.05, +0.02, 0.00)`, D2 `(-0.05, 0.00, -0.02)`, D3 `(+0.10, +0.02, +0.02)`, and D4 `(-0.10, +0.02, -0.02)`, expressed as yaw and XY offset. Routine APIs select these IDs and noncanonical transforms are diagnostic cache artifacts rather than new D labels.
+
 ## Consequences
 
 - Representation comparisons have less task-distribution confounding.
@@ -44,6 +46,7 @@ and [[topics/episode-and-dataset-contracts|Episode and Dataset Contracts]].
 
 ## Version Notes
 
+- 2026-08-12 — Made D0-D4 the sole canonical pose registry and separated noncanonical diagnostic scenes from outputs.
 - 2026-08-12 — The A2/A3 distinguishability evidence moved into the canonical
   dataset interface gate.
 

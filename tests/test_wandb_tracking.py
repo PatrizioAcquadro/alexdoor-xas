@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from alexdoor_xas import paths
 from alexdoor_xas.tracking import (
     NoOpWandbRun,
     WandbConfig,
@@ -25,7 +26,7 @@ def test_default_wandb_config_is_disabled_and_safe() -> None:
     assert cfg.entity is None
     assert cfg.tags == ()
     assert cfg.log_artifacts is False
-    assert cfg.dir.name == "wandb"
+    assert cfg.dir == paths.WANDB_CACHE_DIR
 
 
 def test_disabled_run_is_noop_and_does_not_import_wandb(monkeypatch) -> None:
@@ -129,11 +130,11 @@ def test_offline_run_lazy_imports_wandb_and_logs(tmp_path, monkeypatch) -> None:
     assert calls["artifacts"] == [logged]
 
 
-def test_missing_wandb_dependency_has_actionable_error(monkeypatch) -> None:
+def test_missing_wandb_dependency_has_actionable_error(tmp_path, monkeypatch) -> None:
     def raise_import(name: str):
         raise ImportError(name)
 
     monkeypatch.setattr("alexdoor_xas.tracking.wandb.importlib.import_module", raise_import)
 
     with pytest.raises(RuntimeError, match=r"\.\[tracking\]"):
-        start_wandb_run(WandbConfig(mode="offline"))
+        start_wandb_run(WandbConfig(mode="offline", dir=tmp_path))

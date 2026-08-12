@@ -10,22 +10,19 @@ Evaluate all sixteen Phase 3 checkpoints under one matched Alex V2 protocol.
 
 #### Implementation
 
-Ran 36 D0-D4 rollouts per cell, 576 total. Every rollout succeeded and none was
-adapter-rejected. Success was saturated, secondary metrics were heterogeneous,
-and one ACT-A3-N50 seed-112 force event remained `REVIEW_REQUIRED`.
+Ran 36 D0-D4 rollouts per cell, 576 total. Every rollout succeeded and none was adapter-rejected. Success was saturated, secondary metrics were heterogeneous, and one ACT-A3-N50 seed-112 force event remained `REVIEW_REQUIRED`.
 
 #### Key Decisions and Problems
 
 - The result does not select a policy, representation, or dataset size.
 - Simulator force evidence is not hardware safety evidence.
-- Only the compact report and aggregate summary remain curated; the executable
-  matrix runner and intermediate artifacts are retired.
+- The executable matrix runner and intermediate artifacts are retired; canonical experiment pages preserve the conclusions and Git preserves the removed compact artifacts.
 
 #### Tests
 
-Current evaluation primitives remain covered. The completed aggregate is
-preserved in `outputs/curated/phase3_unified_evaluation/`.
+Current factual aggregation, frozen-protocol, and evaluation-routing primitives remain covered. The former compact evidence package is recoverable from Git history through commit `7f1fc8c` and is no longer part of the active output structure.
 
 ## Version Notes
 
+- 2026-08-12 — Removed the curated-output package after retaining its conclusions in the canonical wiki and its files in Git history.
 - 2026-08-11 — Reduced the phase to scientific findings and retained evidence.

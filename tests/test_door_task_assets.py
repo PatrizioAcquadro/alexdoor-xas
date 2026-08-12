@@ -187,8 +187,7 @@ def test_door_task_pose_authoring_pivots_at_doorframe_and_validates() -> None:
 
 def test_canonical_pose_registry_and_paths_are_exact() -> None:
     assert {
-        pose_id: (pose.yaw_rad, pose.xy_offset_m)
-        for pose_id, pose in CANONICAL_DOOR_POSES.items()
+        pose_id: (pose.yaw_rad, pose.xy_offset_m) for pose_id, pose in CANONICAL_DOOR_POSES.items()
     } == {
         "D0": (0.00, (0.00, 0.00)),
         "D1": (+0.05, (+0.02, 0.00)),
@@ -203,6 +202,15 @@ def test_canonical_pose_registry_and_paths_are_exact() -> None:
         "D3.usda",
         "D4.usda",
     ]
+
+
+def test_outputs_root_has_only_canonical_top_level_entries() -> None:
+    entries = {path.name for path in paths.OUTPUTS_DIR.iterdir()}
+    assert {"README.md", "door_scene"} <= entries
+    assert entries <= {"README.md", "door_scene", "door_push_alex_v2"}
+    learned = paths.OUTPUTS_DIR / paths.ALEX_V2_TASK
+    if learned.exists():
+        assert {path.name for path in learned.iterdir()} <= {"act", "diffusion"}
 
 
 def test_canonical_scene_directory_audit_rejects_extra_layer(tmp_path, monkeypatch) -> None:

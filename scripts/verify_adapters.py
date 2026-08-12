@@ -21,7 +21,7 @@ knowledge/wiki/topics/action-representations-and-adapters.md) on
   is rejected with a reason and commands zero motion,
 - adapter logs and the A4 execution result are written as JSON artifacts.
 
-Gate artifacts go under ``outputs/verify_adapters/``.
+Gate artifacts go under ``~/.cache/alexdoor-xas/verification/verify_adapters/``.
 
 Run through the official Isaac Lab launcher::
 
@@ -310,7 +310,7 @@ def main() -> int:
     rc = 0
     env = None
     try:
-        out_dir = paths.OUTPUTS_DIR / EXPERIMENT / "gate"
+        out_dir = paths.VERIFICATION_CACHE_DIR / EXPERIMENT / "gate"
         out_dir.mkdir(parents=True, exist_ok=True)
         env = _make_env()
 

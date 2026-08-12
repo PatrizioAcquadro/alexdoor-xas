@@ -3,7 +3,8 @@
 
 The gate exercises the same calibrated environment, controller, data engine,
 and exporter as ``run_scripted_baseline.py``. Its disposable artifacts live
-under ``outputs/verify_scripted_baseline/``; reusable datasets are untouched.
+under ``~/.cache/alexdoor-xas/verification/verify_scripted_baseline/``;
+reusable datasets are untouched.
 
 Run through the official Isaac Lab launcher::
 
@@ -93,9 +94,7 @@ def _make_env():
     cfg.seed = args.seed
     cfg.sim.device = args.device
     render_mode = "rgb_array" if args.video else None
-    return gym.make(
-        door_task.DOOR_PUSH_ALEX_V2_ENV_ID, cfg=cfg, render_mode=render_mode
-    ).unwrapped
+    return gym.make(door_task.DOOR_PUSH_ALEX_V2_ENV_ID, cfg=cfg, render_mode=render_mode).unwrapped
 
 
 def _engine_cfg(env) -> DataEngineCfg:
@@ -148,9 +147,7 @@ def _assert_artifacts(artifacts) -> None:
 
 def _assert_exports(artifacts, env) -> None:
     if set(artifacts.exports) != EXPECTED_SPACES:
-        raise RuntimeError(
-            f"exports must cover {EXPECTED_SPACES}, got {set(artifacts.exports)}"
-        )
+        raise RuntimeError(f"exports must cover {EXPECTED_SPACES}, got {set(artifacts.exports)}")
 
     n_episodes = len(artifacts.episodes)
     runtime_asset = env.robot_asset_provenance()
@@ -174,8 +171,7 @@ def _assert_exports(artifacts, env) -> None:
 
     hdf5_spaces = (A1_JOINT_DELTA, A2_EE_DELTA, A3_OBJ_REL_EE_DELTA)
     files = {
-        space: sorted(artifacts.exports[space].glob("episode_*.hdf5"))
-        for space in hdf5_spaces
+        space: sorted(artifacts.exports[space].glob("episode_*.hdf5")) for space in hdf5_spaces
     }
     if any(len(items) != n_episodes for items in files.values()):
         raise RuntimeError("A1/A2/A3 exports are missing episode files")
@@ -199,9 +195,7 @@ def _assert_exports(artifacts, env) -> None:
         if not np.allclose(step_a3.action, expected, atol=1e-6):
             raise RuntimeError("A3 export does not match door-frame conversion of A2 actions")
 
-    a4_lines = (
-        (artifacts.exports[A4_OBJ_CENTRIC_CHUNK] / "episodes.jsonl").read_text().splitlines()
-    )
+    a4_lines = (artifacts.exports[A4_OBJ_CENTRIC_CHUNK] / "episodes.jsonl").read_text().splitlines()
     if len(a4_lines) != n_episodes:
         raise RuntimeError("A4 export is missing episode records")
     record = json.loads(a4_lines[0])
@@ -223,8 +217,8 @@ def main() -> int:
 
         artifacts = run_baseline(
             env,
-            outputs_root=paths.OUTPUTS_DIR,
-            datasets_root=paths.OUTPUTS_DIR / EXPERIMENT / "gate_datasets",
+            outputs_root=paths.VERIFICATION_CACHE_DIR,
+            datasets_root=paths.VERIFICATION_CACHE_DIR / EXPERIMENT / "gate_datasets",
             experiment=EXPERIMENT,
             run_id="gate",
             n_fixed=GATE_N_FIXED,

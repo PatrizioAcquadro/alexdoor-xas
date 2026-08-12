@@ -5,5 +5,4 @@ group: null
 name: null
 job_type: null
 tags: []
-dir: outputs/wandb
 log_artifacts: false

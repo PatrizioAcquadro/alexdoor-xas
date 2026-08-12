@@ -23,13 +23,7 @@ One ACT-A3-N50 D0 randomized rollout at seed 112 peaked at 219.95 N for one
 tick and remains `REVIEW_REQUIRED`. See
 [[act-a3-n50-seed-112-force-diagnostic|ACT-A3-N50 Seed-112 Force Diagnostic]].
 
-The retained scientific evidence is:
-
-- `outputs/curated/phase3_unified_evaluation/report.md`
-- `outputs/curated/phase3_unified_evaluation/aggregate_summary.json`
-
-The matrix runner and its resolved-plan/inventory/rollout-table artifacts are
-no longer maintained. Git retains the former implementation.
+This page is the canonical narrative record. The former compact report and aggregate are recoverable from Git history through commit `7f1fc8c`. The matrix runner and its resolved-plan, inventory, and rollout-table artifacts are no longer maintained.
 
 ## Limits
 
@@ -38,5 +32,6 @@ policies. It is not hardware, broader generalization, or VLA evidence.
 
 ## Version Notes
 
+- 2026-08-12 — Removed the curated package after retaining its conclusions here and its detailed files in Git history.
 - 2026-08-11 — Retained the scientific outcome and compact aggregate while
   retiring the executable unified-evaluation workflow.
