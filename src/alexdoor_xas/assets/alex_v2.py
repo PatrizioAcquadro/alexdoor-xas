@@ -108,7 +108,7 @@ def load_alex_v2_articulation_cfg(
     """
     if fix_base is not True:
         raise ValueError("DoorManipulation's Alex V2 loader is fixed-base only")
-    from isaaclab_assets.robots.alex import make_alex_v2_cfg
+    from ihmc_alex_isaaclab.robots.alex_v2 import make_alex_v2_cfg
 
     asset, _ = build_alex_v2_door_asset(asset_root=asset_root)
     cfg = make_alex_v2_cfg(str(asset.urdf_path), fix_base=True, variant="standard")

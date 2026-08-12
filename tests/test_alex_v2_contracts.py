@@ -175,7 +175,7 @@ def _install_fake_v2_factory(monkeypatch, tmp_path, cfg):
     real_import = builtins.__import__
 
     def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "isaaclab_assets.robots.alex":
+        if name == "ihmc_alex_isaaclab.robots.alex_v2":
             return SimpleNamespace(make_alex_v2_cfg=factory)
         return real_import(name, globals, locals, fromlist, level)
 
@@ -455,28 +455,45 @@ def _check_env_module():
     return module
 
 
-def test_alex_v2_factory_check_fails_loudly_with_branch_action(tmp_path) -> None:
+def test_alex_v2_factory_check_fails_loudly_with_install_action(tmp_path) -> None:
     check_env = _check_env_module()
 
     failure = check_env._alex_v2_module_failure(
         find_spec=lambda _name: None,
-        module_file=tmp_path / "missing" / "alex.py",
+        module_file=tmp_path / "missing" / "alex_v2.py",
     )
 
-    assert "isaaclab_assets.robots.alex is not importable" in failure
-    assert "pacquadr/alex-v2-asset" in failure
-    assert "isaaclab.sh" in failure
+    assert "ihmc_alex_isaaclab.robots.alex_v2 is not the installed external extension" in failure
+    assert "pip install -e" in failure
+    assert "/Desktop/Alex/source/ihmc_alex_isaaclab" in failure
 
 
 def test_alex_v2_factory_check_accepts_discoverable_module(tmp_path) -> None:
     check_env = _check_env_module()
+    module_file = tmp_path / "alex_v2.py"
 
     failure = check_env._alex_v2_module_failure(
-        find_spec=lambda _name: SimpleNamespace(origin="alex.py"),
-        module_file=tmp_path / "unused.py",
+        find_spec=lambda _name: SimpleNamespace(origin=str(module_file)),
+        module_file=module_file,
     )
 
     assert failure is None
+
+
+def test_environment_gate_requires_official_ga_archive_identity() -> None:
+    check_env = _check_env_module()
+
+    assert (
+        check_env._isaac_sim_version_failure(
+            check_env.EXPECTED_ISAAC_SIM_BUILD,
+            "6.0.1",
+        )
+        is None
+    )
+    assert "official GA" in check_env._isaac_sim_version_failure(
+        "6.0.1-rc.6+release.older",
+        "6.0.1",
+    )
 
 
 def test_missing_alex_v2_asset_root_is_a_required_failure(tmp_path) -> None:

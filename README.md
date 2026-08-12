@@ -24,12 +24,18 @@ The Phase 3 matrix was success-saturated and did not identify a winning policy, 
 ## Quick start
 
 ```bash
+/home/pacquadr/IsaacLab/isaaclab.sh -p -m pip install -e \
+  /home/pacquadr/Desktop/Alex/source/ihmc_alex_isaaclab
 PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p -m pip install -e .
 PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p -m pytest -q
 PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/check_env.py
 ```
 
-Do not use bare system `python3` for Isaac code.
+The supported stack is stable Isaac Sim 6.0.1 plus the official Isaac Lab
+`release/3.0.0-beta2` checkout. Alex is a separately installed external
+extension; this repository keeps its fixed-base Door controller, manifests,
+calibration, scene, and contact logic. Do not use bare system `python3` for
+Isaac code.
 
 W&B is disabled by default and remains optional. Install it only when tracking is needed:
 

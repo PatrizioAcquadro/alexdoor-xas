@@ -143,3 +143,15 @@ Documented direct optional SDK initialization in ACT/Diffusion training and eval
 ## 2026-08-12 — lint : Vanilla W&B integration
 
 Verified all 23 wiki pages, 31 internal links, complete index coverage, nine phase pages, allowed tree shape, repository-relative references, Markdown whitespace, protected raw and historical phase boundaries, and removal of obsolete custom W&B references.
+
+## 2026-08-12 — update : Official Alex V2 external extension
+
+Documented the official Isaac Sim/Lab baseline, autonomous Alex extension,
+public factory import, and retained Door-specific controller, calibration,
+manifest, scene, and contact responsibilities.
+
+## 2026-08-12 — lint : Official Alex V2 external extension
+
+Verified all 23 wiki pages, internal links, complete index coverage, nine phase
+pages, Markdown whitespace, protected raw boundaries, and removal of the custom
+Isaac Lab branch and asset-module references from the active system.
