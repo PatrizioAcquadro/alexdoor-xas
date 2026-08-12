@@ -19,7 +19,6 @@ from alexdoor_xas.policies.act.checkpoint import (
     save_checkpoint,
 )
 from alexdoor_xas.policies.act.config import ActModelCfg, ActTrainCfg
-from alexdoor_xas.policies.act.inspect import open_loop_report
 from alexdoor_xas.policies.act.model import ACTModel, act_loss, sinusoidal_table
 from alexdoor_xas.policies.act.policy import (
     ActPolicy,
@@ -28,6 +27,7 @@ from alexdoor_xas.policies.act.policy import (
     stop_on_hinge_angle,
 )
 from alexdoor_xas.policies.act.train import make_seeded_model, train_act
+from alexdoor_xas.policies.common.inspect import open_loop_report
 from conftest import (
     TEST_ROBOT_LIMITS,
     FakeDoorPushEnv,

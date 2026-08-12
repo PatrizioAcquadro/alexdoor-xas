@@ -434,10 +434,15 @@ def test_builder_rejects_any_urdf_identity_drift(tmp_path) -> None:
 
 def test_alex_v2_path_surface_uses_the_static_standard_asset() -> None:
     assert paths.ALEX_V2_URDF == paths.ALEX_V2_ASSET_ROOT / "urdf" / "alex_v2.urdf"
+    assert paths.COMBINED_SCENE_USD == (
+        paths.SCENES_ROOT / "CombinedHallwayScene" / "combinedScene.usda"
+    )
     assert paths.iter_alex_v2_assets() == [
         ("Alex V2 asset root", paths.ALEX_V2_ASSET_ROOT, True),
         ("Alex V2 URDF", paths.ALEX_V2_URDF, True),
     ]
+    assert ("Door USD", paths.DOOR_USD, True) in paths.iter_assets()
+    assert all(path != paths.COMBINED_SCENE_USD for _, path, _ in paths.iter_assets())
     assert not hasattr(paths, "ALEX_V2_BRIDGE_ROOT")
     assert not hasattr(paths, "IHMC_ALEX_SDK_ROOT")
 

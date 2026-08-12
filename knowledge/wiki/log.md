@@ -184,3 +184,8 @@ the complete panel width, height, and face depth.
 
 Documented the common checkpoint v2 serialization, validation, robot identity,
 and atomic I/O layer while retaining policy-specific ACT and Diffusion loaders.
+
+## 2026-08-12 — update : Required asset boundary
+
+Documented that environment readiness requires the Alex V2 and standalone Door
+assets while the optional combined hallway path remains outside the benchmark.

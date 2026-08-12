@@ -14,7 +14,7 @@ active task calibration and contains the task name, base pose, six initial
 joints, operational tool frame, reach shell, controller parameters, and
 randomization limits.
 
-`scripts/verify_benchmark_scene.py` is the non-mutating scene gate. It validates the Alex asset and runtime manifest, canonical door USD dependencies, hinge, mass and inertia, exact 29-joint runtime order, reset state, and zero-action frame/door stability on the requested device. The combined hallway remains an availability check in `scripts/check_env.py`; it is not benchmark physics.
+`scripts/verify_benchmark_scene.py` is the non-mutating scene gate. It validates the Alex asset and runtime manifest, canonical door USD dependencies, hinge, mass and inertia, exact 29-joint runtime order, reset state, and zero-action frame/door stability on the requested device. The optional combined hallway path remains registered for manual composition, but it is neither benchmark physics nor a `check_env.py` requirement.
 
 `scripts/author_alex_v2_door_calibration.py` is a separate mutating maintenance command with internal asset, tool-frame, reset, Jacobian, contact, and scripted checks. Calibration evidence is temporary and belongs under `~/.cache/alexdoor-xas/calibration/`.
 
@@ -34,6 +34,7 @@ The benchmark is simulation-only. It has no physical robot command path, hardwar
 
 ## Version Notes
 
+- 2026-08-12 — Limited environment readiness to benchmark-required assets while retaining the optional combined hallway path for manual composition.
 - 2026-08-12 — Moved generic Alex V2 configuration to the autonomous external extension while retaining every Door-specific runtime contract in this consumer.
 - 2026-08-12 — Replaced transform-derived scene names with the exact D0-D4 registry and moved noncanonical generation to the runtime cache.
 - 2026-08-12 — Consolidated asset and isolated-door checks into the production Alex V2 benchmark scene gate and separated calibration authoring by name.

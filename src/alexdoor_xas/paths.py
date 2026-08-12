@@ -22,8 +22,6 @@ DATASETS_DIR: Path = REPO_ROOT / "datasets"  # reusable exported episodes (Phase
 OUTPUTS_DIR: Path = REPO_ROOT / "outputs"  # canonical scenes + learned-policy runs
 KNOWLEDGE_DIR: Path = REPO_ROOT / "knowledge"
 WIKI_DIR: Path = KNOWLEDGE_DIR / "wiki"
-# Backward-compatible name for the canonical documentation directory.
-DOCS_DIR: Path = WIKI_DIR
 
 # Runtime caches and arbitrary generated artifacts never belong in outputs/.
 RUNTIME_CACHE_ROOT: Path = Path(
@@ -33,7 +31,6 @@ DIAGNOSTIC_SCENES_DIR: Path = RUNTIME_CACHE_ROOT / "door_scenes"
 CALIBRATION_CACHE_DIR: Path = RUNTIME_CACHE_ROOT / "calibration"
 VERIFICATION_CACHE_DIR: Path = RUNTIME_CACHE_ROOT / "verification"
 SCRIPTED_RUNS_CACHE_DIR: Path = RUNTIME_CACHE_ROOT / "scripted_runs"
-LEGACY_RUNS_CACHE_DIR: Path = RUNTIME_CACHE_ROOT / "legacy_runs"
 
 # ── External asset root (referenced in place, overridable) ───────────────────
 ASSETS_ROOT: Path = Path(
@@ -64,21 +61,20 @@ DOOR_SCENE_DIR: Path = OUTPUTS_DIR / "door_scene"
 
 # ── Scenes (CombinedScene) ───────────────────────────────────────────────────
 SCENES_ROOT: Path = ASSETS_ROOT / "CombinedScene"
-# The "corridor with many rooms": a hallway + 4 iThor floorplans.
+# Optional registered path for manual scene composition.
 COMBINED_SCENE_USD: Path = SCENES_ROOT / "CombinedHallwayScene" / "combinedScene.usda"
 # Standalone articulated door (handle + hinge) for the door benchmark.
 DOOR_USD: Path = SCENES_ROOT / "Door.usd"
 
 
 def iter_assets() -> list[tuple[str, Path, bool]]:
-    """Registered external assets as ``(name, path, required)`` triples.
+    """Required external assets as ``(name, path, required)`` triples.
 
-    Used by ``scripts/check_env.py`` and the path tests to confirm every
-    referenced asset actually exists on this machine.
+    Used by ``scripts/check_env.py`` and path tests for the supported benchmark.
+    Optional manually composed scene paths are intentionally not included.
     """
     return [
         *iter_alex_v2_assets(),
-        ("Combined scene USD", COMBINED_SCENE_USD, True),
         ("Door USD", DOOR_USD, True),
     ]
 

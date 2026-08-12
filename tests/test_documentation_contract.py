@@ -20,7 +20,6 @@ def _wiki_pages() -> list[Path]:
 def test_status_and_path_registry_use_the_official_wiki() -> None:
     assert paths.KNOWLEDGE_DIR == REPO_ROOT / "knowledge"
     assert paths.WIKI_DIR == WIKI_ROOT
-    assert paths.DOCS_DIR == paths.WIKI_DIR
     assert (WIKI_ROOT / "status.md").is_file()
     assert not (REPO_ROOT / "knowledge" / "status.md").exists()
     assert not (REPO_ROOT / "docs").exists()
