@@ -8,16 +8,13 @@ dist/
 .env
 .env.*
 !.env.example
-.eggs/
 
 # ── Tooling caches ───────────────────────────────────────────────────────────
 .pytest_cache/
 .ruff_cache/
-.mypy_cache/
 .coverage
 coverage.xml
 htmlcov/
-.ipynb_checkpoints/
 
 # ── Generated artifacts (see datasets/README.md, outputs/README.md) ──────────
 # Datasets are tracked via their README.md; generated data stays local by default.
@@ -29,25 +26,17 @@ htmlcov/
 !/outputs/README.md
 !/outputs/door_scene/
 /outputs/door_scene/*
-!/outputs/door_scene/D0.usda
-!/outputs/door_scene/D1.usda
-!/outputs/door_scene/D2.usda
-!/outputs/door_scene/D3.usda
-!/outputs/door_scene/D4.usda
+!/outputs/door_scene/D[0-4].usda
 
-# ── Large / machine-local sim artifacts ──────────────────────────────────────
+# ── Machine-local artifacts ──────────────────────────────────────────────────
+# Keep active binary formats ignored even when written outside the canonical
+# datasets/ and outputs/ directories.
 *.log
 *.hdf5
-*.h5
 *.mp4
 *.pt
-*.pth
-*.ckpt
-*.onnx
-*.usdc            # binary USD caches; source scenes live outside this repo
-*.occupancy.npz
-*.topdown.png
-.lmdb/
+# Binary USD caches; canonical scene layers use tracked .usda files.
+*.usdc
 
 # ── Local phase records ──────────────────────────────────────────────────────
 /implementation_phases/
