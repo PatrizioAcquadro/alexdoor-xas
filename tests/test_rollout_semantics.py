@@ -4,7 +4,6 @@ truncation, termination reasons, repeat-same-seed determinism helpers)."""
 from __future__ import annotations
 
 import math
-from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -13,21 +12,11 @@ import torch
 from alexdoor_xas.adapters import (
     A2Adapter,
     A3Adapter,
-    AdapterDecision,
-    AdapterLog,
     AdapterStatus,
-    AdapterWarning,
     RobotLimitsCfg,
     RolloutResult,
     WorkspaceSphere,
     rollout_chunks,
-)
-from alexdoor_xas.policies.common.rollout_eval import (
-    DETERMINISM_PROBE_KIND,
-    determinism_probe_reference,
-    determinism_probe_report,
-    determinism_probe_update,
-    rollout_trace_hash,
 )
 from conftest import TEST_ROBOT_LIMITS, FakeDoorPushEnv, FakeForceDoorPushEnv
 
@@ -467,174 +456,6 @@ def test_calibrated_first_contact_correction_is_enforced_in_execution() -> None:
 
 
 # ── repeat-same-seed determinism helpers ─────────────────────────────────────
-
-
-def _result_pair(perturb: bool) -> list[RolloutResult]:
-    results = []
-    for repeat in range(2):
-        result = _run(FakeForceDoorPushEnv(), 8, success_angle_rad=SUCCESS_RAD)
-        if perturb and repeat == 1:
-            result.force_n_per_tick[-1] = (result.force_n_per_tick[-1] or 0.0) + 1.0
-        results.append(result)
-    return results
-
-
-def _final_ee_states(count: int) -> list[dict]:
-    return [
-        {
-            "final_ee_position_world_m": [0.5, 0.0, 1.0],
-            "final_ee_orientation_world_xyzw": [0.0, 0.0, 0.0, 1.0],
-        }
-        for _ in range(count)
-    ]
-
-
-def test_determinism_probe_passes_on_identical_repeats() -> None:
-    report = determinism_probe_report(
-        _result_pair(perturb=False), seed=0, final_ee_states=_final_ee_states(2)
-    )
-    assert report["passed"] is True
-    assert report["repeats"] == 2
-    assert report["kind"] == "repeat_same_seed"
-    assert len(set(report["trace_sha256"])) == 1
-    assert report["mismatches"] == []
-
-
-def test_determinism_probe_fails_beyond_tolerance() -> None:
-    report = determinism_probe_report(
-        _result_pair(perturb=True), seed=0, final_ee_states=_final_ee_states(2)
-    )
-    assert report["passed"] is False
-    assert any("force trace" in m for m in report["mismatches"])
-    assert len(set(report["trace_sha256"])) == 2
-
-
-def test_determinism_probe_detects_tick_count_mismatch() -> None:
-    a = _run(FakeDoorPushEnv(), 8, success_angle_rad=SUCCESS_RAD)
-    b = _run(FakeDoorPushEnv(), 8, max_ticks=a.n_ticks - 2)
-    report = determinism_probe_report([a, b], seed=0, final_ee_states=_final_ee_states(2))
-    assert report["passed"] is False
-    assert any("n_ticks" in m for m in report["mismatches"])
-
-
-def test_trace_hash_is_stable_and_content_sensitive() -> None:
-    a, b = _result_pair(perturb=False)
-    assert rollout_trace_hash(a) == rollout_trace_hash(b)
-    log = AdapterLog()
-    synthetic = RolloutResult(
-        n_ticks=1,
-        initial_angle_rad=0.0,
-        final_angle_rad=0.1,
-        log=log,
-        decisions_per_tick=[
-            AdapterDecision(
-                status=AdapterStatus.ACCEPTED,
-                requested=np.zeros(6),
-                applied=np.zeros(6),
-            )
-        ],
-        contact_per_tick=[None],
-        force_n_per_tick=[None],
-    )
-    assert rollout_trace_hash(synthetic) != rollout_trace_hash(a)
-
-
-def test_fresh_process_probe_reference_and_replay_cycle() -> None:
-    # JSON round-trip mirrors what the eval artifact stores between the
-    # primary eval process and the fresh replay process.
-    import json
-
-    reference_result, replay_result = _result_pair(perturb=False)
-    probe = determinism_probe_reference(
-        reference_result, seed=0, final_ee=_final_ee_states(1)[0]
-    )
-    assert probe["kind"] == DETERMINISM_PROBE_KIND
-    assert probe["repeats"] == 1 and probe["passed"] is None
-    probe = json.loads(json.dumps(probe))
-    updated = determinism_probe_update(
-        probe, replay_result, final_ee=_final_ee_states(1)[0]
-    )
-    assert updated["repeats"] == 2
-    assert updated["passed"] is True
-    assert len(set(updated["trace_sha256"])) == 1
-    assert "note" not in updated
-
-
-def test_fresh_process_probe_replay_detects_divergence() -> None:
-    reference_result, replay_result = _result_pair(perturb=True)
-    probe = determinism_probe_reference(
-        reference_result, seed=0, final_ee=_final_ee_states(1)[0]
-    )
-    updated = determinism_probe_update(
-        probe, replay_result, final_ee=_final_ee_states(1)[0]
-    )
-    assert updated["passed"] is False
-    assert any("force trace" in m for m in updated["mismatches"])
-    assert len(set(updated["trace_sha256"])) == 2
-
-
-def test_fresh_process_probe_detects_force_availability_divergence() -> None:
-    reference_result, replay_result = _result_pair(perturb=False)
-    replay_result.force_n_per_tick[0] = None
-    updated = determinism_probe_update(
-        determinism_probe_reference(
-            reference_result, seed=0, final_ee=_final_ee_states(1)[0]
-        ),
-        replay_result,
-        final_ee=_final_ee_states(1)[0],
-    )
-    assert updated["passed"] is False
-    assert any("force trace availability" in m for m in updated["mismatches"])
-
-
-def test_fresh_process_probe_requires_exact_adapter_reasons_and_warning_ids() -> None:
-    reference_result, replay_result = _result_pair(perturb=False)
-    replay_result.decisions_per_tick[0] = replace(
-        replay_result.decisions_per_tick[0],
-        reason="different reason",
-        warning_records=(
-            AdapterWarning(id="a9.synthetic", message="synthetic warning"),
-        ),
-    )
-    updated = determinism_probe_update(
-        determinism_probe_reference(
-            reference_result, seed=0, final_ee=_final_ee_states(1)[0]
-        ),
-        replay_result,
-        final_ee=_final_ee_states(1)[0],
-    )
-    assert updated["passed"] is False
-    assert any("decision reasons" in mismatch for mismatch in updated["mismatches"])
-    assert any("warning identities" in mismatch for mismatch in updated["mismatches"])
-    assert any("warning counts" in mismatch for mismatch in updated["mismatches"])
-
-
-def test_final_ee_physical_state_uses_documented_tolerances() -> None:
-    reference_result, replay_result = _result_pair(perturb=False)
-    reference_ee = _final_ee_states(1)[0]
-    replay_ee = _final_ee_states(1)[0]
-    replay_ee["final_ee_position_world_m"][0] += 5e-10
-    within = determinism_probe_update(
-        determinism_probe_reference(reference_result, seed=0, final_ee=reference_ee),
-        replay_result,
-        final_ee=replay_ee,
-    )
-    assert within["passed"] is True
-    assert within["max_abs_diffs"]["final_ee_position_world_m"] == pytest.approx(5e-10)
-    replay_ee["final_ee_orientation_world_xyzw"][3] += 2e-9
-    outside = determinism_probe_update(
-        determinism_probe_reference(reference_result, seed=0, final_ee=reference_ee),
-        replay_result,
-        final_ee=replay_ee,
-    )
-    assert outside["passed"] is False
-    assert any("orientation" in mismatch for mismatch in outside["mismatches"])
-
-
-def test_determinism_probe_requires_two_repeats() -> None:
-    a = _run(FakeDoorPushEnv(), 8, success_angle_rad=SUCCESS_RAD)
-    with pytest.raises(ValueError, match="at least 2"):
-        determinism_probe_report([a], seed=0, final_ee_states=_final_ee_states(1))
 
 
 def test_success_angle_none_preserves_legacy_semantics() -> None:

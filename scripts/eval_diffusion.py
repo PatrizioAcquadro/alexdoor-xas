@@ -1,114 +1,79 @@
 #!/usr/bin/env python
-"""Closed-loop Diffusion Policy evaluation through adapters on calibrated Alex V2.
-
-Loads a trained diffusion checkpoint, rebuilds the policy (norm stats and
-noise schedule embedded), and rolls it out on ``AlexDoor-DoorPush-AlexV2-v0``
-through the adapter matching the checkpoint's action space (A2: world-frame
-deltas, A3: door-frame deltas). Execution is receding-horizon: each sampled
-``Tp``-chunk contributes its first ``rollout.n_action_steps`` deltas before
-the policy is re-queried. Sampling is seeded per rollout so the fixed-reset
-block stays a determinism probe. Runs ``rollout.episodes_fixed`` fixed-reset
-rollouts plus ``rollout.episodes_randomized`` rollouts with seeded EE
-start-offset variations on held-out seeds. Writes per-rollout rows and
-aggregates (success vs. the door-angle threshold, adapter
-accept/correct/reject/warning counts) to ``metrics/diffusion_eval.json`` next
-to the checkpoint. A reference metrics file (scripted baseline or an ACT
-``act_eval.json``) is embedded when ``rollout.reference_metrics`` is set;
-``rollout.matched_scripted_reference=true`` additionally runs the scripted
-controller on the same fixed/randomized seed plan::
-
-    PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/eval_diffusion.py \
-        --viz none --device cuda:0 \
-        rollout.policy_device=cuda \
-        rollout.checkpoint=outputs/diffusion_door_push/<run_id>/checkpoints/best.pt
-"""
+"""Evaluate one Diffusion best checkpoint under its frozen closed-loop protocol."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import math
-import os
 import sys
 import traceback
+from pathlib import Path
 
-# -- AppLauncher must be configured before any other Isaac import; the
-# diffusion config layer is torch/diffusers/Isaac-free, so it resolves first.
 from isaaclab.app import AppLauncher
 
-from alexdoor_xas.policies.diffusion import DiffusionConfigError, load_diffusion_config
+from alexdoor_xas.policies.common.closed_loop import (
+    evaluation_preflight,
+    validate_evaluation_protocol,
+)
+from alexdoor_xas.policies.common.runs import load_resolved_config
+from alexdoor_xas.policies.diffusion.config import diffusion_config_from_dict
 
-parser = argparse.ArgumentParser(description="AlexDoor-XAS Diffusion Policy closed-loop eval")
+parser = argparse.ArgumentParser(description="AlexDoor-XAS Diffusion closed-loop evaluation")
+parser.add_argument("--checkpoint", required=True, help="Training run checkpoints/best.pt.")
 parser.add_argument(
-    "--checkpoint", type=str, default=None, help="Trained diffusion checkpoint (.pt)."
-)
-parser.add_argument("--sampler", type=str, default=None, help="Rollout sampler: ddpm or ddim.")
-parser.add_argument("--inference-steps", type=int, default=None, help="Denoising steps at rollout.")
-parser.add_argument(
-    "--reference-metrics",
-    type=str,
-    default=None,
-    help="Reference metrics json (scripted baseline or ACT act_eval.json) to embed.",
+    "--protocol",
+    help="Complete evaluation protocol JSON; omit to use the source run's frozen protocol.",
 )
 parser.add_argument(
-    "--matched-scripted-reference",
-    action="store_true",
-    default=None,
-    help="Evaluate the scripted controller on the same rollout seed plan.",
-)
-parser.add_argument(
-    "--determinism-replay",
-    type=str,
-    default=None,
-    help=(
-        "Path to an existing eval JSON: rerun its first fixed-seed rollout as this "
-        "fresh process's first episode and complete the repeat-same-seed probe."
-    ),
+    "--trace-rollout",
+    action="append",
+    default=[],
+    help="Additionally retain this rollout key in traces/; may be repeated.",
 )
 parser.add_argument(
     "--clean-shutdown",
     action="store_true",
-    help="Call SimulationApp.close() before exiting; useful for debugging Kit shutdown hangs.",
+    help="Call SimulationApp.close() before exiting.",
 )
 AppLauncher.add_app_launcher_args(parser)
-args, hydra_overrides = parser.parse_known_args()
-
-try:
-    dp_cfg = load_diffusion_config(
-        hydra_overrides,
-        cli_overrides={
-            "rollout.checkpoint": args.checkpoint,
-            "rollout.sampler": args.sampler,
-            "rollout.num_inference_steps": args.inference_steps,
-            "rollout.reference_metrics": args.reference_metrics,
-            "rollout.matched_scripted_reference": args.matched_scripted_reference,
-        },
-    )
-except DiffusionConfigError as error:
-    parser.error(str(error))
-if dp_cfg.rollout.checkpoint is None:
-    parser.error("rollout.checkpoint is required (--checkpoint or rollout.checkpoint=...)")
-# A non-default door pose must carry an explicit pose label: rows and the
-# per-pose metrics filename are keyed by it, so an unlabeled pose would be
-# silently bucketed as the default pose in the smoke summary.
-if dp_cfg.rollout.door_pose_id is None and (
-    dp_cfg.rollout.door_yaw_deg != 0.0
-    or dp_cfg.rollout.door_offset_x != 0.0
-    or dp_cfg.rollout.door_offset_y != 0.0
-):
+args, unknown = parser.parse_known_args()
+if unknown:
     parser.error(
-        "rollout.door_pose_id is required when a non-default door pose is set "
-        "(rollout.door_yaw_deg / rollout.door_offset_x / rollout.door_offset_y)"
+        "evaluation does not accept config overrides; use a complete --protocol JSON: "
+        + " ".join(unknown)
     )
+
+checkpoint_path = Path(args.checkpoint).expanduser().resolve()
+if not checkpoint_path.is_file():
+    parser.error(f"checkpoint not found: {checkpoint_path}")
+source_run = checkpoint_path.parent.parent
+source_resolved = load_resolved_config(source_run)
+if source_resolved.get("run_type") != "training" or source_resolved.get("policy") != "diffusion":
+    parser.error("--checkpoint must be best.pt from a Diffusion training run")
+dp_cfg = diffusion_config_from_dict(source_resolved["config"])
+protocol = (
+    json.loads(Path(args.protocol).expanduser().read_text())
+    if args.protocol
+    else source_resolved["evaluation_protocol"]
+)
+try:
+    validate_evaluation_protocol(protocol, "diffusion")
+    evaluation_preflight(
+        source_checkpoint=checkpoint_path,
+        requested_protocol=protocol,
+        policy="diffusion",
+    )
+except (FileExistsError, ValueError) as error:
+    parser.error(str(error))
 
 app_launcher = AppLauncher(args)
 simulation_app = app_launcher.app
 
-# -- Runtime imports after AppLauncher.
+# Runtime imports must follow AppLauncher.
 import gymnasium as gym  # noqa: E402
 
 import alexdoor_xas.envs.door_task as door_task  # noqa: E402
-from alexdoor_xas import paths  # noqa: E402
 from alexdoor_xas.action.spaces import A2_EE_DELTA, A3_OBJ_REL_EE_DELTA  # noqa: E402
 from alexdoor_xas.adapters import (  # noqa: E402
     A2Adapter,
@@ -118,57 +83,39 @@ from alexdoor_xas.adapters import (  # noqa: E402
     rollout_chunks,
 )
 from alexdoor_xas.assets.alex_v2_contract import RobotAssetRef  # noqa: E402
-from alexdoor_xas.data_engine import (  # noqa: E402
-    DataEngineCfg,
-    apply_start_offset,
-    plan_episodes,
-    run_episode,
-)
-from alexdoor_xas.envs.door_task.alex_v2_runtime import ALEX_V2_LIMITATIONS  # noqa: E402
+from alexdoor_xas.data_engine import apply_start_offset, plan_randomized_seeds  # noqa: E402
 from alexdoor_xas.envs.door_task.door_push_alex_v2_env_cfg import (  # noqa: E402
     ALEX_V2_ROBOT_TAG,
     DoorPushAlexV2EnvCfg,
 )
-from alexdoor_xas.eval.metrics import aggregate_metrics, episode_metrics  # noqa: E402
-from alexdoor_xas.eval.sanity import FORCE_DATASET_LIMIT_N  # noqa: E402
-from alexdoor_xas.policies.common.eval_metadata import checkpoint_metadata  # noqa: E402
-from alexdoor_xas.policies.common.rollout_eval import (  # noqa: E402
-    aggregate_rollout_rows,
-    contact_report,
-    determinism_probe_reference,
-    determinism_probe_update,
-    final_ee_state,
-    force_trace_evidence,
-    scripted_reference_payload,
-    seed_protocol,
-    summarize_decision_warnings,
+from alexdoor_xas.policies.common.closed_loop import (  # noqa: E402
+    closed_loop_trace_payload,
+    factual_rollout_row,
+    prepare_evaluation_run,
+    protocol_rollouts,
+    publish_closed_loop,
+    rollout_key,
 )
 from alexdoor_xas.policies.diffusion.policy import (  # noqa: E402
     DiffusionPolicy,
     diffusion_chunk_source,
 )
-from alexdoor_xas.policies.scripted import (  # noqa: E402
-    alex_v2_push_cfg,
-    alex_v2_variation_bounds,
-)
-from alexdoor_xas.tracking import load_wandb_config, start_wandb_run  # noqa: E402
+from alexdoor_xas.policies.scripted import alex_v2_variation_bounds  # noqa: E402
 
 
-def _make_env():
+def _make_env(pose_id: str):
+    control = protocol["control"]
     cfg = DoorPushAlexV2EnvCfg()
-    cfg.seed = dp_cfg.rollout.base_seed
+    cfg.seed = 0
     cfg.sim.device = args.device
-    cfg.door_yaw_rad = math.radians(dp_cfg.rollout.door_yaw_deg)
-    cfg.door_offset_xy = (dp_cfg.rollout.door_offset_x, dp_cfg.rollout.door_offset_y)
+    cfg.sim.dt = float(control["sim_dt_s"])
+    cfg.decimation = int(control["decimation"])
+    cfg.sim.render_interval = cfg.decimation
+    cfg.max_pos_delta_m = float(control["max_position_delta_m"])
+    cfg.max_rot_delta_rad = float(control["max_rotation_delta_rad"])
+    cfg.episode_length_s = float(protocol["horizon_ticks"]) * cfg.sim.dt * cfg.decimation
+    cfg.door_pose_id = pose_id
     return gym.make(door_task.DOOR_PUSH_ALEX_V2_ENV_ID, cfg=cfg).unwrapped
-
-
-def _door_pose_payload() -> dict:
-    return {
-        "door_pose_id": dp_cfg.rollout.door_pose_id or "D0",
-        "door_yaw_deg": dp_cfg.rollout.door_yaw_deg,
-        "door_offset_xy": [dp_cfg.rollout.door_offset_x, dp_cfg.rollout.door_offset_y],
-    }
 
 
 def _fresh_adapter(action_space: str, env):
@@ -178,7 +125,10 @@ def _fresh_adapter(action_space: str, env):
         calibration=env.alex_v2_calibration(),
         workspace_center_w=center_w,
     )
-    a2 = A2Adapter(limits, contact_entry_shaping=True)
+    a2 = A2Adapter(
+        limits,
+        contact_entry_shaping=bool(protocol["control"]["contact_entry_shaping"]),
+    )
     if action_space == A2_EE_DELTA:
         return a2
     if action_space == A3_OBJ_REL_EE_DELTA:
@@ -186,410 +136,110 @@ def _fresh_adapter(action_space: str, env):
     raise ValueError(f"no adapter path for action space {action_space!r}")
 
 
-def _run_rollout(
-    env,
-    policy,
-    seed: int,
-    variation,
-    success_angle_rad: float,
-    *,
-    capture_final_ee: bool = False,
-) -> tuple[dict, object, dict | None]:
-    env.reset(seed=seed)
-    settle_report = None
-    if variation is not None:
-        settle_report = apply_start_offset(env, read_door_frame(env), variation)
-    adapter = _fresh_adapter(policy.action_space, env)
-    # Per-rollout sampling seed: the physics is deterministic headless, so the
-    # same (reset seed, sampling seed) pair replays the same rollout — the
-    # repeat-same-seed probe relies on exactly this.
-    policy.seed(seed)
-    # Per-tick success semantics: the driver checks the hinge threshold after
-    # every executed control tick and stops at the first crossing, so
-    # first_success_tick is Ta-independent (post-task extrapolation is out of
-    # distribution and can knock the open door shut again).
-    source = diffusion_chunk_source(policy, env, n_action_steps=dp_cfg.rollout.n_action_steps)
-    result = rollout_chunks(
-        env,
-        source,
-        adapter,
-        max_ticks=dp_cfg.rollout.max_ticks,
-        success_angle_rad=success_angle_rad,
-    )
-    warning_summary = summarize_decision_warnings(result.decisions_per_tick)
-    control_dt = float(env.cfg.sim.dt) * int(env.cfg.decimation)
-    contact = contact_report(
-        result.contact_per_tick,
-        result.force_n_per_tick,
-        control_dt,
-        admission_bound_n=FORCE_DATASET_LIMIT_N,
-    )
-    success = bool(result.success)
-    row = {
-        "seed": seed,
-        "randomized": variation is not None,
-        **_door_pose_payload(),
-        "success": success,
-        "termination_reason": result.termination_reason,
-        "first_success_tick": result.first_success_tick,
-        "time_to_success_s": (
-            result.first_success_tick * control_dt
-            if result.first_success_tick is not None
-            else None
-        ),
-        "environment_terminated": result.environment_terminated,
-        "environment_truncated": result.environment_truncated,
-        "start_pose_settle": settle_report,
-        "initial_angle_rad": result.initial_angle_rad,
-        "final_angle_rad": result.final_angle_rad,
-        "door_angle_change_rad": result.door_angle_change_rad,
-        "n_ticks": result.n_ticks,
-        "contact_ticks": contact["contact_ticks"],
-        "contact_source": contact["contact_source"],
-        "force_exceeds_admission_bound": contact["force_exceeds_admission_bound"],
-        "force_n": contact["force_n"],
-        "force_n_all_samples": contact["force_n_all_samples"],
-        "force_trace_evidence": force_trace_evidence(
-            result, admission_bound_n=FORCE_DATASET_LIMIT_N
-        ),
-        "impulse_ns": contact["impulse_ns"],
-        "contact_unavailable_reason": contact["unavailable_reason"],
-        "n_accepted": result.log.n_accepted,
-        "n_corrected": result.log.n_corrected,
-        "n_rejected": result.log.n_rejected,
-        "n_warnings": warning_summary["n_warnings"],
-        "warning_counts": warning_summary["warning_counts"],
-        "warning_family_counts": warning_summary["warning_family_counts"],
-        "warning_records": warning_summary["warning_records"],
-        "policy_metadata_keys": [
-            "horizon",
-            "checkpoint_horizon",
-            "n_action_steps",
-            "sampler",
-            "num_inference_steps",
-            "execution_mode",
-        ],
-        "horizon": policy.chunk_size,
-        "checkpoint_horizon": policy.chunk_size,
-        "n_action_steps": dp_cfg.rollout.n_action_steps,
-        "sampler": dp_cfg.rollout.sampler,
-        "num_inference_steps": dp_cfg.rollout.num_inference_steps,
-        "execution_mode": "receding_horizon",
-        "notes": result.notes,
-    }
-    ee_state = final_ee_state(env, result) if capture_final_ee else None
-    return row, result, ee_state
+def _run() -> int:
+    rows: list[dict] = []
+    force_samples: dict[str, list[float]] = {}
+    trace_payloads: dict[str, dict] = {}
+    policy = None
+    rollout_plan = protocol_rollouts(protocol)
+    execution = protocol["policy_execution"]
+    success_angle = math.radians(float(protocol["success_threshold_deg"]))
 
-
-def _reference_aggregate() -> dict | None:
-    if dp_cfg.rollout.reference_metrics is None:
-        return None
-    path = paths.REPO_ROOT / dp_cfg.rollout.reference_metrics
-    payload = json.loads(path.read_text())
-    return {"path": str(path), "aggregate": payload.get("aggregate", payload)}
-
-
-def _episode_plan(env):
-    variation_bounds = alex_v2_variation_bounds(env.alex_v2_calibration())
-    return plan_episodes(
-        dp_cfg.rollout.episodes_fixed,
-        dp_cfg.rollout.episodes_randomized,
-        dp_cfg.rollout.base_seed,
-        variation_bounds,
-    )
-
-
-def _seed_protocol(env) -> dict:
-    variation_bounds = alex_v2_variation_bounds(env.alex_v2_calibration())
-    return seed_protocol(
-        base_seed=dp_cfg.rollout.base_seed,
-        episodes_fixed=dp_cfg.rollout.episodes_fixed,
-        episodes_randomized=dp_cfg.rollout.episodes_randomized,
-        variation_bounds=variation_bounds,
-    )
-
-
-def _run_matched_scripted_reference(env, plan, success_angle_rad: float, protocol: dict) -> dict:
-    engine_cfg = DataEngineCfg(
-        task=paths.ALEX_V2_TASK,
-        robot=ALEX_V2_ROBOT_TAG,
-        success_angle_rad=success_angle_rad,
-        max_ticks=dp_cfg.rollout.max_ticks,
-        limitations=ALEX_V2_LIMITATIONS,
-    )
-    controller_cfg = alex_v2_push_cfg(env.alex_v2_calibration())
-    episodes = [run_episode(env, item, engine_cfg, controller_cfg=controller_cfg) for item in plan]
-    per_episode = [episode_metrics(episode) for episode in episodes]
-    aggregate = aggregate_metrics(per_episode)
-    return scripted_reference_payload(
-        per_episode_metrics=per_episode,
-        aggregate=aggregate,
-        protocol=protocol,
-    )
-
-
-def main() -> int:
-    rc = 0
-    env = None
-    try:
-        checkpoint_path = paths.REPO_ROOT / dp_cfg.rollout.checkpoint
-        env = _make_env()
-        runtime_asset = RobotAssetRef.from_dict(env.robot_asset_provenance())
-        policy = DiffusionPolicy.from_checkpoint(
-            checkpoint_path,
-            device=dp_cfg.rollout.policy_device,
-            sampler=dp_cfg.rollout.sampler,
-            num_inference_steps=dp_cfg.rollout.num_inference_steps,
-            runtime_asset=runtime_asset,
-        )
-        run_dir = checkpoint_path.parent.parent  # outputs/<experiment>/<run_id>/
-        # Sampler/horizon metadata must be consistent with the checkpoint: the
-        # config-level Ta<=Tp guard ran against configs/diffusion.yaml's
-        # horizon, which for a non-default checkpoint only matches when
-        # model.horizon=<H> was passed — fail loudly instead of silently
-        # evaluating with mislabeled horizon metadata.
-        if policy.chunk_size != dp_cfg.model.horizon:
-            raise RuntimeError(
-                f"checkpoint horizon Tp={policy.chunk_size} != config model.horizon="
-                f"{dp_cfg.model.horizon}; pass model.horizon={policy.chunk_size} so the "
-                "recorded metadata and the Ta<=Tp check match the checkpoint"
-            )
-        if dp_cfg.rollout.n_action_steps > policy.chunk_size:
-            raise RuntimeError(
-                f"rollout.n_action_steps ({dp_cfg.rollout.n_action_steps}) exceeds the "
-                f"checkpoint horizon Tp={policy.chunk_size}"
-            )
-        success_angle_rad = math.radians(dp_cfg.rollout.success_angle_deg)
-        print(
-            f"[eval_diffusion] checkpoint={checkpoint_path} space={policy.action_space} "
-            f"obs={policy.obs_preset} Tp={policy.chunk_size} "
-            f"Ta={dp_cfg.rollout.n_action_steps} sampler={dp_cfg.rollout.sampler}-"
-            f"{dp_cfg.rollout.num_inference_steps} device={dp_cfg.rollout.policy_device}",
-            flush=True,
-        )
-        checkpoint_info = checkpoint_metadata(policy, "diffusion")
-        if args.determinism_replay:
-            return _run_determinism_replay(env, policy, checkpoint_path, success_angle_rad)
-
-        plan = _episode_plan(env)
-        protocol = _seed_protocol(env)
-        rows: list[dict] = []
-        first_fixed_result = None
-        first_fixed_ee = None
-        fixed_i = 0
-        random_i = 0
-        for item in plan:
-            row, result, ee_state = _run_rollout(
-                env,
-                policy,
-                item.seed,
-                item.variation,
-                success_angle_rad,
-                capture_final_ee=item.variation is None and first_fixed_result is None,
-            )
-            rows.append(row)
-            if item.variation is None:
-                if first_fixed_result is None:
-                    first_fixed_result = result  # this process's first episode
-                    first_fixed_ee = ee_state
-                print(f"[fixed {fixed_i}] {_row_line(row)}", flush=True)
-                fixed_i += 1
-            else:
-                print(f"[rand {random_i}] {_row_line(row)}", flush=True)
-                random_i += 1
-
-        # Repeat-same-seed determinism evidence: same-seed repeats *within* one
-        # sim process are history-dependent (PhysX internal state evolves per
-        # episode), so the probe records this process's first fixed rollout
-        # (identical reset AND sampling seed) and is completed by a fresh
-        # --determinism-replay process that reruns it as *its* first episode.
-        determinism_probe = None
-        if first_fixed_result is not None:
-            if first_fixed_ee is None:
-                raise RuntimeError("first fixed rollout has no valid final EE state")
-            determinism_probe = determinism_probe_reference(
-                first_fixed_result,
-                seed=dp_cfg.rollout.base_seed,
-                final_ee=first_fixed_ee,
-            )
-            print(
-                f"[determinism] reference recorded (seed={dp_cfg.rollout.base_seed}); "
-                "fresh-process replay pending",
-                flush=True,
-            )
-
-        aggregate = aggregate_rollout_rows(rows)
-        matched_scripted_reference = None
-        if dp_cfg.rollout.matched_scripted_reference:
-            matched_scripted_reference = _run_matched_scripted_reference(
-                env, plan, success_angle_rad, protocol
-            )
-            matched = matched_scripted_reference["aggregate"]
-            print(
-                f"[matched scripted] success_rate={matched['success_rate']:.2f} "
-                f"({matched['n_success']}/{matched['n_episodes']}) "
-                f"final_angle_mean="
-                f"{math.degrees(matched['final_door_angle_rad']['mean']):.1f} deg",
-                flush=True,
-            )
-        payload = {
-            "policy": "diffusion",
-            "checkpoint": str(checkpoint_path),
-            "checkpoint_metadata": checkpoint_info,
-            "robot_compatibility_label": policy.robot_compatibility_label,
-            "action_space": policy.action_space,
-            "obs_preset": policy.obs_preset,
-            "horizon": policy.chunk_size,
-            "checkpoint_horizon": policy.chunk_size,
-            "n_action_steps": dp_cfg.rollout.n_action_steps,
-            "sampler": dp_cfg.rollout.sampler,
-            "num_inference_steps": dp_cfg.rollout.num_inference_steps,
-            "execution_mode": "receding_horizon",
-            "policy_device": dp_cfg.rollout.policy_device,
-            "max_ticks": dp_cfg.rollout.max_ticks,
-            "success_angle_deg": dp_cfg.rollout.success_angle_deg,
-            "success_semantics": "per_tick_first_crossing_stop",
-            "base_seed": dp_cfg.rollout.base_seed,
-            "config_horizon": dp_cfg.model.horizon,
-            "door_pose": _door_pose_payload(),
-            "control_dt": float(env.cfg.sim.dt) * int(env.cfg.decimation),
-            "seed_protocol": protocol,
-            "determinism_probe": determinism_probe,
-            "rollouts": rows,
-            "aggregate": aggregate,
-            "reference": _reference_aggregate(),
-            "scripted_matched_reference": matched_scripted_reference,
-        }
-        eval_name = (
-            f"diffusion_eval_{dp_cfg.rollout.door_pose_id}.json"
-            if dp_cfg.rollout.door_pose_id
-            else "diffusion_eval.json"
-        )
-        metrics_path = run_dir / "metrics" / eval_name
-        metrics_path.parent.mkdir(parents=True, exist_ok=True)
-        metrics_path.write_text(json.dumps(payload, indent=2) + "\n")
-
-        wandb_cfg = load_wandb_config(
-            overrides={
-                "group": dp_cfg.run.experiment,
-                "name": f"{run_dir.name}_eval",
-                "job_type": "eval",
-                **dp_cfg.wandb_overrides,
+    for pose_spec in protocol["poses"]:
+        pose_id = str(pose_spec["pose"])
+        env = _make_env(pose_id)
+        try:
+            if policy is None:
+                runtime_asset = RobotAssetRef.from_dict(env.robot_asset_provenance())
+                policy = DiffusionPolicy.from_checkpoint(
+                    checkpoint_path,
+                    device=dp_cfg.rollout.policy_device,
+                    sampler=str(execution["sampler"]),
+                    num_inference_steps=int(execution["num_inference_steps"]),
+                    runtime_asset=runtime_asset,
+                )
+                if policy.action_space != dp_cfg.dataset.space:
+                    raise RuntimeError("checkpoint action space differs from resolved config")
+            variations = {
+                item.seed: item.variation
+                for item in plan_randomized_seeds(
+                    pose_spec["randomized_seeds"],
+                    alex_v2_variation_bounds(env.alex_v2_calibration()),
+                )
             }
-        )
-        with start_wandb_run(wandb_cfg, config=payload | {"rollouts": None}) as run:
-            run.log(
-                {
-                    "eval/success_rate": aggregate["success_rate"],
-                    "eval/final_angle_mean_rad": aggregate["final_angle_rad"]["mean"],
-                    "eval/n_corrected": aggregate["adapter"]["n_corrected"],
-                    "eval/n_rejected": aggregate["adapter"]["n_rejected"],
-                    "eval/n_warnings": aggregate["adapter"]["n_warnings"],
-                }
-            )
+            pose_items = [item for item in rollout_plan if item["pose"] == pose_id]
+            for item in pose_items:
+                seed = int(item["seed"])
+                env.reset(seed=seed)
+                variation = variations.get(seed) if item["status"] == "randomized" else None
+                if variation is not None:
+                    apply_start_offset(env, read_door_frame(env), variation)
+                policy.seed(seed)
+                source = diffusion_chunk_source(
+                    policy,
+                    env,
+                    n_action_steps=int(execution["n_action_steps"]),
+                )
+                result = rollout_chunks(
+                    env,
+                    source,
+                    _fresh_adapter(policy.action_space, env),
+                    max_ticks=int(protocol["horizon_ticks"]),
+                    stop_on_reject=bool(protocol["control"]["stop_on_reject"]),
+                    success_angle_rad=success_angle,
+                )
+                row, forces = factual_rollout_row(
+                    pose=pose_id,
+                    seed=seed,
+                    status=item["status"],
+                    result=result,
+                    control_dt_s=float(env.cfg.sim.dt) * int(env.cfg.decimation),
+                    force_limit_n=float(protocol["force_limit_n"]),
+                )
+                key = rollout_key(pose_id, seed, item["status"])
+                rows.append(row)
+                force_samples[key] = forces
+                trace_payloads[key] = closed_loop_trace_payload(result)
+                print(
+                    f"[eval_diffusion] {key}: success={row['success']} "
+                    f"reason={row['termination_reason']} steps={row['evaluated_steps']}",
+                    flush=True,
+                )
+        finally:
+            env.close()
 
-        print(
-            f"[eval_diffusion] success_rate={aggregate['success_rate']:.2f} "
-            f"({aggregate['n_success']}/{aggregate['n_rollouts']}) "
-            f"final_angle_mean={math.degrees(aggregate['final_angle_rad']['mean']):.1f} deg "
-            f"adapter accepted/corrected/rejected="
-            f"{aggregate['adapter']['n_accepted']}/{aggregate['adapter']['n_corrected']}/"
-            f"{aggregate['adapter']['n_rejected']} "
-            f"warnings={aggregate['adapter']['n_warnings']}",
-            flush=True,
-        )
-        print(f"[eval_diffusion] metrics: {metrics_path}", flush=True)
-    except Exception:  # noqa: BLE001
-        traceback.print_exc()
-        print("FAIL: Diffusion Policy evaluation failed.", flush=True)
-        rc = 1
-    finally:
-        if env is not None:
-            try:
-                env.close()
-            except Exception:  # noqa: BLE001
-                traceback.print_exc()
-                rc = 1 if rc == 0 else rc
-        if args.clean_shutdown:
-            try:
-                simulation_app.close()
-            except Exception:  # noqa: BLE001
-                traceback.print_exc()
-                rc = 1 if rc == 0 else rc
-    return rc
-
-
-def _run_determinism_replay(env, policy, checkpoint_path, success_angle_rad: float) -> int:
-    """Fresh-process leg of the repeat-same-seed probe: rerun + compare + record."""
-    path = paths.REPO_ROOT / args.determinism_replay
-    payload = json.loads(path.read_text())
-    probe = payload.get("determinism_probe")
-    if not probe:
-        raise RuntimeError(f"{path} carries no determinism probe block to complete")
-    # The replay is only valid evidence if this process is configured exactly
-    # like the reference eval; any drift is a hard error, not a comparison.
-    expected = {
-        "policy": "diffusion",
-        "checkpoint": str(checkpoint_path),
-        "action_space": policy.action_space,
-        "obs_preset": policy.obs_preset,
-        "max_ticks": dp_cfg.rollout.max_ticks,
-        "success_angle_deg": dp_cfg.rollout.success_angle_deg,
-        "base_seed": dp_cfg.rollout.base_seed,
-        "horizon": policy.chunk_size,
-        "checkpoint_horizon": policy.chunk_size,
-        "n_action_steps": dp_cfg.rollout.n_action_steps,
-        "sampler": dp_cfg.rollout.sampler,
-        "num_inference_steps": dp_cfg.rollout.num_inference_steps,
-        "execution_mode": "receding_horizon",
-    }
-    for key, value in expected.items():
-        if payload.get(key) != value:
-            raise RuntimeError(
-                f"replay configuration mismatch on {key}: eval has "
-                f"{payload.get(key)!r}, replay resolved {value!r}"
-            )
-    if payload.get("door_pose") != _door_pose_payload():
-        raise RuntimeError(
-            f"replay door pose {_door_pose_payload()} != eval {payload.get('door_pose')}"
-        )
-    _, result, ee_state = _run_rollout(
-        env,
-        policy,
-        dp_cfg.rollout.base_seed,
-        None,
-        success_angle_rad,
-        capture_final_ee=True,
+    run_dir, resolved, source_publish = prepare_evaluation_run(
+        source_checkpoint=checkpoint_path,
+        requested_protocol=protocol,
+        policy="diffusion",
+        output_root=None,
     )
-    if ee_state is None:
-        raise RuntimeError("determinism replay has no valid final EE state")
-    updated = determinism_probe_update(probe, result, final_ee=ee_state)
-    payload["determinism_probe"] = updated
-    path.write_text(json.dumps(payload, indent=2) + "\n")
+    metrics = publish_closed_loop(
+        run_dir=run_dir,
+        resolved=resolved,
+        rows=rows,
+        force_samples=force_samples,
+        source_run_publish=source_publish,
+        trace_payloads=trace_payloads,
+        selected_trace_keys=set(args.trace_rollout),
+    )
+    overall = metrics["aggregate"]["overall"]
     print(
-        f"[determinism-replay] seed={dp_cfg.rollout.base_seed} "
-        f"repeats={updated['repeats']} passed={updated['passed']} -> {path}",
+        f"[eval_diffusion] {overall['success_count']}/{overall['rollout_count']} successful; "
+        f"published {run_dir / 'closed_loop'}",
         flush=True,
     )
-    if not updated["passed"]:
-        for mismatch in updated["mismatches"]:
-            print(f"[determinism-mismatch] {mismatch}", flush=True)
-        return 1
     return 0
 
 
-def _row_line(row: dict) -> str:
-    return (
-        f"seed={row['seed']} success={row['success']} "
-        f"final={math.degrees(row['final_angle_rad']):.1f} deg ticks={row['n_ticks']} "
-        f"a/c/r={row['n_accepted']}/{row['n_corrected']}/{row['n_rejected']} "
-        f"warnings={row['n_warnings']}"
-    )
-
-
 if __name__ == "__main__":
-    # os._exit avoids Kit shutdown masking the exit code.
-    result = main()
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os._exit(result)
+    rc = 0
+    try:
+        rc = _run()
+    except Exception:  # noqa: BLE001
+        traceback.print_exc()
+        rc = 1
+    finally:
+        if args.clean_shutdown:
+            simulation_app.close()
+    sys.exit(rc)

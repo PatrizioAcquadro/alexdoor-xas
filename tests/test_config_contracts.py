@@ -55,7 +55,6 @@ def test_act_hydra_overrides_flow_through_all_sections() -> None:
             "train.overfit_episodes=2",
             "run.output_root=/tmp/act-pilot",
             "rollout.temporal_ensemble=true",
-            "rollout.matched_scripted_reference=true",
             "+wandb.mode=offline",
         ]
     )
@@ -68,7 +67,6 @@ def test_act_hydra_overrides_flow_through_all_sections() -> None:
     assert cfg.train.overfit_episodes == 2
     assert cfg.run.output_root == "/tmp/act-pilot"
     assert cfg.rollout.temporal_ensemble is True
-    assert cfg.rollout.matched_scripted_reference is True
     assert cfg.wandb_overrides == {"mode": "offline"}
 
 
@@ -77,13 +75,11 @@ def test_act_cli_overrides_take_precedence_over_hydra() -> None:
         ["train.epochs=3", "rollout.max_ticks=100"],
         cli_overrides={
             "train.epochs": 9,
-            "rollout.checkpoint": "outputs/x/best.pt",
             "rollout.max_ticks": None,
         },
     )
 
     assert cfg.train.epochs == 9
-    assert cfg.rollout.checkpoint == "outputs/x/best.pt"
     assert cfg.rollout.max_ticks == 100
 
 
@@ -171,7 +167,6 @@ def test_diffusion_hydra_overrides_flow_through_all_sections() -> None:
             "rollout.n_action_steps=4",
             "rollout.sampler=ddim",
             "rollout.num_inference_steps=10",
-            "rollout.matched_scripted_reference=true",
             "+wandb.mode=offline",
         ]
     )
@@ -189,7 +184,6 @@ def test_diffusion_hydra_overrides_flow_through_all_sections() -> None:
     assert cfg.rollout.n_action_steps == 4
     assert cfg.rollout.sampler == "ddim"
     assert cfg.rollout.num_inference_steps == 10
-    assert cfg.rollout.matched_scripted_reference is True
     assert cfg.wandb_overrides == {"mode": "offline"}
 
 
@@ -198,13 +192,11 @@ def test_diffusion_cli_overrides_take_precedence_over_hydra() -> None:
         ["train.epochs=3", "rollout.max_ticks=100"],
         cli_overrides={
             "train.epochs": 9,
-            "rollout.checkpoint": "outputs/x/best.pt",
             "rollout.max_ticks": None,
         },
     )
 
     assert cfg.train.epochs == 9
-    assert cfg.rollout.checkpoint == "outputs/x/best.pt"
     assert cfg.rollout.max_ticks == 100
 
 

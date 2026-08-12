@@ -89,14 +89,11 @@ class ActRunCfg:
 class ActRolloutCfg:
     """Closed-loop evaluation settings (Isaac side)."""
 
-    checkpoint: str | None = None
     max_ticks: int = 600
     success_angle_deg: float = 45.0
     temporal_ensemble: bool = False
     ensemble_m: float = 0.01
     policy_device: str = "cuda"
-    reference_metrics: str | None = None
-    matched_scripted_reference: bool = False
 
 
 @dataclass(frozen=True)
@@ -311,14 +308,11 @@ def _build_run_cfg(node: dict[str, Any]) -> ActRunCfg:
 
 def _build_rollout_cfg(node: dict[str, Any]) -> ActRolloutCfg:
     field_names = {
-        "checkpoint",
         "max_ticks",
         "success_angle_deg",
         "temporal_ensemble",
         "ensemble_m",
         "policy_device",
-        "reference_metrics",
-        "matched_scripted_reference",
     }
     _reject_unknown("rollout", node, field_names)
     defaults = ActRolloutCfg()
@@ -339,7 +333,6 @@ def _build_rollout_cfg(node: dict[str, Any]) -> ActRolloutCfg:
         raise ActConfigError("rollout.ensemble_m must be a positive finite number")
 
     return ActRolloutCfg(
-        checkpoint=_optional_str("rollout.checkpoint", node.get("checkpoint")),
         max_ticks=max_ticks,
         success_angle_deg=success_angle_deg,
         temporal_ensemble=_coerce_bool(
@@ -349,13 +342,6 @@ def _build_rollout_cfg(node: dict[str, Any]) -> ActRolloutCfg:
         ensemble_m=ensemble_m,
         policy_device=_required_str(
             "rollout.policy_device", node.get("policy_device", defaults.policy_device)
-        ),
-        reference_metrics=_optional_str(
-            "rollout.reference_metrics", node.get("reference_metrics")
-        ),
-        matched_scripted_reference=_coerce_bool(
-            "rollout.matched_scripted_reference",
-            node.get("matched_scripted_reference", defaults.matched_scripted_reference),
         ),
     )
 

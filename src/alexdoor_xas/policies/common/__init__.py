@@ -6,6 +6,11 @@ closed-loop eval aggregation. Policy packages import from here; this package
 never imports a policy, an adapter, or Isaac.
 """
 
+from alexdoor_xas.policies.common.closed_loop import (
+    aggregate_closed_loop,
+    factual_rollout_row,
+    protocol_rollouts,
+)
 from alexdoor_xas.policies.common.data import (
     EPOCH_SEED_STRIDE,
     PolicyData,
@@ -22,14 +27,6 @@ from alexdoor_xas.policies.common.obs import (
     build_env_obs,
     stop_on_hinge_angle,
 )
-from alexdoor_xas.policies.common.rollout_eval import (
-    aggregate_rollout_rows,
-    contact_report,
-    final_ee_state,
-    scripted_reference_payload,
-    seed_protocol,
-    summarize_decision_warnings,
-)
 
 __all__ = [
     "EPOCH_SEED_STRIDE",
@@ -37,18 +34,15 @@ __all__ = [
     "ROLLOUT_OBS_PRESETS",
     "PolicyData",
     "PolicyDataError",
-    "aggregate_rollout_rows",
+    "aggregate_closed_loop",
     "build_env_obs",
-    "contact_report",
-    "final_ee_state",
+    "factual_rollout_row",
     "load_policy_data",
     "make_eval_factory",
     "make_train_factory",
     "normalize_batch",
     "open_loop_report",
     "predict_episode_open_loop",
-    "scripted_reference_payload",
-    "seed_protocol",
+    "protocol_rollouts",
     "stop_on_hinge_angle",
-    "summarize_decision_warnings",
 ]

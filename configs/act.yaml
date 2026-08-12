@@ -32,13 +32,10 @@ run:
   output_root: null              # optional base override (cluster scratch for pilot jobs)
 
 rollout:
-  checkpoint: null
   max_ticks: 600
   success_angle_deg: 45.0
   temporal_ensemble: false
   ensemble_m: 0.01
   policy_device: cuda            # learned-policy inference runs on GPU by default
-  reference_metrics: null
-  matched_scripted_reference: false
 
 wandb: {}

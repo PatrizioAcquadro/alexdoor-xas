@@ -40,15 +40,12 @@ run:
   output_root: null              # optional base override (cluster scratch for pilot jobs)
 
 rollout:
-  checkpoint: null
   max_ticks: 600
   success_angle_deg: 45.0
   n_action_steps: 8              # Ta: executed prefix per chunk (receding horizon)
   sampler: ddpm                  # ddpm | ddim
   num_inference_steps: 100
   policy_device: cuda            # learned-policy inference runs on GPU by default
-  reference_metrics: null
-  matched_scripted_reference: false
 
 # Optional per-run W&B overrides; field names validated by WandbConfig.
 wandb: {}

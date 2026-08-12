@@ -104,15 +104,12 @@ class DiffusionRunCfg:
 class DiffusionRolloutCfg:
     """Closed-loop evaluation settings (Isaac side)."""
 
-    checkpoint: str | None = None
     max_ticks: int = 600
     success_angle_deg: float = 45.0
     n_action_steps: int = 8  # Ta: executed prefix of each predicted chunk (receding horizon)
     sampler: str = "ddpm"
     num_inference_steps: int = 100
     policy_device: str = "cuda"
-    reference_metrics: str | None = None
-    matched_scripted_reference: bool = False
 
 
 @dataclass(frozen=True)
@@ -415,15 +412,12 @@ def _build_run_cfg(node: dict[str, Any]) -> DiffusionRunCfg:
 
 def _build_rollout_cfg(node: dict[str, Any]) -> DiffusionRolloutCfg:
     field_names = {
-        "checkpoint",
         "max_ticks",
         "success_angle_deg",
         "n_action_steps",
         "sampler",
         "num_inference_steps",
         "policy_device",
-        "reference_metrics",
-        "matched_scripted_reference",
     }
     _reject_unknown("rollout", node, field_names)
     defaults = DiffusionRolloutCfg()
@@ -459,7 +453,6 @@ def _build_rollout_cfg(node: dict[str, Any]) -> DiffusionRolloutCfg:
         raise DiffusionConfigError("rollout.num_inference_steps must be positive")
 
     return DiffusionRolloutCfg(
-        checkpoint=_optional_str("rollout.checkpoint", node.get("checkpoint")),
         max_ticks=max_ticks,
         success_angle_deg=success_angle_deg,
         n_action_steps=n_action_steps,
@@ -467,13 +460,6 @@ def _build_rollout_cfg(node: dict[str, Any]) -> DiffusionRolloutCfg:
         num_inference_steps=num_inference_steps,
         policy_device=_required_str(
             "rollout.policy_device", node.get("policy_device", defaults.policy_device)
-        ),
-        reference_metrics=_optional_str(
-            "rollout.reference_metrics", node.get("reference_metrics")
-        ),
-        matched_scripted_reference=_coerce_bool(
-            "rollout.matched_scripted_reference",
-            node.get("matched_scripted_reference", defaults.matched_scripted_reference),
         ),
     )
 
