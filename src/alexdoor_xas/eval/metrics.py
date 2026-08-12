@@ -97,9 +97,7 @@ def aggregate_metrics(per_episode: list[dict[str, Any]]) -> dict[str, Any]:
     finals = np.array([m["final_door_angle_rad"] for m in per_episode], dtype=np.float64)
     finite_finals = finals[np.isfinite(finals)]
     successes = [m for m in per_episode if m["success"]]
-    times = [
-        m["time_to_threshold_s"] for m in successes if m["time_to_threshold_s"] is not None
-    ]
+    times = [m["time_to_threshold_s"] for m in successes if m["time_to_threshold_s"] is not None]
     termination_counts = Counter(m["termination_reason"] for m in per_episode)
     summary = {
         "n_episodes": len(per_episode),

@@ -27,9 +27,7 @@ def door_angle_plot(episodes: list[EpisodeBuffer], path: str | Path) -> Path:
         threshold = engine_cfg.get("success_angle_rad", threshold)
 
     if threshold is not None:
-        ax.axhline(
-            math.degrees(threshold), color="0.4", ls="--", lw=1.0, label="success threshold"
-        )
+        ax.axhline(math.degrees(threshold), color="0.4", ls="--", lw=1.0, label="success threshold")
     ax.set_xlabel("time (s)")
     ax.set_ylabel("door angle (deg)")
     ax.set_title("Scripted door push: door angle vs. time")

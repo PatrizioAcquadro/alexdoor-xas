@@ -44,19 +44,13 @@ def compose_offset_pose_xyzw(
     _validate_tensors(values)
     _validate_unit_quaternion(link_orientation_w_xyzw, "link_orientation_w_xyzw")
     _validate_unit_quaternion(offset_orientation_link_xyzw, "offset_orientation_link_xyzw")
-    batch_shape = _broadcast_batch_shape(
-        tuple((name, tensor, 1) for name, tensor, _ in values)
-    )
+    batch_shape = _broadcast_batch_shape(tuple((name, tensor, 1) for name, tensor, _ in values))
     link_position_w = _expand_batch(link_position_w, batch_shape, 1)
     link_orientation_w_xyzw = _expand_batch(link_orientation_w_xyzw, batch_shape, 1)
     offset_position_link = _expand_batch(offset_position_link, batch_shape, 1)
-    offset_orientation_link_xyzw = _expand_batch(
-        offset_orientation_link_xyzw, batch_shape, 1
-    )
+    offset_orientation_link_xyzw = _expand_batch(offset_orientation_link_xyzw, batch_shape, 1)
 
-    offset_position_w = _rotate_vector_xyzw(
-        link_orientation_w_xyzw, offset_position_link
-    )
+    offset_position_w = _rotate_vector_xyzw(link_orientation_w_xyzw, offset_position_link)
     position_w = link_position_w + offset_position_w
     orientation_w_xyzw = _quaternion_multiply_xyzw(
         link_orientation_w_xyzw, offset_orientation_link_xyzw
@@ -85,8 +79,7 @@ def link_jacobian_to_point(
     _validate_tensor(link_jacobian_w, "link_jacobian_w")
     if link_jacobian_w.ndim < 2 or link_jacobian_w.shape[-2] != 6:
         raise ValueError(
-            "link_jacobian_w must have shape (..., 6, N), "
-            f"got {tuple(link_jacobian_w.shape)}"
+            f"link_jacobian_w must have shape (..., 6, N), got {tuple(link_jacobian_w.shape)}"
         )
     if link_jacobian_w.shape[-1] <= 0:
         raise ValueError("link_jacobian_w must have at least one joint column")
@@ -104,14 +97,9 @@ def link_jacobian_to_point(
     link_orientation_w_xyzw = _expand_batch(link_orientation_w_xyzw, batch_shape, 1)
     offset_position_link = _expand_batch(offset_position_link, batch_shape, 1)
 
-    offset_position_w = _rotate_vector_xyzw(
-        link_orientation_w_xyzw, offset_position_link
-    )
+    offset_position_w = _rotate_vector_xyzw(link_orientation_w_xyzw, offset_position_link)
     skew_offset_w = _skew_symmetric(offset_position_w)
-    linear = (
-        link_jacobian_w[..., :3, :]
-        - skew_offset_w @ link_jacobian_w[..., 3:, :]
-    )
+    linear = link_jacobian_w[..., :3, :] - skew_offset_w @ link_jacobian_w[..., 3:, :]
     angular = link_jacobian_w[..., 3:, :]
     result = torch.cat((linear, angular), dim=-2)
     assert result.shape == batch_shape + (6, joint_count)
@@ -135,12 +123,8 @@ def world_vector_to_link_xyzw(
     )
     _validate_tensors(values)
     _validate_unit_quaternion(link_orientation_w_xyzw, "link_orientation_w_xyzw")
-    batch_shape = _broadcast_batch_shape(
-        tuple((name, tensor, 1) for name, tensor, _ in values)
-    )
-    link_orientation_w_xyzw = _expand_batch(
-        link_orientation_w_xyzw, batch_shape, 1
-    )
+    batch_shape = _broadcast_batch_shape(tuple((name, tensor, 1) for name, tensor, _ in values))
+    link_orientation_w_xyzw = _expand_batch(link_orientation_w_xyzw, batch_shape, 1)
     vector_w = _expand_batch(vector_w, batch_shape, 1)
     inverse_orientation_xyzw = torch.cat(
         (-link_orientation_w_xyzw[..., :3], link_orientation_w_xyzw[..., 3:]),
@@ -189,8 +173,7 @@ def _validate_unit_quaternion(quaternion: torch.Tensor, name: str) -> None:
     if bool(torch.any(errors > _QUATERNION_NORM_ATOL)):
         max_error = float(errors.max().detach().cpu())
         raise ValueError(
-            f"{name} must contain unit XYZW quaternions; maximum norm error is "
-            f"{max_error:.3e}"
+            f"{name} must contain unit XYZW quaternions; maximum norm error is {max_error:.3e}"
         )
 
 
@@ -227,18 +210,16 @@ def _quaternion_multiply_xyzw(left: torch.Tensor, right: torch.Tensor) -> torch.
         + right_scalar * left_vector
         + torch.linalg.cross(left_vector, right_vector, dim=-1)
     )
-    scalar = left_scalar * right_scalar - (left_vector * right_vector).sum(
-        dim=-1, keepdim=True
-    )
+    scalar = left_scalar * right_scalar - (left_vector * right_vector).sum(dim=-1, keepdim=True)
     return torch.cat((vector, scalar), dim=-1)
 
 
 def _skew_symmetric(vector: torch.Tensor) -> torch.Tensor:
     x, y, z = vector.unbind(dim=-1)
     zero = torch.zeros_like(x)
-    return torch.stack(
-        (zero, -z, y, z, zero, -x, -y, x, zero), dim=-1
-    ).reshape(vector.shape[:-1] + (3, 3))
+    return torch.stack((zero, -z, y, z, zero, -x, -y, x, zero), dim=-1).reshape(
+        vector.shape[:-1] + (3, 3)
+    )
 
 
 __all__ = [

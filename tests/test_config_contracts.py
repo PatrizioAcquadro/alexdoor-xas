@@ -41,6 +41,7 @@ def test_act_default_config_matches_yaml_defaults() -> None:
     assert cfg.rollout.temporal_ensemble is False
     assert cfg.rollout.policy_device == "cuda"
 
+
 def test_act_hydra_overrides_flow_through_all_sections() -> None:
     cfg = load_act_config(
         [
@@ -142,6 +143,7 @@ def test_diffusion_default_config_matches_yaml_defaults() -> None:
     assert cfg.rollout.sampler == "ddpm"
     assert cfg.rollout.num_inference_steps == 100
     assert cfg.rollout.policy_device == "cuda"
+
 
 def test_diffusion_hydra_overrides_flow_through_all_sections() -> None:
     cfg = load_diffusion_config(

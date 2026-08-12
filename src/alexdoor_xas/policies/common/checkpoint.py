@@ -189,9 +189,7 @@ def load_checkpoint_payload(
         stats = stats_from_payload(payload["norm_stats"])
         robot_asset = robot_asset_from_payload(payload.get("robot_asset"))
     except (KeyError, TypeError, ValueError) as error:
-        raise ValueError(
-            f"invalid {checkpoint_label} checkpoint {path}: {error}"
-        ) from error
+        raise ValueError(f"invalid {checkpoint_label} checkpoint {path}: {error}") from error
     validate_checkpoint_contract(
         dataset=dataset,
         stats=stats,

@@ -50,9 +50,7 @@ def export_datasets(
     root = Path(datasets_root)
 
     exported: dict[str, Path] = {}
-    exported[A2_EE_DELTA] = _export_hdf5(
-        episodes, root / task / A2_EE_DELTA / version, robot_asset
-    )
+    exported[A2_EE_DELTA] = _export_hdf5(episodes, root / task / A2_EE_DELTA / version, robot_asset)
     a3_episodes = [_relabel_to_door_frame(episode) for episode in episodes]
     exported[A3_OBJ_REL_EE_DELTA] = _export_hdf5(
         a3_episodes, root / task / A3_OBJ_REL_EE_DELTA / version, robot_asset
@@ -146,9 +144,7 @@ def export_paired_ee_datasets_atomic(
                 staged.parent.mkdir(parents=True, exist_ok=True)
                 os.replace(final, staged)
         raise
-    for directory in sorted(
-        staging.rglob("*"), key=lambda path: len(path.parts), reverse=True
-    ):
+    for directory in sorted(staging.rglob("*"), key=lambda path: len(path.parts), reverse=True):
         if directory.is_dir():
             directory.rmdir()
     staging.rmdir()
@@ -205,8 +201,7 @@ def _relabel_to_door_frame(episode: EpisodeBuffer) -> EpisodeBuffer:
             f"{actions_door.shape[0]} door-frame actions"
         )
     steps = [
-        dataclasses.replace(step, action=actions_door[i])
-        for i, step in enumerate(episode.steps)
+        dataclasses.replace(step, action=actions_door[i]) for i, step in enumerate(episode.steps)
     ]
     relabeled = EpisodeBuffer(
         meta=dataclasses.replace(episode.meta, action_space=A3_OBJ_REL_EE_DELTA),
@@ -241,9 +236,7 @@ def _relabel_to_joint_delta(episode: EpisodeBuffer) -> EpisodeBuffer:
         else targets[-1:].copy()
     )
     deltas = np.diff(np.concatenate([targets, last], axis=0), axis=0)
-    steps = [
-        dataclasses.replace(step, action=deltas[i]) for i, step in enumerate(episode.steps)
-    ]
+    steps = [dataclasses.replace(step, action=deltas[i]) for i, step in enumerate(episode.steps)]
     relabeled = EpisodeBuffer(
         meta=dataclasses.replace(episode.meta, action_space=A1_JOINT_DELTA),
         steps=steps,
@@ -290,16 +283,14 @@ def _fresh_dir(directory: Path) -> None:
 
 def _git_commit() -> str:
     try:
-        return (
-            subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                cwd=Path(__file__).resolve().parents[3],
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=10,
-            ).stdout.strip()
-        )
+        return subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=Path(__file__).resolve().parents[3],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        ).stdout.strip()
     except (OSError, subprocess.SubprocessError):
         return "unknown"
 

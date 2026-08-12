@@ -465,13 +465,15 @@ def _a4(limits=TEST_ROBOT_LIMITS, cfg: A4AdapterCfg | None = None) -> A4Adapter:
 
 
 def test_a4_cfg_is_sourced_from_alex_v2_calibration() -> None:
-    calibration = SimpleNamespace(controller={
-        "approach_standoff_m": 0.12,
-        "align_standoff_m": 0.10,
-        "pre_contact_clearance_m": 0.010,
-        "contact_clearance_m": -0.002,
-        "release_standoff_m": 0.30,
-    })
+    calibration = SimpleNamespace(
+        controller={
+            "approach_standoff_m": 0.12,
+            "align_standoff_m": 0.10,
+            "pre_contact_clearance_m": 0.010,
+            "contact_clearance_m": -0.002,
+            "release_standoff_m": 0.30,
+        }
+    )
 
     assert alex_v2_a4_cfg(calibration) == _a4_cfg()
 

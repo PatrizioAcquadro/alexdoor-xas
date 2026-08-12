@@ -150,9 +150,7 @@ class A2Adapter:
         self.log.record(decision)
         return applied, decision
 
-    def _shape_first_contact_approach(
-        self, applied: np.ndarray, ctx: StepContext
-    ) -> bool:
+    def _shape_first_contact_approach(self, applied: np.ndarray, ctx: StepContext) -> bool:
         """Bound only the unsensed inward transition through the pre-contact corridor.
 
         Learned A2/A3 policies have no scripted phase label. Geometry and the
@@ -292,9 +290,7 @@ class A2Adapter:
             for joint in np.flatnonzero(over > 0.0):
                 joint = int(joint)
                 joint_excess = float(over[joint])
-                message = (
-                    f"joint {joint} velocity exceeds its limit by {joint_excess:.3f} rad/s"
-                )
+                message = f"joint {joint} velocity exceeds its limit by {joint_excess:.3f} rad/s"
                 warnings.append(
                     AdapterWarning(
                         id="a2.joint_velocity_limit",

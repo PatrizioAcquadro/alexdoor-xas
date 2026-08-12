@@ -195,9 +195,7 @@ def contact_force_diagnostics(
                 else None
             ),
             "door_angle_rad": step.object_state.get("door_angle_rad"),
-            "door_angular_velocity_rad_s": step.object_state.get(
-                "door_angular_velocity_rad_s"
-            ),
+            "door_angular_velocity_rad_s": step.object_state.get("door_angular_velocity_rad_s"),
             "arm_joint_pos_rad": arm_values("joint_pos"),
             "arm_joint_vel_rad_s": arm_values("joint_vel"),
             "arm_joint_target_rad": arm_values("joint_pos_target"),
@@ -223,10 +221,7 @@ def contact_force_diagnostics(
         # Admission covers the response to *every* executed action: all
         # per-step (pre-action) samples plus the terminal post-action sample.
         "force_admission_passed": bool(
-            finite.all()
-            and not negative_ticks
-            and not over_limit
-            and terminal_admission_ok
+            finite.all() and not negative_ticks and not over_limit and terminal_admission_ok
         ),
         "non_finite_force_ticks": non_finite_ticks,
         "negative_force_ticks": negative_ticks,
@@ -362,10 +357,7 @@ def check_alex_episode(
             f"limit: {force_evidence['max_force_n']:.1f} N at tick "
             f"{force_evidence['max_force_tick']}"
         )
-    elif (
-        force_evidence["max_force_n"] is not None
-        and force_evidence["max_force_n"] > force_warn_n
-    ):
+    elif force_evidence["max_force_n"] is not None and force_evidence["max_force_n"] > force_warn_n:
         result.warnings.append(
             f"{label}: contact force spiked to {force_evidence['max_force_n']:.1f} N at tick "
             f"{force_evidence['max_force_tick']} (warn threshold {force_warn_n:.0f} N)"

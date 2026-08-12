@@ -122,6 +122,7 @@ class DiffusionConfig:
     run: DiffusionRunCfg
     rollout: DiffusionRolloutCfg
 
+
 def load_diffusion_config(
     hydra_overrides: list[str] | tuple[str, ...] | None = None,
     cli_overrides: dict[str, Any] | None = None,
@@ -169,9 +170,7 @@ def diffusion_config_from_dict(payload: dict[str, Any]) -> DiffusionConfig:
     payload = dict(payload)
     unknown_sections = sorted(set(payload) - CONFIG_SECTIONS)
     if unknown_sections:
-        raise DiffusionConfigError(
-            "unknown config section(s): " + ", ".join(unknown_sections)
-        )
+        raise DiffusionConfigError("unknown config section(s): " + ", ".join(unknown_sections))
     nodes = {name: dict(payload.get(name) or {}) for name in CONFIG_SECTIONS}
     return _validate_cross_section(
         DiffusionConfig(
@@ -223,9 +222,7 @@ def _compose_config(overrides: list[str]) -> dict[str, Any]:
 
 
 def _build_dataset_cfg(node: dict[str, Any]) -> DiffusionDatasetCfg:
-    _reject_unknown(
-        "dataset", node, {"task", "space", "version", "view_id", "obs_preset"}
-    )
+    _reject_unknown("dataset", node, {"task", "space", "version", "view_id", "obs_preset"})
 
     space = str(node.get("space", A2_EE_DELTA))
     if space not in VALID_SPACES:
@@ -359,13 +356,10 @@ def _build_train_cfg(node: dict[str, Any]) -> DiffusionTrainCfg:
     if not (0.0 < ema_decay < 1.0):
         raise DiffusionConfigError("train.ema_decay must be in (0, 1)")
 
-    lr_schedule = _required_str(
-        "train.lr_schedule", node.get("lr_schedule", defaults.lr_schedule)
-    )
+    lr_schedule = _required_str("train.lr_schedule", node.get("lr_schedule", defaults.lr_schedule))
     if lr_schedule not in VALID_LR_SCHEDULES:
         raise DiffusionConfigError(
-            f"train.lr_schedule must be one of {sorted(VALID_LR_SCHEDULES)}, "
-            f"got {lr_schedule!r}"
+            f"train.lr_schedule must be one of {sorted(VALID_LR_SCHEDULES)}, got {lr_schedule!r}"
         )
 
     lr_warmup_steps = _coerce_int(

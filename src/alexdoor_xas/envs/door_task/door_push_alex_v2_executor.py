@@ -200,9 +200,9 @@ class DoorPushAlexV2Executor(DoorPushRobotEnv):
         """World-frame tool-point Jacobian for the six ordered arm joints."""
 
         link_quat = _as_torch(self._robot.data.body_quat_w)[:, self._ee_body_idx]
-        link_jacobian = _as_torch(self._robot.data.body_link_jacobian_w)[
-            :, self._jacobi_body_idx
-        ][:, :, self._arm_joint_ids]
+        link_jacobian = _as_torch(self._robot.data.body_link_jacobian_w)[:, self._jacobi_body_idx][
+            :, :, self._arm_joint_ids
+        ]
         translation = link_quat.new_tensor(self._tool_translation_link)
         point_jacobian = link_jacobian_to_point(
             link_jacobian,

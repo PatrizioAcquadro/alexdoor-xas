@@ -79,9 +79,7 @@ def test_tool_frame_is_deterministic_and_normal_is_normalized() -> None:
 
 
 def test_tool_frame_consumes_the_static_urdf_manifest_schema() -> None:
-    tool = derive_right_gripper_tool_frame(
-        build_alex_v2_manifest(), (1.0, 0.0, 0.0)
-    )
+    tool = derive_right_gripper_tool_frame(build_alex_v2_manifest(), (1.0, 0.0, 0.0))
 
     assert tool.parent_link == "RIGHT_GRIPPER_Z_LINK"
     assert tool.support_shape == "right_thumb_collision"

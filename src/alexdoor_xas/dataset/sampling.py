@@ -140,9 +140,7 @@ class BatchIterator:
 def chunk_features(chunk: ObjectCentricChunk, control_dt: float) -> np.ndarray:
     """Fixed-dim numeric encoding of one A4 chunk (:data:`A4_FEATURE_DIM`,)."""
     if chunk.phase not in A4_PHASE_VOCAB:
-        raise ValueError(
-            f"unknown A4 phase {chunk.phase!r} (vocabulary: {A4_PHASE_VOCAB})"
-        )
+        raise ValueError(f"unknown A4 phase {chunk.phase!r} (vocabulary: {A4_PHASE_VOCAB})")
     one_hot = np.zeros(len(A4_PHASE_VOCAB), dtype=np.float64)
     one_hot[A4_PHASE_VOCAB.index(chunk.phase)] = 1.0
     return np.concatenate(
@@ -158,9 +156,7 @@ def episode_chunk_features(record: A4EpisodeRecord) -> np.ndarray:
     """Encode one A4 episode's chunk log as a ``(C, A4_FEATURE_DIM)`` matrix."""
     if not record.chunks:
         return np.zeros((0, A4_FEATURE_DIM), dtype=np.float64)
-    return np.stack(
-        [chunk_features(chunk, record.control_dt) for chunk in record.chunks]
-    )
+    return np.stack([chunk_features(chunk, record.control_dt) for chunk in record.chunks])
 
 
 def collate_torch(batch: dict[str, Any]):  # pragma: no cover - exercised by the gate

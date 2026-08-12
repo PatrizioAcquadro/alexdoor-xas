@@ -528,6 +528,7 @@ def test_verify_dataset_interface_requires_a4_by_default(alex_exports, tmp_path)
         "missing required" in failure and A4_OBJ_CENTRIC_CHUNK in failure for failure in failures
     )
 
+
 # ── chunk sampling + batching ─────────────────────────────────────────────────
 
 

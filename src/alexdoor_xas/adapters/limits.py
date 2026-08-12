@@ -78,9 +78,7 @@ def alex_v2_limits(
         raise ValueError("workspace_center_w must contain exactly three finite values")
     min_reach_m, max_reach_m = calibration.reach_shell_m
     if not (
-        np.isfinite(min_reach_m)
-        and np.isfinite(max_reach_m)
-        and 0.0 < min_reach_m < max_reach_m
+        np.isfinite(min_reach_m) and np.isfinite(max_reach_m) and 0.0 < min_reach_m < max_reach_m
     ):
         raise ValueError("calibration reach_shell_m must be finite, positive, and increasing")
     controller = calibration.controller
@@ -118,9 +116,7 @@ def limits_for_robot(
 
     if robot_tag == ALEX_V2_ROBOT_TAG:
         if calibration is None or workspace_center_w is None:
-            raise ValueError(
-                "Alex V2 limits require validated calibration and workspace_center_w"
-            )
+            raise ValueError("Alex V2 limits require validated calibration and workspace_center_w")
         return alex_v2_limits(calibration, workspace_center_w=workspace_center_w)
     raise KeyError(f"no adapter limits for robot {robot_tag!r} (known: {[ALEX_V2_ROBOT_TAG]})")
 

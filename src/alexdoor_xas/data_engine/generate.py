@@ -144,8 +144,7 @@ def _validated_robot_asset_provenance(
     missing = required.difference(payload)
     if missing:
         raise AlexV2ContractError(
-            "env robot_asset_provenance is missing required keys: "
-            + ", ".join(sorted(missing))
+            "env robot_asset_provenance is missing required keys: " + ", ".join(sorted(missing))
         )
 
     manifest_value = payload["manifest"]
@@ -159,9 +158,7 @@ def _validated_robot_asset_provenance(
         manifest_fingerprint=str(payload["manifest_fingerprint"]),
     )
     if provided != validated:
-        raise AlexV2ContractError(
-            "env robot asset reference does not match its canonical manifest"
-        )
+        raise AlexV2ContractError("env robot asset reference does not match its canonical manifest")
     return validated, manifest
 
 
@@ -271,8 +268,7 @@ def _prepare_episode(
         control_dt=control_dt,
         settle_report=settle_report,
         capabilities=_EnvCapabilities(
-            force_contact=hasattr(env, "contact_sensed")
-            and hasattr(env, "contact_force_w"),
+            force_contact=hasattr(env, "contact_sensed") and hasattr(env, "contact_force_w"),
             joint_state=hasattr(env, "robot_joint_state"),
         ),
     )
@@ -318,15 +314,9 @@ def _record_episode_ticks(
             runtime.termination_reason = controller_reason
             break
 
-        delta_world = frame_delta_to_world(
-            command.delta_door_frame, setup.door_frame
-        )
-        setup.buffer.add_step(
-            _build_episode_step(env, setup, snapshot, command, delta_world)
-        )
-        runtime.actions_door_frame.append(
-            np.asarray(command.delta_door_frame, dtype=np.float64)
-        )
+        delta_world = frame_delta_to_world(command.delta_door_frame, setup.door_frame)
+        setup.buffer.add_step(_build_episode_step(env, setup, snapshot, command, delta_world))
+        runtime.actions_door_frame.append(np.asarray(command.delta_door_frame, dtype=np.float64))
         step_outcome = _step_episode_env(env, delta_world, tick, render_hook)
         if step_outcome.termination_reason:
             _apply_env_step_outcome(runtime, step_outcome)
@@ -334,9 +324,7 @@ def _record_episode_ticks(
     return runtime
 
 
-def _read_tick_snapshot(
-    env, capabilities: _EnvCapabilities
-) -> _TickSnapshot:
+def _read_tick_snapshot(env, capabilities: _EnvCapabilities) -> _TickSnapshot:
     angle, velocity = _hinge_state(env)
     ee_pos_w, ee_quat_w = _ee_pose(env)
     contact_sensed: bool | None = None
@@ -400,9 +388,7 @@ def _build_episode_step(
         contact=contact,
         safety={
             "controller_phase": str(command.phase),
-            "pos_clamped": bool(
-                np.any(np.abs(delta_world[:3]) > env.cfg.max_pos_delta_m + 1e-12)
-            ),
+            "pos_clamped": bool(np.any(np.abs(delta_world[:3]) > env.cfg.max_pos_delta_m + 1e-12)),
             "rot_clamped": bool(
                 np.any(np.abs(delta_world[3:]) > env.cfg.max_rot_delta_rad + 1e-12)
             ),
@@ -423,9 +409,7 @@ def _step_contact(
     }
 
 
-def _step_episode_env(
-    env, delta_world: np.ndarray, tick: int, render_hook
-) -> _EnvStepOutcome:
+def _step_episode_env(env, delta_world: np.ndarray, tick: int, render_hook) -> _EnvStepOutcome:
     action = torch.as_tensor(delta_world, dtype=torch.float32).reshape(1, -1)
     try:
         step_result = env.step(action)
@@ -433,21 +417,15 @@ def _step_episode_env(
         return _EnvStepOutcome("step_error", f"env.step failed: {error}")
     terminated, truncated = _step_termination_flags(step_result)
     if terminated:
-        return _EnvStepOutcome(
-            "environment_terminated", environment_terminated=True
-        )
+        return _EnvStepOutcome("environment_terminated", environment_terminated=True)
     if truncated:
-        return _EnvStepOutcome(
-            "environment_truncated", environment_truncated=True
-        )
+        return _EnvStepOutcome("environment_truncated", environment_truncated=True)
     if render_hook is not None:
         render_hook(tick)
     return _EnvStepOutcome()
 
 
-def _apply_env_step_outcome(
-    runtime: _EpisodeRuntime, outcome: _EnvStepOutcome
-) -> None:
+def _apply_env_step_outcome(runtime: _EpisodeRuntime, outcome: _EnvStepOutcome) -> None:
     runtime.notes = outcome.notes
     runtime.termination_reason = outcome.termination_reason
     runtime.environment_terminated = outcome.environment_terminated
@@ -474,9 +452,7 @@ def _assert_no_silent_episode_reset(
         )
 
 
-def _record_terminal_contact(
-    env, setup: _EpisodeSetup, runtime: _EpisodeRuntime
-) -> None:
+def _record_terminal_contact(env, setup: _EpisodeSetup, runtime: _EpisodeRuntime) -> None:
     if not setup.buffer.n_steps or not setup.capabilities.force_contact:
         return
     if runtime.environment_terminated or runtime.environment_truncated:
@@ -508,12 +484,8 @@ def _finalize_episode(
     ):
         runtime.final_angle, _ = _hinge_state(env)
     chunk_log = setup.controller.finalize()
-    timed_out = bool(
-        runtime.last_command is not None and runtime.last_command.timed_out
-    )
-    controller_done = bool(
-        runtime.last_command is not None and runtime.last_command.done
-    )
+    timed_out = bool(runtime.last_command is not None and runtime.last_command.timed_out)
+    controller_done = bool(runtime.last_command is not None and runtime.last_command.done)
     setup.buffer.extras.update(
         {
             "action_door_frame": np.stack(runtime.actions_door_frame)
@@ -522,9 +494,7 @@ def _finalize_episode(
             "door_frame_pos_w": setup.door_frame.origin.copy(),
             "door_frame_quat_w_xyzw": _door_frame_quat(env),
             "a4_chunks": chunk_log.to_list(),
-            "variation": item.variation.to_dict()
-            if item.variation is not None
-            else None,
+            "variation": item.variation.to_dict() if item.variation is not None else None,
             "start_pose_settle": setup.settle_report,
             "controller_cfg": asdict(setup.controller_cfg),
             "engine_cfg": engine_cfg.to_dict(),
@@ -538,8 +508,7 @@ def _finalize_episode(
     )
     _record_optional_final_state(env, setup)
     success = (
-        math.isfinite(runtime.final_angle)
-        and runtime.final_angle >= engine_cfg.success_angle_rad
+        math.isfinite(runtime.final_angle) and runtime.final_angle >= engine_cfg.success_angle_rad
     )
     setup.buffer.set_outcome(
         EpisodeOutcome(
@@ -575,9 +544,7 @@ def _step_termination_flags(step_result: Any) -> tuple[bool, bool]:
     """Extract Gymnasium termination flags from a duck-typed env step result."""
     if not isinstance(step_result, tuple) or len(step_result) < 5:
         return False, False
-    return bool(_numpy(step_result[2]).reshape(-1)[0]), bool(
-        _numpy(step_result[3]).reshape(-1)[0]
-    )
+    return bool(_numpy(step_result[2]).reshape(-1)[0]), bool(_numpy(step_result[3]).reshape(-1)[0])
 
 
 def traces_equal(
@@ -615,9 +582,7 @@ def traces_equal(
         diff = 0.0 if a.size == 0 else float(np.max(np.abs(a - b)))
         max_diff = max(max_diff, diff)
         if diff > trace_tol:
-            raise AssertionError(
-                f"episode {name!r} traces differ by {diff:.3g} > {trace_tol:.3g}"
-            )
+            raise AssertionError(f"episode {name!r} traces differ by {diff:.3g} > {trace_tol:.3g}")
 
     exact_traces = [("safety.controller_phase", lambda s: s.safety["controller_phase"])]
     if _both_have(first, second, lambda s: s.contact.get("sensed") is not None):
@@ -643,9 +608,7 @@ def _both_have(first: EpisodeBuffer, second: EpisodeBuffer, predicate) -> bool:
 
 def _read_door_frame(env) -> ObjectFrame:
     frame_pos, frame_quat = env.door_frame_pose_w()
-    return door_frame_from_body_pose(
-        _numpy(frame_pos)[0], _numpy(frame_quat)[0]
-    )
+    return door_frame_from_body_pose(_numpy(frame_pos)[0], _numpy(frame_quat)[0])
 
 
 def _door_frame_quat(env) -> np.ndarray:
@@ -653,9 +616,7 @@ def _door_frame_quat(env) -> np.ndarray:
     return _numpy(frame_quat)[0].astype(np.float64)
 
 
-def apply_start_offset(
-    env, door_frame: ObjectFrame, variation: DoorPushVariation
-) -> dict | None:
+def apply_start_offset(env, door_frame: ObjectFrame, variation: DoorPushVariation) -> dict | None:
     """Shift the EE start pose by the variation's door-frame offset (shared with eval).
 
     Returns the env's realized-state settle report when it exposes one

@@ -50,15 +50,11 @@ def _finite_array(name: str, value) -> np.ndarray:
     try:
         array = np.asarray(_numpy(value), dtype=np.float64)
     except (TypeError, ValueError) as exc:
-        raise InvalidSimulatorStateError(
-            f"invalid simulator state: {name} is not numeric"
-        ) from exc
+        raise InvalidSimulatorStateError(f"invalid simulator state: {name} is not numeric") from exc
     if array.size == 0:
         raise InvalidSimulatorStateError(f"invalid simulator state: {name} is empty")
     if not np.isfinite(array).all():
-        raise InvalidSimulatorStateError(
-            f"invalid simulator state: {name} contains NaN or Inf"
-        )
+        raise InvalidSimulatorStateError(f"invalid simulator state: {name} contains NaN or Inf")
     return array
 
 

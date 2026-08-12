@@ -74,9 +74,7 @@ def _copy_source_values(
     for joint_name in RIGHT_ARM_PD_JOINTS:
         expression = _SOURCE_EXPRESSION_BY_RIGHT_JOINT[joint_name]
         if expression not in source:
-            raise ValueError(
-                f"arms actuator {field} is missing source expression {expression!r}"
-            )
+            raise ValueError(f"arms actuator {field} is missing source expression {expression!r}")
         copied[joint_name] = _finite_number(
             source[expression],
             field=f"{joint_name} {field}",
@@ -102,12 +100,8 @@ def _validated_ordered_gains(
         raise ValueError("right-arm production gains must use the exact six-joint order")
     return {
         joint_name: {
-            "stiffness": _finite_number(
-                stiffness, field=f"{joint_name} stiffness", positive=True
-            ),
-            "damping": _finite_number(
-                damping, field=f"{joint_name} damping", positive=True
-            ),
+            "stiffness": _finite_number(stiffness, field=f"{joint_name} stiffness", positive=True),
+            "damping": _finite_number(damping, field=f"{joint_name} damping", positive=True),
         }
         for joint_name, stiffness, damping in ordered_gains
     }
@@ -148,16 +142,12 @@ def apply_production_right_arm_pd(
     _numeric_mapping(getattr(source, "stiffness", None), field="stiffness")
     _numeric_mapping(getattr(source, "damping", None), field="damping")
     velocity = _copy_source_values(
-        _numeric_mapping(
-            getattr(source, "velocity_limit_sim", None), field="velocity_limit_sim"
-        ),
+        _numeric_mapping(getattr(source, "velocity_limit_sim", None), field="velocity_limit_sim"),
         field="velocity_limit_sim",
         positive=True,
     )
     effort = _copy_source_values(
-        _numeric_mapping(
-            getattr(source, "effort_limit_sim", None), field="effort_limit_sim"
-        ),
+        _numeric_mapping(getattr(source, "effort_limit_sim", None), field="effort_limit_sim"),
         field="effort_limit_sim",
         positive=True,
     )
@@ -171,12 +161,8 @@ def apply_production_right_arm_pd(
     retained.joint_names_expr = list(_RETAINED_ARM_JOINTS)
     right_arm = deepcopy(source)
     right_arm.joint_names_expr = list(RIGHT_ARM_PD_JOINTS)
-    right_arm.stiffness = {
-        name: gains_profile[name]["stiffness"] for name in RIGHT_ARM_PD_JOINTS
-    }
-    right_arm.damping = {
-        name: gains_profile[name]["damping"] for name in RIGHT_ARM_PD_JOINTS
-    }
+    right_arm.stiffness = {name: gains_profile[name]["stiffness"] for name in RIGHT_ARM_PD_JOINTS}
+    right_arm.damping = {name: gains_profile[name]["damping"] for name in RIGHT_ARM_PD_JOINTS}
     right_arm.velocity_limit_sim = velocity
     right_arm.effort_limit_sim = effort
     right_arm.armature = armature

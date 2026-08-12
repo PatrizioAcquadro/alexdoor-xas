@@ -89,9 +89,7 @@ def resolve_resume_directory(path: str | Path, policy: str) -> Path:
     """Validate an explicit resumable run directory."""
     run_dir = Path(path).expanduser().resolve()
     if run_dir.parent.name != policy or run_dir.parent.parent.name != paths.ALEX_V2_TASK:
-        raise ValueError(
-            f"resume path must be under door_push_alex_v2/{policy}/: {run_dir}"
-        )
+        raise ValueError(f"resume path must be under door_push_alex_v2/{policy}/: {run_dir}")
     required = (run_dir / "resolved_config.json", run_dir / "checkpoints" / "last.pt")
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
@@ -246,9 +244,7 @@ def write_training_summary(policy: str, history: dict[str, Any], path: str | Pat
     else:
         axes[0].plot(x, [entry["train_mse"] for entry in epochs])
         axes[0].set_ylabel("train MSE")
-        _plot_optional(
-            axes[1], x, epochs, "sampled_validation_l1", "sampled validation L1"
-        )
+        _plot_optional(axes[1], x, epochs, "sampled_validation_l1", "sampled validation L1")
         axes[1].set_ylabel("validation L1")
         axes[2].plot(x, [entry["learning_rate"] for entry in epochs])
         axes[2].set_ylabel("learning rate")
@@ -325,9 +321,8 @@ def write_run_report(
         )
     anomaly_values = list(anomalies or [])
     if (
-        (run_dir / "error.log").is_file()
-        and "Historical error.log retained after resume." not in anomaly_values
-    ):
+        run_dir / "error.log"
+    ).is_file() and "Historical error.log retained after resume." not in anomaly_values:
         anomaly_values.append("Historical error.log retained after resume.")
     lines.append("- Anomalies: " + ("; ".join(anomaly_values) if anomaly_values else "none."))
     optional = retained_optional_artifacts or []
@@ -340,9 +335,7 @@ def write_run_report(
     return target
 
 
-def _plot_optional(
-    axis, x: list[int], epochs: list[dict[str, Any]], key: str, label: str
-) -> None:
+def _plot_optional(axis, x: list[int], epochs: list[dict[str, Any]], key: str, label: str) -> None:
     points = [
         (epoch, entry[key])
         for epoch, entry in zip(x, epochs, strict=True)

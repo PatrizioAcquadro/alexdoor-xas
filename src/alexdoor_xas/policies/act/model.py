@@ -46,9 +46,7 @@ class ACTModel(nn.Module):
 
         # CVAE encoder (training only): [CLS, obs, a_1..a_H] -> z mean/logvar.
         self.cls_token = nn.Parameter(torch.zeros(1, 1, d))
-        self.register_buffer(
-            "cvae_pos", sinusoidal_table(cfg.chunk_size + 2, d), persistent=False
-        )
+        self.register_buffer("cvae_pos", sinusoidal_table(cfg.chunk_size + 2, d), persistent=False)
         self.cvae_encoder = nn.TransformerEncoder(
             self._encoder_layer(cfg), num_layers=cfg.cvae_encoder_layers
         )
@@ -70,9 +68,7 @@ class ACTModel(nn.Module):
             ),
             num_layers=cfg.decoder_layers,
         )
-        self.register_buffer(
-            "query_pos", sinusoidal_table(cfg.chunk_size, d), persistent=False
-        )
+        self.register_buffer("query_pos", sinusoidal_table(cfg.chunk_size, d), persistent=False)
         self.action_head = nn.Linear(d, action_dim)
 
     @staticmethod

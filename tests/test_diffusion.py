@@ -415,8 +415,7 @@ def test_train_diffusion_resume_matches_uninterrupted_state_and_ema() -> None:
         if state["next_epoch"] == 2:
             captured["training_state"] = deepcopy(state)
             captured["model_state"] = {
-                key: value.detach().clone()
-                for key, value in interrupted_model.state_dict().items()
+                key: value.detach().clone() for key, value in interrupted_model.state_dict().items()
             }
             raise StopAfterEpoch
 

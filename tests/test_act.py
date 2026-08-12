@@ -386,8 +386,7 @@ def test_train_act_resume_matches_uninterrupted_state() -> None:
         if state["next_epoch"] == 2:
             captured["training_state"] = deepcopy(state)
             captured["model_state"] = {
-                key: value.detach().clone()
-                for key, value in interrupted_model.state_dict().items()
+                key: value.detach().clone() for key, value in interrupted_model.state_dict().items()
             }
             raise StopAfterEpoch
 
@@ -745,9 +744,7 @@ def test_open_loop_report_numerics(tmp_path) -> None:
     assert json_path.is_file()
     assert report["evaluated_steps"] == record.n_steps
     assert report["aggregate_l1_mean"] == pytest.approx(0.25)
-    assert report["l1_by_dimension"] == pytest.approx(
-        {"dx": 0.25, "dy": 0.25, "dz": 0.25}
-    )
+    assert report["l1_by_dimension"] == pytest.approx({"dx": 0.25, "dy": 0.25, "dz": 0.25})
     assert report["per_episode"] == [
         {
             "episode_id": record.episode_id,

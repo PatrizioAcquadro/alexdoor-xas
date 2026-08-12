@@ -132,16 +132,13 @@ class EpisodeBuffer:
             raise RuntimeError("cannot add steps after the episode outcome is set")
         action = np.asarray(step.action, dtype=np.float64).reshape(-1)
         if action.shape != (EE_DELTA_DIM,):
-            raise ValueError(
-                f"step action must have shape ({EE_DELTA_DIM},), got {action.shape}"
-            )
+            raise ValueError(f"step action must have shape ({EE_DELTA_DIM},), got {action.shape}")
         self.steps.append(step)
 
     def set_outcome(self, outcome: EpisodeOutcome) -> None:
         if outcome.n_steps != len(self.steps):
             raise ValueError(
-                f"outcome.n_steps={outcome.n_steps} does not match "
-                f"recorded steps={len(self.steps)}"
+                f"outcome.n_steps={outcome.n_steps} does not match recorded steps={len(self.steps)}"
             )
         self.outcome = outcome
 

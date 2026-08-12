@@ -106,6 +106,7 @@ class ActConfig:
     run: ActRunCfg
     rollout: ActRolloutCfg
 
+
 def load_act_config(
     hydra_overrides: list[str] | tuple[str, ...] | None = None,
     cli_overrides: dict[str, Any] | None = None,
@@ -185,9 +186,7 @@ def _build_dataset_cfg(node: dict[str, Any]) -> ActDatasetCfg:
 
     space = str(node.get("space", A2_EE_DELTA))
     if space not in VALID_SPACES:
-        raise ActConfigError(
-            f"dataset.space must be one of {sorted(VALID_SPACES)}, got {space!r}"
-        )
+        raise ActConfigError(f"dataset.space must be one of {sorted(VALID_SPACES)}, got {space!r}")
 
     obs_preset = str(node.get("obs_preset", "core"))
     if obs_preset not in OBS_PRESETS:

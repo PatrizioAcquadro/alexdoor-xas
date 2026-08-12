@@ -49,26 +49,21 @@ def _apply_production_non_right_arm_damping(cfg: Any) -> None:
             continue
         damping = actuator_cfg.damping
         if not isinstance(damping, Mapping) or not damping:
-            raise TypeError(
-                f"actuator {actuator_name!r} damping must be a non-empty mapping"
-            )
+            raise TypeError(f"actuator {actuator_name!r} damping must be a non-empty mapping")
         scaled: dict[str, float] = {}
         for joint_expression, value in damping.items():
             try:
                 numeric = float(value)
             except (TypeError, ValueError) as error:
                 raise TypeError(
-                    f"actuator {actuator_name!r} damping for "
-                    f"{joint_expression!r} must be numeric"
+                    f"actuator {actuator_name!r} damping for {joint_expression!r} must be numeric"
                 ) from error
             if not math.isfinite(numeric) or numeric < 0.0:
                 raise ValueError(
                     f"actuator {actuator_name!r} damping for {joint_expression!r} "
                     "must be finite and non-negative"
                 )
-            scaled[str(joint_expression)] = (
-                numeric * DOOR_NON_RIGHT_ARM_DAMPING_SCALE
-            )
+            scaled[str(joint_expression)] = numeric * DOOR_NON_RIGHT_ARM_DAMPING_SCALE
         scaled_by_actuator[str(actuator_name)] = scaled
 
     for actuator_name, scaled in scaled_by_actuator.items():

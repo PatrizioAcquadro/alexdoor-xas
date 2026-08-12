@@ -303,9 +303,7 @@ class A4Adapter:
             target, numeric = self._parse_chunk(state)
             hinge_delta = self._validate_phase_and_hinge(state, numeric)
             target = self._validate_contact_target(state, target)
-            hinge_delta = self._fit_hinge_travel(
-                state, hinge_delta, entry_angle_rad
-            )
+            hinge_delta = self._fit_hinge_travel(state, hinge_delta, entry_angle_rad)
             self._validate_reach(
                 state,
                 target,
@@ -353,9 +351,7 @@ class A4Adapter:
             )
         return corrected_chunk, decision
 
-    def _parse_chunk(
-        self, state: _ChunkValidationState
-    ) -> tuple[np.ndarray, np.ndarray]:
+    def _parse_chunk(self, state: _ChunkValidationState) -> tuple[np.ndarray, np.ndarray]:
         chunk = state.chunk
         try:
             target = np.asarray(chunk.contact_target_panel, dtype=np.float64)
@@ -379,9 +375,7 @@ class A4Adapter:
             state.fail("finite", "chunk contains non-numeric values")
         return target, numeric
 
-    def _validate_phase_and_hinge(
-        self, state: _ChunkValidationState, numeric: np.ndarray
-    ) -> float:
+    def _validate_phase_and_hinge(self, state: _ChunkValidationState, numeric: np.ndarray) -> float:
         chunk = state.chunk
         hinge_delta = float(numeric[3])
         state.require(
@@ -434,9 +428,7 @@ class A4Adapter:
         self._record_face_warning(state, target)
         return target
 
-    def _record_face_warning(
-        self, state: _ChunkValidationState, target: np.ndarray
-    ) -> None:
+    def _record_face_warning(self, state: _ChunkValidationState, target: np.ndarray) -> None:
         face_x = self.geometry.surface_x_m(0.0)
         deviation = abs(float(target[0] - face_x))
         if deviation <= self.cfg.target_x_face_tol_m:
@@ -465,9 +457,7 @@ class A4Adapter:
         hinge_delta: float,
         entry_angle_rad: float,
     ) -> float:
-        state.checks["within_hinge_travel"] = (
-            entry_angle_rad + hinge_delta <= MAX_HINGE_ANGLE_RAD
-        )
+        state.checks["within_hinge_travel"] = entry_angle_rad + hinge_delta <= MAX_HINGE_ANGLE_RAD
         if state.checks["within_hinge_travel"]:
             return hinge_delta
         capped = max(MAX_HINGE_ANGLE_RAD - entry_angle_rad, 0.0)
@@ -488,9 +478,7 @@ class A4Adapter:
         state.checks["reachable"] = True
         if self.limits.workspace is None or door_frame is None:
             return
-        reason = self._reach_reason(
-            target, entry_angle, exit_angle, state.chunk, door_frame
-        )
+        reason = self._reach_reason(target, entry_angle, exit_angle, state.chunk, door_frame)
         if reason:
             state.fail("reachable", reason)
 
@@ -648,14 +636,10 @@ class A4Adapter:
         initial_angle = ctx.hinge_angle_rad
         validated = self._validate_sequence(chunks, initial_angle, door_frame)
         if validated.rejected_reason:
-            return self._rejected_execution_result(
-                chunks, validated, initial_angle
-            )
+            return self._rejected_execution_result(chunks, validated, initial_angle)
 
         state = _A4ExecutionState(ctx=ctx)
-        reason = "; ".join(
-            decision.reason for decision in validated.decisions if decision.reason
-        )
+        reason = "; ".join(decision.reason for decision in validated.decisions if decision.reason)
         for stage in self.plan(validated.chunks):
             outcome = self._run_stage(
                 _StageExecution(
@@ -675,9 +659,7 @@ class A4Adapter:
                 reason = f"{reason}; {failure_reason}" if reason else failure_reason
                 break
 
-        requested_delta = sum(
-            chunk.motion_hinge_delta_rad for chunk in validated.chunks
-        )
+        requested_delta = sum(chunk.motion_hinge_delta_rad for chunk in validated.chunks)
         achieved = self._achieved_push_delta(state)
         return A4ExecutionResult(
             status=validated.status,
@@ -760,9 +742,7 @@ class A4Adapter:
             why = self._stage_stop_reason(execution, observation.angle)
             if why:
                 break
-            delta_door = self._stage_delta(
-                stage, observation.angle, observation.ee_door
-            )
+            delta_door = self._stage_delta(stage, observation.angle, observation.ee_door)
             applied, decision = self.a3.process(delta_door, execution.ctx)
             if decision.status is AdapterStatus.REJECTED:
                 why = f"per-tick command rejected: {decision.reason}"
@@ -801,17 +781,13 @@ class A4Adapter:
             environment_truncated=environment_truncated,
         )
 
-    def _stage_observation(
-        self, execution: _StageExecution
-    ) -> _StageObservation:
+    def _stage_observation(self, execution: _StageExecution) -> _StageObservation:
         angle = execution.ctx.hinge_angle_rad
         ee_door = execution.door_frame.point_from_world(execution.ctx.ee_pos_w)
         ee_panel = rot_z(angle).T @ ee_door
         sensed = execution.ctx.contact_sensed
         in_contact = (
-            bool(sensed)
-            if sensed is not None
-            else self.geometry.geometric_contact(ee_panel)
+            bool(sensed) if sensed is not None else self.geometry.geometric_contact(ee_panel)
         )
         execution.contact_reached = execution.contact_reached or in_contact
         return _StageObservation(angle, ee_door, in_contact)
@@ -835,9 +811,7 @@ class A4Adapter:
             f"for {execution.stall_ticks} ticks at angle {angle:.4f} rad"
         )
 
-    def _stage_delta(
-        self, stage: _Stage, angle: float, ee_door: np.ndarray
-    ) -> np.ndarray:
+    def _stage_delta(self, stage: _Stage, angle: float, ee_door: np.ndarray) -> np.ndarray:
         delta_door = np.zeros(EE_DELTA_DIM)
         if stage.phase == "hold":
             return delta_door
@@ -848,9 +822,7 @@ class A4Adapter:
         error = rot_z(angle) @ target_panel - ee_door
         distance = float(np.linalg.norm(error))
         step = (
-            error
-            if distance <= self.cfg.max_step_m
-            else error * (self.cfg.max_step_m / distance)
+            error if distance <= self.cfg.max_step_m else error * (self.cfg.max_step_m / distance)
         )
         delta_door[:3] = step
         return delta_door
@@ -873,9 +845,7 @@ class A4Adapter:
                 state.push_entry_angle = result.entry_angle_rad
             state.push_exit_angle = result.exit_angle_rad
 
-    def _classify_stage_failure(
-        self, stage: _Stage, outcome: _StageOutcome
-    ) -> str:
+    def _classify_stage_failure(self, stage: _Stage, outcome: _StageOutcome) -> str:
         if outcome.environment_terminated:
             return "environment_terminated"
         if outcome.environment_truncated:

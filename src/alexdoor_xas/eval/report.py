@@ -102,9 +102,7 @@ def write_run_report(
     return path
 
 
-def _a1_status_note(
-    episodes: list[EpisodeBuffer], exports: dict[str, Path] | None
-) -> str | None:
+def _a1_status_note(episodes: list[EpisodeBuffer], exports: dict[str, Path] | None) -> str | None:
     """A1 status line: nothing when exported, otherwise say why it is missing."""
     from alexdoor_xas.action.spaces import A1_JOINT_DELTA
 

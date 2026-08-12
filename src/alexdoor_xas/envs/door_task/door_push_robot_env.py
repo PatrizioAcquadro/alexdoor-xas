@@ -146,9 +146,7 @@ class DoorPushRobotEnv(DirectRLEnv):
                 f"{contact_prim_pattern}"
             )
         for env_id in range(self.scene.cfg.num_envs):
-            activate_contact_sensors(
-                contact_prim_pattern.replace("env_.*", f"env_{env_id}", 1)
-            )
+            activate_contact_sensors(contact_prim_pattern.replace("env_.*", f"env_{env_id}", 1))
 
         self.scene.articulations["door"] = self._door
         self.scene.articulations["robot"] = self._robot
@@ -295,9 +293,7 @@ class DoorPushRobotEnv(DirectRLEnv):
             if bool((error.norm(dim=-1) < self.cfg.settle_target_m).all()):
                 break
             delta = torch.zeros((self.num_envs, 6), device=self.device)
-            delta[env_ids, :3] = error.clamp(
-                -self.cfg.max_pos_delta_m, self.cfg.max_pos_delta_m
-            )
+            delta[env_ids, :3] = error.clamp(-self.cfg.max_pos_delta_m, self.cfg.max_pos_delta_m)
             self._solve_arm_ik(delta)
             for _ in range(self.cfg.decimation):
                 self._apply_action()

@@ -197,6 +197,7 @@ def sample_variation(
         push_height_m=float(rng.uniform(*bounds.push_height_m_range)),
     )
 
+
 @dataclass
 class _FsmState:
     phase: DoorPushPhase = DoorPushPhase.APPROACH
@@ -293,9 +294,7 @@ class DoorPushController:
             DoorPushPhase.HOLD: cfg.contact_clearance_m,
             DoorPushPhase.RELEASE: cfg.release_standoff_m,
         }[phase]
-        point_panel = np.array(
-            [cfg.surface_x_m(clearance), cfg.push_point_y_m, cfg.push_height_m]
-        )
+        point_panel = np.array([cfg.surface_x_m(clearance), cfg.push_point_y_m, cfg.push_height_m])
         # Panel-frame waypoints rotate with the hinge angle into the door frame.
         return rot_z(hinge_angle_rad) @ point_panel
 

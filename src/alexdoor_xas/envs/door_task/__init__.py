@@ -18,11 +18,13 @@ def _register_gym_envs() -> None:
     except ModuleNotFoundError:
         return
 
-    registrations = ((
-        DOOR_PUSH_ALEX_V2_ENV_ID,
-        DOOR_PUSH_ALEX_V2_ENV_ENTRY_POINT,
-        DOOR_PUSH_ALEX_V2_ENV_CFG_ENTRY_POINT,
-    ),)
+    registrations = (
+        (
+            DOOR_PUSH_ALEX_V2_ENV_ID,
+            DOOR_PUSH_ALEX_V2_ENV_ENTRY_POINT,
+            DOOR_PUSH_ALEX_V2_ENV_CFG_ENTRY_POINT,
+        ),
+    )
     for env_id, entry_point, cfg_entry_point in registrations:
         try:
             gym.spec(env_id)

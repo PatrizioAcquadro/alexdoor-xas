@@ -71,9 +71,7 @@ class EmaModel:
     def update(self, model: DiffusionTransformer) -> None:
         self.n_updates += 1
         decay = min(self.decay, (1 + self.n_updates) / (10 + self.n_updates))
-        for shadow, param in zip(
-            self.module.parameters(), model.parameters(), strict=True
-        ):
+        for shadow, param in zip(self.module.parameters(), model.parameters(), strict=True):
             shadow.mul_(decay).add_(param.detach(), alpha=1.0 - decay)
         for shadow, buffer in zip(self.module.buffers(), model.buffers(), strict=True):
             shadow.copy_(buffer)
@@ -142,9 +140,7 @@ class TrainHistory:
                 val_sampled_l1=(
                     None
                     if entry.get("sampled_validation_l1", entry.get("val_sampled_l1")) is None
-                    else float(
-                        entry.get("sampled_validation_l1", entry.get("val_sampled_l1"))
-                    )
+                    else float(entry.get("sampled_validation_l1", entry.get("val_sampled_l1")))
                 ),
                 duration_s=float(entry.get("duration_s", 0.0)),
             )
@@ -187,9 +183,7 @@ def train_diffusion(
     model.to(device)
     if ema is not None:
         ema.module.to(device)
-    optimizer = torch.optim.AdamW(
-        model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay
-    )
+    optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
 
     # One probe pass to size the cosine schedule (batch factories are cheap
     # numpy generators; the probe does not consume training randomness).

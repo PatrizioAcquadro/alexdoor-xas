@@ -90,9 +90,7 @@ class RobotAssetRef:
             len(self.manifest_fingerprint) != 64
             or any(c not in "0123456789abcdef" for c in self.manifest_fingerprint)
         ):
-            raise AlexV2ContractError(
-                "manifest fingerprint must be 64 lowercase hex characters"
-            )
+            raise AlexV2ContractError("manifest fingerprint must be 64 lowercase hex characters")
 
     def to_dict(self) -> dict[str, str]:
         payload = {"id": self.asset_id, "sha256": self.sha256}

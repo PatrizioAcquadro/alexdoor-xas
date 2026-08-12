@@ -21,9 +21,7 @@ from alexdoor_xas.policies.scripted import DoorPushControllerCfg
 
 CONFIG_DIR: Path = paths.REPO_ROOT / "configs"
 CONFIG_NAME = "scripted_baseline"
-CONTROLLER_FIELD_TYPES = {
-    field.name: field.type for field in fields(DoorPushControllerCfg)
-}
+CONTROLLER_FIELD_TYPES = {field.name: field.type for field in fields(DoorPushControllerCfg)}
 RUN_FIELD_NAMES = frozenset(
     {
         "episodes",
@@ -143,9 +141,7 @@ def _compose_config(overrides: list[str]) -> dict[str, Any]:
 def _build_run_cfg(node: dict[str, Any]) -> ScriptedBaselineRunCfg:
     unknown = sorted(set(node) - RUN_FIELD_NAMES)
     if unknown:
-        raise ScriptedBaselineConfigError(
-            "unknown run config field(s): " + ", ".join(unknown)
-        )
+        raise ScriptedBaselineConfigError("unknown run config field(s): " + ", ".join(unknown))
 
     episodes = _coerce_int("run.episodes", node.get("episodes", 5))
     randomized = _coerce_int("run.randomized", node.get("randomized", 0))
@@ -158,9 +154,7 @@ def _build_run_cfg(node: dict[str, Any]) -> ScriptedBaselineRunCfg:
     if max_ticks <= 0:
         raise ScriptedBaselineConfigError("run.max_ticks must be positive")
 
-    success_angle_deg = _coerce_float(
-        "run.success_angle_deg", node.get("success_angle_deg", 45.0)
-    )
+    success_angle_deg = _coerce_float("run.success_angle_deg", node.get("success_angle_deg", 45.0))
     if not math.isfinite(success_angle_deg):
         raise ScriptedBaselineConfigError("run.success_angle_deg must be finite")
 

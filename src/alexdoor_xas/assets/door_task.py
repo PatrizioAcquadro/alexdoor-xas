@@ -68,9 +68,7 @@ def door_task_usd(pose_id: str = DEFAULT_DOOR_POSE_ID) -> Path:
 def ensure_door_task_usd(pose_id: str = DEFAULT_DOOR_POSE_ID) -> Path:
     """Create or refresh one canonical D0-D4 scene layer."""
     pose = canonical_door_pose(pose_id)
-    return _ensure_door_task_usd(
-        canonical_door_scene_path(pose_id), pose.yaw_rad, pose.xy_offset_m
-    )
+    return _ensure_door_task_usd(canonical_door_scene_path(pose_id), pose.yaw_rad, pose.xy_offset_m)
 
 
 def ensure_canonical_door_scenes() -> tuple[Path, ...]:

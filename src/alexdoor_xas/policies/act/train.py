@@ -127,9 +127,7 @@ def train_act(
         torch.manual_seed(cfg.seed)
     device = torch.device(cfg.device)
     model.to(device)
-    optimizer = torch.optim.AdamW(
-        model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay
-    )
+    optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
 
     history = (
         TrainHistory.from_dict(resume_state["history"])

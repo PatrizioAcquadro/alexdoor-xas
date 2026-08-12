@@ -159,9 +159,7 @@ def load_episode_record(path: str | Path) -> EpisodeRecord:
         schema_version=schema_version,
         meta=buffer.meta.to_dict(),
         t=np.array([step.t for step in buffer.steps], dtype=np.float64),
-        actions=buffer.stacked(lambda s: s.action)
-        if buffer.steps
-        else np.zeros((0, 0)),
+        actions=buffer.stacked(lambda s: s.action) if buffer.steps else np.zeros((0, 0)),
         obs=obs,
         success=buffer.outcome.success,
         final_door_angle=buffer.outcome.final_door_angle,

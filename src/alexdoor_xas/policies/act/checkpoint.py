@@ -62,9 +62,7 @@ def save_checkpoint(
 
 def load_checkpoint(path: str | Path, map_location: str = "cpu") -> LoadedCheckpoint:
     """Load a v2 checkpoint without consulting the live dataset."""
-    payload = load_checkpoint_payload(
-        path, CHECKPOINT_FORMAT, "ACT", map_location
-    )
+    payload = load_checkpoint_payload(path, CHECKPOINT_FORMAT, "ACT", map_location)
     try:
         model_cfg = ActModelCfg(**payload.model_cfg)
     except (TypeError, ValueError) as error:

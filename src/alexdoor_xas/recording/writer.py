@@ -59,9 +59,7 @@ def write_episode(buffer: EpisodeBuffer, directory: str | Path) -> Path:
         steps = h5.create_group("steps")
         steps.create_dataset("t", data=np.array([s.t for s in buffer.steps], dtype=np.float64))
         actions = (
-            buffer.stacked(lambda s: s.action)
-            if buffer.steps
-            else np.zeros((0, EE_DELTA_DIM))
+            buffer.stacked(lambda s: s.action) if buffer.steps else np.zeros((0, EE_DELTA_DIM))
         )
         steps.create_dataset("action", data=actions)
         for table in _STEP_TABLES:
@@ -79,9 +77,7 @@ def write_episode(buffer: EpisodeBuffer, directory: str | Path) -> Path:
 
     sidecar = h5_path.with_suffix(".meta.json")
     sidecar.write_text(
-        json.dumps(
-            {"meta": buffer.meta.to_dict(), "outcome": buffer.outcome.to_dict()}, indent=2
-        )
+        json.dumps({"meta": buffer.meta.to_dict(), "outcome": buffer.outcome.to_dict()}, indent=2)
         + "\n"
     )
     return h5_path

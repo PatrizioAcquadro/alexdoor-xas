@@ -29,9 +29,7 @@ def decode_contact_flag(value: Any) -> bool:
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError("contact flag must be Boolean or exactly 0/1") from exc
     if not math.isfinite(numeric) or numeric not in (0.0, 1.0):
-        raise ValueError(
-            f"contact flag must be Boolean or exactly 0/1, got {numeric!r}"
-        )
+        raise ValueError(f"contact flag must be Boolean or exactly 0/1, got {numeric!r}")
     return bool(numeric)
 
 
@@ -68,9 +66,7 @@ def sum_actor_contact_forces(
     expected_sensor_shape = (num_sensors,)
     if start_indices.shape != expected_sensor_shape:
         raise ValueError("raw contact start indices must match sensor count")
-    if target_actor_ids.shape != expected_sensor_shape or target_known.shape != (
-        num_sensors,
-    ):
+    if target_actor_ids.shape != expected_sensor_shape or target_known.shape != (num_sensors,):
         raise ValueError("target actor IDs and validity flags must match sensor count")
     if bool((counts < 0).any()) or bool((start_indices < 0).any()):
         raise ValueError("raw contact ranges must be non-negative")

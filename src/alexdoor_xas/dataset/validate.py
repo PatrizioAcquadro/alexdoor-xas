@@ -75,9 +75,7 @@ class ValidationResult:
         self.warnings.extend(other.warnings)
 
 
-def validate_episode(
-    record: EpisodeRecord, expected_space: str | None = None
-) -> ValidationResult:
+def validate_episode(record: EpisodeRecord, expected_space: str | None = None) -> ValidationResult:
     """Validate one loaded episode against the frozen schema contract."""
     result = ValidationResult()
     label = f"episode {record.episode_id[:8]}"
@@ -175,9 +173,7 @@ def validate_dataset(
         n_declared = -1
         result.errors.append("meta.json n_episodes must be an integer")
     if n_declared != len(dataset):
-        result.errors.append(
-            f"meta.json declares {n_declared} episodes, found {len(dataset)}"
-        )
+        result.errors.append(f"meta.json declares {n_declared} episodes, found {len(dataset)}")
     ids = dataset.episode_ids
     if len(set(ids)) != len(ids):
         result.errors.append("duplicate episode ids in dataset")
@@ -210,9 +206,7 @@ def validate_a4_dataset(
         n_declared = -1
         result.errors.append("meta.json n_episodes must be an integer")
     if n_declared != len(dataset):
-        result.errors.append(
-            f"meta.json declares {n_declared} episodes, found {len(dataset)}"
-        )
+        result.errors.append(f"meta.json declares {n_declared} episodes, found {len(dataset)}")
     ids = dataset.episode_ids
     duplicates = sorted({episode_id for episode_id in ids if ids.count(episode_id) > 1})
     if duplicates:
@@ -222,17 +216,14 @@ def validate_a4_dataset(
         label = f"episode {record.episode_id[:8]}"
         if record.action_space != dataset.action_space:
             result.errors.append(
-                f"{label}: action_space {record.action_space!r} != dataset "
-                f"{dataset.action_space!r}"
+                f"{label}: action_space {record.action_space!r} != dataset {dataset.action_space!r}"
             )
         _check_a4_outcome(record, result, label)
         if not record.chunks:
             result.errors.append(f"{label}: no A4 chunks recorded")
         for i, chunk in enumerate(record.chunks):
             if chunk.phase not in A4_PHASE_VOCAB:
-                result.errors.append(
-                    f"{label}: chunk {i} has unknown phase {chunk.phase!r}"
-                )
+                result.errors.append(f"{label}: chunk {i} has unknown phase {chunk.phase!r}")
             if chunk.duration_ticks <= 0:
                 result.errors.append(
                     f"{label}: chunk {i} ({chunk.phase}) has duration_ticks "
@@ -328,9 +319,7 @@ def validate_matched_action_space_datasets(
     return result
 
 
-def _check_action_dim(
-    record: EpisodeRecord, result: ValidationResult, label: str
-) -> None:
+def _check_action_dim(record: EpisodeRecord, result: ValidationResult, label: str) -> None:
     if record.action_space in (A2_EE_DELTA, A3_OBJ_REL_EE_DELTA):
         if record.action_dim != EE_DELTA_DIM:
             result.errors.append(
@@ -395,9 +384,7 @@ def _check_timestamps(
             )
 
 
-def _check_contact_semantics(
-    record: EpisodeRecord, result: ValidationResult, label: str
-) -> None:
+def _check_contact_semantics(record: EpisodeRecord, result: ValidationResult, label: str) -> None:
     for key in ("inferred", "sensed"):
         if key in record.obs:
             values = np.asarray(record.obs[key])
@@ -436,9 +423,7 @@ def _check_contact_semantics(
             break
 
 
-def _check_obs_ref_consistency(
-    record: EpisodeRecord, result: ValidationResult, label: str
-) -> None:
+def _check_obs_ref_consistency(record: EpisodeRecord, result: ValidationResult, label: str) -> None:
     if not record.buffer.steps:
         return
     comparisons = (
@@ -488,9 +473,7 @@ def _check_a3_actions(record: EpisodeRecord, result: ValidationResult, label: st
         result.errors.append(f"{label}: A3 door_frame_quat_w_xyzw must be normalized")
 
 
-def _check_a4_outcome(
-    record: A4EpisodeRecord, result: ValidationResult, label: str
-) -> None:
+def _check_a4_outcome(record: A4EpisodeRecord, result: ValidationResult, label: str) -> None:
     _positive_finite_control_dt(record.meta, label, result)
     if not np.isfinite(record.final_door_angle):
         result.errors.append(f"{label}: final_door_angle must be finite")
@@ -504,9 +487,7 @@ def _check_a4_outcome(
 def _check_termination_data(record, result: ValidationResult, label: str, *, legacy: bool) -> None:
     allowed = (*TERMINATION_REASONS, LEGACY_TERMINATION_REASON)
     if record.termination_reason not in allowed:
-        result.errors.append(
-            f"{label}: unknown termination_reason {record.termination_reason!r}"
-        )
+        result.errors.append(f"{label}: unknown termination_reason {record.termination_reason!r}")
     if legacy:
         if record.termination_reason != LEGACY_TERMINATION_REASON:
             result.errors.append(f"{label}: legacy episode termination_reason must be not_recorded")

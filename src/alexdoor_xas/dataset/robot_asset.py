@@ -27,9 +27,7 @@ def dataset_robot_asset_payload(episodes: Iterable[Any]) -> dict[str, Any] | Non
         raise AlexV2ContractError("cannot derive robot provenance from no episodes")
     tasks = {str(item.meta.task) for item in values}
     if len(tasks) != 1:
-        raise AlexV2ContractError(
-            f"dataset export cannot mix episode tasks: {sorted(tasks)}"
-        )
+        raise AlexV2ContractError(f"dataset export cannot mix episode tasks: {sorted(tasks)}")
     is_v2 = any(str(item.meta.task) == paths.ALEX_V2_TASK for item in values)
     raw_refs = {
         (str(item.meta.robot_asset_id), str(item.meta.robot_asset_sha256)) for item in values
