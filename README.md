@@ -1,13 +1,9 @@
 # AlexDoor-XAS
 
-AlexDoor-XAS studies how action representation affects learning and execution in
-contact-rich humanoid manipulation. Its first benchmark is simulated door
-pushing with the fixed-base IHMC Alex V2 torso in NVIDIA Isaac Sim and Isaac
-Lab.
+AlexDoor-XAS studies how action representation affects learning and execution in contact-rich humanoid manipulation. 
+Its first benchmark is simulated door pushing with the fixed-base IHMC Alex V2 torso in NVIDIA Isaac Sim and Isaac Lab.
 
-The benchmark records matched episodes in four action representations (A1-A4),
-allowing the representation to change while the robot, task, and underlying
-experience remain fixed.
+The benchmark records matched episodes in four action representations (A1-A4), allowing the representation to change while the robot, task, and underlying experience remain fixed.
 
 ## Current scope
 
@@ -21,25 +17,16 @@ A2/A3 datasets -> ACT or Diffusion -> adapter-v1 -> closed-loop evaluation
 - A1 is export-only.
 - A2 and A3 support learned policies.
 - A4 is recorded and adapter-executable but does not have a learned policy.
-- Policies are state-only, the benchmark is simulation-only, and no command
-  controls a physical Alex robot.
-- Phase 4 VLA work has not started.
+- Policies are state-only, the benchmark is simulation-only, and no command controls a physical Alex robot.
 
-The completed Phase 3 evaluation was success-saturated and did not identify a
-winning policy, representation, or dataset size. See [Project
-Status](knowledge/wiki/status.md) for maintained capabilities, results, and
-current boundaries.
+The completed evaluation was success-saturated and did not identify a winning policy, representation, or dataset size. 
+See [Project Status](knowledge/wiki/status.md) for maintained capabilities, results, and current boundaries.
 
 ## Requirements
 
 - Python 3.11 or newer through the supported Isaac Lab runtime.
-- Isaac Sim 6.0.1 at `/home/pacquadr/isaacsim`.
-- Isaac Lab `release/3.0.0-beta2` at `/home/pacquadr/IsaacLab`.
-- The external Alex extension at
-  `/home/pacquadr/Desktop/Alex/source/ihmc_alex_isaaclab`.
-- The machine-local Alex V2, door, and hallway assets checked by
-  `scripts/check_env.py`. Use `ALEX_V2_ASSET_ROOT` and
-  `ALEXDOOR_ASSETS_ROOT` to override their default locations.
+- Isaac Sim 6.0.1 and Isaac Lab `release/3.0.0-beta2`.
+- The external Alex extension, the machine-local Alex V2, door, and hallway assets.
 
 Do not use bare system `python3` for Isaac code.
 
@@ -53,8 +40,7 @@ PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/check_env.py
 PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p -m pytest -q
 ```
 
-The complete simulator, dataset, adapter, and policy verification surface is
-listed in [Project Status](knowledge/wiki/status.md).
+The complete simulator, dataset, adapter, and policy verification surface is listed in [Project Status](knowledge/wiki/status.md).
 
 ## Minimal workflow
 
@@ -91,8 +77,7 @@ datasets/           reusable local episodes, splits, and normalization artifacts
 outputs/            canonical D0-D4 scenes and learned-policy runs
 ```
 
-Machine-local assets, datasets, checkpoints, videos, logs, and runtime caches
-remain outside Git.
+Machine-local assets, datasets, checkpoints, videos, logs, and runtime caches remain outside Git.
 
 ## Documentation
 
@@ -107,5 +92,5 @@ remain outside Git.
 
 ## License
 
-This repository is proprietary. No license grant is provided unless a separate
-license file or written agreement states otherwise.
+This repository is proprietary. 
+No license grant is provided unless a separate license file or written agreement states otherwise.
