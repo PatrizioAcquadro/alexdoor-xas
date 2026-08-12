@@ -63,9 +63,9 @@ opposite actor ID belongs to the door panel body. It does not use the gripper's
 unfiltered net force or the unsupported shape-filter API. Pre-action contact
 belongs to each recorded step;
 `terminal_contact` records the response to the final action. Two current input
-validation gaps are documented: finite scalar contact values are coerced to
-Boolean rather than restricted to exact Boolean/0/1, and geometric contact
-checks omit the panel Z extent.
+boundaries are fail-loud: sensed-contact values must be exactly one Boolean or
+numeric 0/1 scalar, and geometric fallback requires the tool point to lie
+within the panel width and height as well as the contact-face depth.
 
 ## Representation Comparison
 
@@ -88,6 +88,8 @@ carefully than independently generating one dataset per space; see
 
 ## Version Notes
 
+- 2026-08-12 — Unified exact contact-flag decoding and made geometric contact
+  inference respect the full three-dimensional panel extent.
 - 2026-08-12 — Required proper A3 rotations and aligned A4 environment-end
   handling with the shared pre-reset rollout contract.
 - 2026-08-12 — Bound A4 execution to validated Alex V2 calibration and replaced synthetic end-effector-radius contact geometry with the collision-derived tool point and physical panel thickness.

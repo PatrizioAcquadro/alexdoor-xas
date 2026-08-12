@@ -271,5 +271,13 @@ def test_contact_inference_tracks_panel_rotation(angle: float) -> None:
     controller = DoorPushController(cfg)
     on_face_panel = np.array([cfg.surface_x_m(0.0), cfg.push_point_y_m, 0.0])
     away_panel = np.array([cfg.surface_x_m(0.2), cfg.push_point_y_m, 0.0])
+    above_panel = np.array(
+        [cfg.surface_x_m(0.0), cfg.push_point_y_m, cfg.panel_height_m / 2 + 0.01]
+    )
+    below_panel = np.array(
+        [cfg.surface_x_m(0.0), cfg.push_point_y_m, -cfg.panel_height_m / 2 - 0.01]
+    )
     assert controller._contact_inferred(rot_z(angle) @ on_face_panel, angle)
     assert not controller._contact_inferred(rot_z(angle) @ away_panel, angle)
+    assert not controller._contact_inferred(rot_z(angle) @ above_panel, angle)
+    assert not controller._contact_inferred(rot_z(angle) @ below_panel, angle)

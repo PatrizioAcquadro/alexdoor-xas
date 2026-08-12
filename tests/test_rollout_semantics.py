@@ -119,6 +119,11 @@ class NonFiniteContactEnv(FakeForceDoorPushEnv):
         return torch.tensor([float("nan")], dtype=torch.float64)
 
 
+class NonBinaryContactEnv(FakeForceDoorPushEnv):
+    def contact_sensed(self):
+        return torch.tensor([0.5], dtype=torch.float64)
+
+
 class NonFiniteStateEnv(FakeForceDoorPushEnv):
     """Inject one non-finite value into the shared adapter state surface."""
 
@@ -420,6 +425,22 @@ def test_non_finite_a3_frame_state_is_an_explicit_simulator_failure(field: str) 
     assert result.termination_reason == "invalid_simulator_state"
     assert result.n_ticks == 0
     assert result.decisions_per_tick == []
+
+
+def test_nonbinary_contact_stops_before_adapter_execution() -> None:
+    env = NonBinaryContactEnv()
+    env.reset(seed=0)
+    result = rollout_chunks(
+        env,
+        _push_source(1),
+        A2Adapter(TEST_ROBOT_LIMITS),
+        max_ticks=1,
+    )
+
+    assert result.termination_reason == "invalid_simulator_state"
+    assert result.n_ticks == 0
+    assert result.decisions_per_tick == []
+    assert "exactly 0/1" in result.notes
 
 
 def test_calibrated_first_contact_correction_is_enforced_in_execution() -> None:

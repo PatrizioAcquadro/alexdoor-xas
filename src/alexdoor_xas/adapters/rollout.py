@@ -25,6 +25,7 @@ import torch
 
 from alexdoor_xas.action.frames import ObjectFrame, door_frame_from_body_pose
 from alexdoor_xas.action.spaces import EE_DELTA_DIM
+from alexdoor_xas.envs.door_task.contact_force import decode_contact_flag
 
 from .base import AdapterDecision, AdapterLog, AdapterStatus, StepContext
 from .limits import RobotLimitsCfg
@@ -177,8 +178,12 @@ def _read_ee_pose(env) -> tuple[np.ndarray, np.ndarray]:
 def _read_contact_state(env) -> tuple[bool | None, float | None]:
     contact_sensed: bool | None = None
     if hasattr(env, "contact_sensed"):
-        raw_contact = _finite_array("contact value", env.contact_sensed()).reshape(-1)[0]
-        contact_sensed = bool(raw_contact)
+        try:
+            contact_sensed = decode_contact_flag(env.contact_sensed())
+        except ValueError as exc:
+            raise InvalidSimulatorStateError(
+                f"invalid simulator state: contact value is invalid ({exc})"
+            ) from exc
     contact_force_n: float | None = None
     if hasattr(env, "contact_force_w"):
         force = _finite_array("contact force", env.contact_force_w())

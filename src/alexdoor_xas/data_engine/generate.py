@@ -16,7 +16,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 import numpy as np
@@ -30,6 +30,7 @@ from alexdoor_xas.assets.alex_v2_contract import (
     validate_alex_v2_manifest,
 )
 from alexdoor_xas.assets.door_task import DEFAULT_DOOR_POSE_ID, canonical_door_pose
+from alexdoor_xas.envs.door_task.contact_force import decode_contact_flag
 from alexdoor_xas.policies.scripted import (
     DoorPushController,
     DoorPushControllerCfg,
@@ -164,6 +165,53 @@ def _validated_robot_asset_provenance(
     return validated, manifest
 
 
+@dataclass(frozen=True)
+class _EnvCapabilities:
+    force_contact: bool
+    joint_state: bool
+
+
+@dataclass(frozen=True)
+class _EpisodeSetup:
+    buffer: EpisodeBuffer
+    controller: DoorPushController
+    controller_cfg: DoorPushControllerCfg
+    door_frame: ObjectFrame
+    door_pose_obs: dict[str, float]
+    control_dt: float
+    settle_report: dict | None
+    capabilities: _EnvCapabilities
+
+
+@dataclass(frozen=True)
+class _TickSnapshot:
+    angle: float
+    velocity: float
+    ee_pos_w: np.ndarray
+    ee_quat_w: np.ndarray
+    contact_sensed: bool | None
+    contact_force_n: float
+
+
+@dataclass(frozen=True)
+class _EnvStepOutcome:
+    termination_reason: str = ""
+    notes: str = ""
+    environment_terminated: bool = False
+    environment_truncated: bool = False
+
+
+@dataclass
+class _EpisodeRuntime:
+    actions_door_frame: list[np.ndarray] = field(default_factory=list)
+    notes: str = ""
+    termination_reason: str = "tick_budget"
+    environment_terminated: bool = False
+    environment_truncated: bool = False
+    final_angle: float = float("nan")
+    last_command: Any = None
+
+
 def run_episode(
     env,
     item: EpisodePlanItem,
@@ -172,9 +220,22 @@ def run_episode(
     render_hook=None,
 ) -> EpisodeBuffer:
     """Roll out and record one episode; deterministic given (env state, item)."""
+    setup = _prepare_episode(env, item, engine_cfg, controller_cfg)
+    runtime = _record_episode_ticks(env, engine_cfg, setup, render_hook)
+    _assert_no_silent_episode_reset(env, item, setup.buffer, runtime)
+    _record_terminal_contact(env, setup, runtime)
+    _finalize_episode(env, item, engine_cfg, setup, runtime)
+    return setup.buffer
+
+
+def _prepare_episode(
+    env,
+    item: EpisodePlanItem,
+    engine_cfg: DataEngineCfg,
+    controller_cfg: DoorPushControllerCfg | None,
+) -> _EpisodeSetup:
     base_controller_cfg = controller_cfg or DoorPushControllerCfg()
     robot_asset_ref, robot_asset_manifest = _validated_robot_asset_provenance(env)
-
     env.reset(seed=item.seed)
     door_frame = _read_door_frame(env)
 
@@ -183,12 +244,9 @@ def run_episode(
     if item.variation is not None:
         active_cfg = item.variation.apply(base_controller_cfg)
         settle_report = apply_start_offset(env, door_frame, item.variation)
-    controller = DoorPushController(active_cfg)
 
     sim_dt = float(env.cfg.sim.dt)
-    decimation = int(env.cfg.decimation)
-    control_dt = sim_dt * decimation
-
+    control_dt = sim_dt * int(env.cfg.decimation)
     meta = EpisodeMeta.create(
         task=engine_cfg.task,
         action_space=A2_EE_DELTA,
@@ -204,195 +262,305 @@ def run_episode(
     buffer = EpisodeBuffer(meta=meta)
     if robot_asset_manifest is not None:
         buffer.extras["robot_asset_manifest"] = robot_asset_manifest
-    actions_door_frame: list[np.ndarray] = []
-    has_force_contact = hasattr(env, "contact_sensed") and hasattr(env, "contact_force_w")
-    has_joint_state = hasattr(env, "robot_joint_state")
+    return _EpisodeSetup(
+        buffer=buffer,
+        controller=DoorPushController(active_cfg),
+        controller_cfg=active_cfg,
+        door_frame=door_frame,
+        door_pose_obs=_door_pose_observation(env, door_frame),
+        control_dt=control_dt,
+        settle_report=settle_report,
+        capabilities=_EnvCapabilities(
+            force_contact=hasattr(env, "contact_sensed")
+            and hasattr(env, "contact_force_w"),
+            joint_state=hasattr(env, "robot_joint_state"),
+        ),
+    )
 
-    # Door-pose observation terms (constant per episode: the pose is authored
-    # into the scene USD per process, and the frame is static within a rollout).
-    # Yaw is derived from the recorded door-frame rotation; the translation is
-    # the door-frame origin relative to the robot base (world origin for the
-    # origin for base-less test doubles) so it stays meaningful if re-based.
+
+def _door_pose_observation(env, door_frame: ObjectFrame) -> dict[str, float]:
+    """Constant episode-level door pose expressed relative to the robot base."""
     door_yaw_rad = float(math.atan2(door_frame.rot[1, 0], door_frame.rot[0, 0]))
     base_pos_w = np.zeros(3)
     if hasattr(env, "robot_base_pos_w"):
         base_pos_w = np.asarray(_numpy(env.robot_base_pos_w())[0], dtype=np.float64)
     door_rel_pos = door_frame.origin - base_pos_w
-    door_pose_obs = {
+    return {
         "door_yaw_rad": door_yaw_rad,
         "door_rel_pos_x": float(door_rel_pos[0]),
         "door_rel_pos_y": float(door_rel_pos[1]),
         "door_rel_pos_z": float(door_rel_pos[2]),
     }
 
-    notes = ""
-    termination_reason = "tick_budget"
-    environment_terminated = False
-    environment_truncated = False
-    final_angle = float("nan")
-    last_command = None
+
+def _record_episode_ticks(
+    env,
+    engine_cfg: DataEngineCfg,
+    setup: _EpisodeSetup,
+    render_hook,
+) -> _EpisodeRuntime:
+    runtime = _EpisodeRuntime()
     for tick in range(engine_cfg.max_ticks):
-        angle, velocity = _hinge_state(env)
-        final_angle = angle
-        ee_pos_w, ee_quat_w = _ee_pose(env)
-        contact_sensed: bool | None = None
-        contact_force_n = 0.0
-        if has_force_contact:
-            contact_sensed = bool(_numpy(env.contact_sensed())[0])
-            contact_force_n = float(np.linalg.norm(_numpy(env.contact_force_w())[0]))
-        command = controller.act(
+        snapshot = _read_tick_snapshot(env, setup.capabilities)
+        runtime.final_angle = snapshot.angle
+        command = setup.controller.act(
             DoorPushObservation(
-                door_frame=door_frame,
-                hinge_angle_rad=angle,
-                hinge_velocity_rad_s=velocity,
-                ee_pos_w=ee_pos_w,
-                contact_sensed=contact_sensed,
+                door_frame=setup.door_frame,
+                hinge_angle_rad=snapshot.angle,
+                hinge_velocity_rad_s=snapshot.velocity,
+                ee_pos_w=snapshot.ee_pos_w,
+                contact_sensed=snapshot.contact_sensed,
             )
         )
-        last_command = command
-        if command.done:
-            termination_reason = "controller_done"
-            break
-        if command.timed_out:
-            termination_reason = "controller_timeout"
+        runtime.last_command = command
+        controller_reason = _controller_stop_reason(command)
+        if controller_reason:
+            runtime.termination_reason = controller_reason
             break
 
-        proprio: dict[str, np.ndarray] = {"ee_pos_w": ee_pos_w, "ee_quat_w_xyzw": ee_quat_w}
-        if has_joint_state:
-            proprio.update(env.robot_joint_state())
-        if has_force_contact:
-            contact = {
-                "inferred": command.contact_inferred,
-                "sensed": contact_sensed,
-                "force_n": contact_force_n,
-                "source": CONTACT_SOURCE_FORCE,
-            }
-        else:
-            contact = {"inferred": command.contact_inferred, "source": CONTACT_SOURCE}
-
-        delta_world = frame_delta_to_world(command.delta_door_frame, door_frame)
-        buffer.add_step(
-            EpisodeStep(
-                t=tick * control_dt,
-                action=delta_world,
-                obs_ref={
-                    "door_angle_rad": angle,
-                    "door_angular_velocity_rad_s": velocity,
-                    "ee_pos_x_m": float(ee_pos_w[0]),
-                    "ee_pos_y_m": float(ee_pos_w[1]),
-                    "ee_pos_z_m": float(ee_pos_w[2]),
-                },
-                proprio=proprio,
-                object_state={
-                    "door_angle_rad": angle,
-                    "door_angular_velocity_rad_s": velocity,
-                    **door_pose_obs,
-                },
-                contact=contact,
-                safety={
-                    "controller_phase": str(command.phase),
-                    "pos_clamped": bool(
-                        np.any(np.abs(delta_world[:3]) > env.cfg.max_pos_delta_m + 1e-12)
-                    ),
-                    "rot_clamped": bool(
-                        np.any(np.abs(delta_world[3:]) > env.cfg.max_rot_delta_rad + 1e-12)
-                    ),
-                },
-            )
+        delta_world = frame_delta_to_world(
+            command.delta_door_frame, setup.door_frame
         )
-        actions_door_frame.append(np.asarray(command.delta_door_frame, dtype=np.float64))
-
-        action = torch.as_tensor(delta_world, dtype=torch.float32).reshape(1, -1)
-        try:
-            step_result = env.step(action)
-        except RuntimeError as error:  # non-finite sim state raised by the env
-            notes = f"env.step failed: {error}"
-            termination_reason = "step_error"
+        setup.buffer.add_step(
+            _build_episode_step(env, setup, snapshot, command, delta_world)
+        )
+        runtime.actions_door_frame.append(
+            np.asarray(command.delta_door_frame, dtype=np.float64)
+        )
+        step_outcome = _step_episode_env(env, delta_world, tick, render_hook)
+        if step_outcome.termination_reason:
+            _apply_env_step_outcome(runtime, step_outcome)
             break
-        environment_terminated, environment_truncated = _step_termination_flags(step_result)
-        if environment_terminated:
-            termination_reason = "environment_terminated"
-            break
-        if environment_truncated:
-            termination_reason = "environment_truncated"
-            break
-        if render_hook is not None:
-            render_hook(tick)
+    return runtime
 
-    # A DirectRLEnv auto-resets *inside* env.step when the episode budget is
-    # reached; everything read after that (final angle, final joint targets,
-    # clamp telemetry) would silently be post-reset state. The env's episode
-    # counter zeroes on reset, so a counter smaller than the executed step
-    # count is unambiguous evidence of a mid-episode reset. Fail loudly.
-    if (
-        buffer.n_steps
-        and not environment_terminated
-        and not environment_truncated
-        and hasattr(env, "episode_length_buf")
-    ):
-        env_ticks = int(_numpy(env.episode_length_buf)[0])
-        if env_ticks < buffer.n_steps:
-            raise RuntimeError(
-                f"episode seed {item.seed} hit the env's auto-reset after "
-                f"{buffer.n_steps} executed steps (episode counter {env_ticks}); "
-                "the recorded final state would be invalid — lower engine "
-                "max_ticks or raise the env's episode_length_s"
-            )
 
-    # Terminal post-action safety sample (additive, phase2.v1-compatible):
-    # per-step contact samples are read *before* each tick's action, so the
-    # force/contact response to the final executed action is only visible in
-    # the env state at loop exit — capture it so the dataset admission bound
-    # covers the response to every executed action, including the last one.
-    if (
-        buffer.n_steps
-        and has_force_contact
-        and not (environment_terminated or environment_truncated)
-    ):
-        buffer.extras["terminal_contact"] = {
-            "sensed": bool(_numpy(env.contact_sensed())[0]),
-            "force_n": float(np.linalg.norm(_numpy(env.contact_force_w())[0])),
-            "t": buffer.n_steps * control_dt,
-            "alignment": (
-                "post-step env state at loop exit: the contact/force response to "
-                "the final executed action (steps[t].contact is pre-action, i.e. "
-                "the response to action t-1)"
+def _read_tick_snapshot(
+    env, capabilities: _EnvCapabilities
+) -> _TickSnapshot:
+    angle, velocity = _hinge_state(env)
+    ee_pos_w, ee_quat_w = _ee_pose(env)
+    contact_sensed: bool | None = None
+    contact_force_n = 0.0
+    if capabilities.force_contact:
+        contact_sensed, contact_force_n = _read_force_contact(env)
+    return _TickSnapshot(
+        angle,
+        velocity,
+        ee_pos_w,
+        ee_quat_w,
+        contact_sensed,
+        contact_force_n,
+    )
+
+
+def _read_force_contact(env) -> tuple[bool, float]:
+    sensed = decode_contact_flag(env.contact_sensed())
+    force_n = float(np.linalg.norm(_numpy(env.contact_force_w())[0]))
+    return sensed, force_n
+
+
+def _controller_stop_reason(command) -> str:
+    if command.done:
+        return "controller_done"
+    if command.timed_out:
+        return "controller_timeout"
+    return ""
+
+
+def _build_episode_step(
+    env,
+    setup: _EpisodeSetup,
+    snapshot: _TickSnapshot,
+    command,
+    delta_world: np.ndarray,
+) -> EpisodeStep:
+    proprio: dict[str, np.ndarray] = {
+        "ee_pos_w": snapshot.ee_pos_w,
+        "ee_quat_w_xyzw": snapshot.ee_quat_w,
+    }
+    if setup.capabilities.joint_state:
+        proprio.update(env.robot_joint_state())
+    contact = _step_contact(setup.capabilities, snapshot, command)
+    return EpisodeStep(
+        t=setup.buffer.n_steps * setup.control_dt,
+        action=delta_world,
+        obs_ref={
+            "door_angle_rad": snapshot.angle,
+            "door_angular_velocity_rad_s": snapshot.velocity,
+            "ee_pos_x_m": float(snapshot.ee_pos_w[0]),
+            "ee_pos_y_m": float(snapshot.ee_pos_w[1]),
+            "ee_pos_z_m": float(snapshot.ee_pos_w[2]),
+        },
+        proprio=proprio,
+        object_state={
+            "door_angle_rad": snapshot.angle,
+            "door_angular_velocity_rad_s": snapshot.velocity,
+            **setup.door_pose_obs,
+        },
+        contact=contact,
+        safety={
+            "controller_phase": str(command.phase),
+            "pos_clamped": bool(
+                np.any(np.abs(delta_world[:3]) > env.cfg.max_pos_delta_m + 1e-12)
             ),
-        }
+            "rot_clamped": bool(
+                np.any(np.abs(delta_world[3:]) > env.cfg.max_rot_delta_rad + 1e-12)
+            ),
+        },
+    )
 
-    if not (environment_terminated or environment_truncated) and termination_reason != "step_error":
-        final_angle, _ = _hinge_state(env)
-    chunk_log = controller.finalize()
-    timed_out = bool(last_command is not None and last_command.timed_out)
-    controller_done = bool(last_command is not None and last_command.done)
-    success = math.isfinite(final_angle) and final_angle >= engine_cfg.success_angle_rad
 
-    buffer.extras.update(
+def _step_contact(
+    capabilities: _EnvCapabilities, snapshot: _TickSnapshot, command
+) -> dict[str, Any]:
+    if not capabilities.force_contact:
+        return {"inferred": command.contact_inferred, "source": CONTACT_SOURCE}
+    return {
+        "inferred": command.contact_inferred,
+        "sensed": snapshot.contact_sensed,
+        "force_n": snapshot.contact_force_n,
+        "source": CONTACT_SOURCE_FORCE,
+    }
+
+
+def _step_episode_env(
+    env, delta_world: np.ndarray, tick: int, render_hook
+) -> _EnvStepOutcome:
+    action = torch.as_tensor(delta_world, dtype=torch.float32).reshape(1, -1)
+    try:
+        step_result = env.step(action)
+    except RuntimeError as error:
+        return _EnvStepOutcome("step_error", f"env.step failed: {error}")
+    terminated, truncated = _step_termination_flags(step_result)
+    if terminated:
+        return _EnvStepOutcome(
+            "environment_terminated", environment_terminated=True
+        )
+    if truncated:
+        return _EnvStepOutcome(
+            "environment_truncated", environment_truncated=True
+        )
+    if render_hook is not None:
+        render_hook(tick)
+    return _EnvStepOutcome()
+
+
+def _apply_env_step_outcome(
+    runtime: _EpisodeRuntime, outcome: _EnvStepOutcome
+) -> None:
+    runtime.notes = outcome.notes
+    runtime.termination_reason = outcome.termination_reason
+    runtime.environment_terminated = outcome.environment_terminated
+    runtime.environment_truncated = outcome.environment_truncated
+
+
+def _assert_no_silent_episode_reset(
+    env,
+    item: EpisodePlanItem,
+    buffer: EpisodeBuffer,
+    runtime: _EpisodeRuntime,
+) -> None:
+    if not buffer.n_steps or runtime.environment_terminated or runtime.environment_truncated:
+        return
+    if not hasattr(env, "episode_length_buf"):
+        return
+    env_ticks = int(_numpy(env.episode_length_buf)[0])
+    if env_ticks < buffer.n_steps:
+        raise RuntimeError(
+            f"episode seed {item.seed} hit the env's auto-reset after "
+            f"{buffer.n_steps} executed steps (episode counter {env_ticks}); "
+            "the recorded final state would be invalid — lower engine "
+            "max_ticks or raise the env's episode_length_s"
+        )
+
+
+def _record_terminal_contact(
+    env, setup: _EpisodeSetup, runtime: _EpisodeRuntime
+) -> None:
+    if not setup.buffer.n_steps or not setup.capabilities.force_contact:
+        return
+    if runtime.environment_terminated or runtime.environment_truncated:
+        return
+    sensed, force_n = _read_force_contact(env)
+    setup.buffer.extras["terminal_contact"] = {
+        "sensed": sensed,
+        "force_n": force_n,
+        "t": setup.buffer.n_steps * setup.control_dt,
+        "alignment": (
+            "post-step env state at loop exit: the contact/force response to "
+            "the final executed action (steps[t].contact is pre-action, i.e. "
+            "the response to action t-1)"
+        ),
+    }
+
+
+def _finalize_episode(
+    env,
+    item: EpisodePlanItem,
+    engine_cfg: DataEngineCfg,
+    setup: _EpisodeSetup,
+    runtime: _EpisodeRuntime,
+) -> None:
+    if (
+        not runtime.environment_terminated
+        and not runtime.environment_truncated
+        and runtime.termination_reason != "step_error"
+    ):
+        runtime.final_angle, _ = _hinge_state(env)
+    chunk_log = setup.controller.finalize()
+    timed_out = bool(
+        runtime.last_command is not None and runtime.last_command.timed_out
+    )
+    controller_done = bool(
+        runtime.last_command is not None and runtime.last_command.done
+    )
+    setup.buffer.extras.update(
         {
-            "action_door_frame": np.stack(actions_door_frame)
-            if actions_door_frame
+            "action_door_frame": np.stack(runtime.actions_door_frame)
+            if runtime.actions_door_frame
             else np.zeros((0, 6)),
-            "door_frame_pos_w": door_frame.origin.copy(),
+            "door_frame_pos_w": setup.door_frame.origin.copy(),
             "door_frame_quat_w_xyzw": _door_frame_quat(env),
             "a4_chunks": chunk_log.to_list(),
-            "variation": item.variation.to_dict() if item.variation is not None else None,
-            "start_pose_settle": settle_report,
-            "controller_cfg": asdict(active_cfg),
+            "variation": item.variation.to_dict()
+            if item.variation is not None
+            else None,
+            "start_pose_settle": setup.settle_report,
+            "controller_cfg": asdict(setup.controller_cfg),
             "engine_cfg": engine_cfg.to_dict(),
             "door_pose_id": engine_cfg.door_pose_id,
             "controller_done": controller_done,
             "controller_timed_out": timed_out,
-            "last_phase": str(last_command.phase) if last_command is not None else "",
+            "last_phase": str(runtime.last_command.phase)
+            if runtime.last_command is not None
+            else "",
         }
     )
+    _record_optional_final_state(env, setup)
+    success = (
+        math.isfinite(runtime.final_angle)
+        and runtime.final_angle >= engine_cfg.success_angle_rad
+    )
+    setup.buffer.set_outcome(
+        EpisodeOutcome(
+            success=success,
+            final_door_angle=runtime.final_angle,
+            n_steps=setup.buffer.n_steps,
+            termination_reason=runtime.termination_reason,
+            environment_terminated=runtime.environment_terminated,
+            environment_truncated=runtime.environment_truncated,
+            notes=runtime.notes,
+        )
+    )
+
+
+def _record_optional_final_state(env, setup: _EpisodeSetup) -> None:
+    buffer = setup.buffer
     if hasattr(env, "robot_joint_names"):
         buffer.extras["joint_names"] = list(env.robot_joint_names())
     if hasattr(env, "arm_joint_ids"):
         buffer.extras["arm_joint_ids"] = [int(i) for i in env.arm_joint_ids()]
-    if has_joint_state:
-        # Applied target after the last executed tick: per-step proprio targets
-        # are captured pre-step, so the A1 (joint-target delta) relabel of the
-        # final step needs this one extra sample (see export._relabel_to_joint_delta).
+    if setup.capabilities.joint_state:
         buffer.extras["final_joint_pos_target"] = np.asarray(
             env.robot_joint_state()["joint_pos_target"], dtype=np.float64
         )
@@ -400,23 +568,7 @@ def run_episode(
         for name, value in env.robot_joint_limits().items():
             buffer.extras[name] = np.asarray(value, dtype=np.float64)
     if hasattr(env, "ik_clamp_telemetry"):
-        # Raw pre-clamp diff-IK excess per joint (anti-windup telemetry): how
-        # often and how far the solver ran past the position limits before the
-        # executor clamped the targets. JSON-able → lands in the sidecar-style
-        # /extras_json group.
         buffer.extras["ik_clamp_telemetry"] = env.ik_clamp_telemetry()
-    buffer.set_outcome(
-        EpisodeOutcome(
-            success=success,
-            final_door_angle=final_angle,
-            n_steps=buffer.n_steps,
-            termination_reason=termination_reason,
-            environment_terminated=environment_terminated,
-            environment_truncated=environment_truncated,
-            notes=notes,
-        )
-    )
-    return buffer
 
 
 def _step_termination_flags(step_result: Any) -> tuple[bool, bool]:

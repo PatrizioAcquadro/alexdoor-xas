@@ -173,8 +173,10 @@ class DoorPanelGeometry:
         """Tool-point-on-panel-face inference (the scripted controller's rule)."""
         point = np.asarray(ee_panel, dtype=np.float64).reshape(3)
         on_face = point[0] <= self.surface_x_m(self.contact_eps_m)
+        half_height = self.panel_height_m / 2.0
         within_panel = (
             0.0 <= point[1] <= self.panel_width_m
+            and -half_height <= point[2] <= half_height
             and point[0] >= 0.0
         )
         return bool(on_face and within_panel)

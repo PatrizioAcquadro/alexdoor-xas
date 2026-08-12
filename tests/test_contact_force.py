@@ -8,7 +8,10 @@ import pytest
 import torch
 
 from alexdoor_xas.data_engine import plan_episodes, run_episode
-from alexdoor_xas.envs.door_task.contact_force import sum_actor_contact_forces
+from alexdoor_xas.envs.door_task.contact_force import (
+    decode_contact_flag,
+    sum_actor_contact_forces,
+)
 from alexdoor_xas.eval.sanity import (
     FORCE_DATASET_LIMIT_N,
     check_alex_episode,
@@ -17,6 +20,30 @@ from alexdoor_xas.eval.sanity import (
 from conftest import FakeForceDoorPushEnv, make_test_engine_cfg
 
 # --- test_contact_force ---
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (False, False),
+        (True, True),
+        (0, False),
+        (1.0, True),
+        (torch.tensor([0]), False),
+        (torch.tensor([1.0]), True),
+    ],
+)
+def test_decode_contact_flag_accepts_only_exact_binary_scalars(value, expected) -> None:
+    assert decode_contact_flag(value) is expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    [-1, 0.5, 2, float("nan"), float("inf"), [], [0, 1]],
+)
+def test_decode_contact_flag_rejects_ambiguous_values(value) -> None:
+    with pytest.raises(ValueError, match="contact flag"):
+        decode_contact_flag(value)
 
 
 def _inputs():
@@ -71,6 +98,20 @@ def test_sum_actor_contact_forces_rejects_invalid_active_data() -> None:
 
 def _episode():
     return run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
+
+
+class _InvalidContactFlagEnv(FakeForceDoorPushEnv):
+    def contact_sensed(self):
+        return torch.tensor([0.5])
+
+
+def test_run_episode_rejects_nonbinary_contact_flag() -> None:
+    with pytest.raises(ValueError, match="exactly 0/1"):
+        run_episode(
+            _InvalidContactFlagEnv(),
+            plan_episodes(1, 0, 0)[0],
+            make_test_engine_cfg(),
+        )
 
 
 def test_terminal_contact_recorded_with_alignment() -> None:

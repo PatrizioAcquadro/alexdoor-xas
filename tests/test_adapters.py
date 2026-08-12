@@ -420,6 +420,7 @@ def test_panel_geometry_pins_controller_defaults():
     geo = DoorPanelGeometry()
     cfg = DoorPushControllerCfg()
     assert geo.panel_width_m == cfg.panel_width_m
+    assert geo.panel_height_m == cfg.panel_height_m
     assert geo.panel_thickness_m == cfg.panel_thickness_m
     assert geo.contact_eps_m == cfg.contact_eps_m
     assert geo.surface_x_m(0.01) == cfg.surface_x_m(0.01)
@@ -431,7 +432,7 @@ def test_geometric_contact_pins_controller_inference():
     rng = np.random.default_rng(0)
     for _ in range(200):
         angle = float(rng.uniform(0.0, math.pi / 2))
-        ee_door = rng.uniform([-0.2, -0.3, -0.6], [0.4, 1.1, 0.6])
+        ee_door = rng.uniform([-0.2, -0.3, -1.4], [0.4, 1.1, 1.4])
         expected = controller._contact_inferred(ee_door, angle)
         assert geo.geometric_contact(rot_z(angle).T @ ee_door) == expected
 

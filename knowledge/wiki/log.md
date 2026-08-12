@@ -174,3 +174,8 @@ schema-version and collision-shape identifiers unrelated to that retired path.
 
 Documented proper-rotation validation for A3 and factual terminated/truncated
 handling in A4 with the last valid pre-reset state retained.
+
+## 2026-08-12 — update : Contact input and panel geometry semantics
+
+Documented exact Boolean/0/1 contact decoding and geometric contact bounds over
+the complete panel width, height, and face depth.

@@ -51,12 +51,13 @@ class DoorPushControllerCfg:
     """Door-relative geometry and per-phase budgets for the scripted push.
 
     Distances are meters, angles radians. The panel occupies
-    ``x in [0, panel_thickness_m]``, ``y in [0, panel_width_m]`` in the panel
-    frame; pushing the +X face toward -X produces positive hinge torque
-    (opens the door).
+    ``x in [0, panel_thickness_m]``, ``y in [0, panel_width_m]``, and
+    ``z in [-panel_height_m/2, panel_height_m/2]`` in the panel frame; pushing
+    the +X face toward -X produces positive hinge torque (opens the door).
     """
 
     panel_width_m: float = 0.83
+    panel_height_m: float = 2.0
     panel_thickness_m: float = 0.036
 
     push_radius_frac: float = 0.8
@@ -343,8 +344,10 @@ class DoorPushController:
         cfg = self.cfg
         ee_panel = rot_z(hinge_angle_rad).T @ ee_door
         on_face = ee_panel[0] <= cfg.surface_x_m(cfg.contact_eps_m)
+        half_height = cfg.panel_height_m / 2.0
         within_panel = (
             0.0 <= ee_panel[1] <= cfg.panel_width_m
+            and -half_height <= ee_panel[2] <= half_height
             and ee_panel[0] >= 0.0
         )
         return bool(on_face and within_panel)

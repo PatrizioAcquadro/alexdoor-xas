@@ -2,7 +2,37 @@
 
 from __future__ import annotations
 
+import math
+from typing import Any
+
 import torch
+
+
+def decode_contact_flag(value: Any) -> bool:
+    """Decode one exact Boolean/0/1 scalar and reject ambiguous sensor values."""
+
+    try:
+        tensor = torch.as_tensor(value)
+    except (TypeError, ValueError, RuntimeError) as exc:
+        raise ValueError("contact flag must be one Boolean/0/1 scalar") from exc
+    if tensor.numel() != 1:
+        raise ValueError(
+            f"contact flag must contain exactly one scalar, got {tensor.numel()} values"
+        )
+    scalar = tensor.reshape(-1)[0].item()
+    if isinstance(scalar, bool):
+        return scalar
+    if isinstance(scalar, complex):
+        raise ValueError("contact flag must be Boolean or exactly 0/1")
+    try:
+        numeric = float(scalar)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("contact flag must be Boolean or exactly 0/1") from exc
+    if not math.isfinite(numeric) or numeric not in (0.0, 1.0):
+        raise ValueError(
+            f"contact flag must be Boolean or exactly 0/1, got {numeric!r}"
+        )
+    return bool(numeric)
 
 
 def sum_actor_contact_forces(
@@ -69,4 +99,4 @@ def sum_actor_contact_forces(
     return (matches.unsqueeze(2) * vectors_w.unsqueeze(0)).sum(dim=1)
 
 
-__all__ = ["sum_actor_contact_forces"]
+__all__ = ["decode_contact_flag", "sum_actor_contact_forces"]
