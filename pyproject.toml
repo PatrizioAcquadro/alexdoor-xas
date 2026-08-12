@@ -1,7 +1,10 @@
 # AlexDoor-XAS package metadata.
+#
+# Isaac Sim, Isaac Lab, PyTorch, and CUDA are supplied by the supported
+# workstation runtime and are intentionally not resolved by pip here.
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
@@ -10,7 +13,7 @@ version = "0.1.0"
 description = "Cross-action-space learning for humanoid articulated-object manipulation."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "Proprietary" }
+license = "LicenseRef-Proprietary"
 authors = [{ name = "Patrizio Acquadro", email = "pacquadr@purdue.edu" }]
 dependencies = [
     "hydra-core>=1.3,<1.4",
@@ -19,16 +22,19 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "ruff>=0.5"]
+dev = [
+    "pytest>=7",
+    "ruff>=0.5",
+]
+diffusion = ["diffusers>=0.39,<1.0"]
 tracking = ["wandb>=0.28.1,<0.29"]
-diffusion = ["diffusers>=0.39,<1.0"]  # schedulers only; installed into the Isaac Lab env
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/alexdoor_xas"]
 
 [tool.ruff]
 line-length = 100
-src = ["src", "scripts", "tests"]
+src = ["src", "tests"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
+select = ["B", "E", "F", "I", "UP", "W"]
