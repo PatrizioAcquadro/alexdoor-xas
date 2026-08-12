@@ -68,7 +68,9 @@ MIN_DISTINCT_DELTA = 1e-4
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--datasets_root", type=Path, default=paths.DATASETS_DIR,
+        "--datasets_root",
+        type=Path,
+        default=paths.DATASETS_DIR,
         help="datasets root (default: repo datasets/)",
     )
     parser.add_argument(
@@ -95,9 +97,7 @@ def parse_args() -> argparse.Namespace:
 def discover_tasks(datasets_root: Path, version: str) -> list[str]:
     tasks = []
     for task_dir in sorted(datasets_root.iterdir()) if datasets_root.is_dir() else []:
-        if any(
-            (task_dir / space / version).is_dir() for space in ALL_ACTION_SPACES
-        ):
+        if any((task_dir / space / version).is_dir() for space in ALL_ACTION_SPACES):
             tasks.append(task_dir.name)
     return tasks
 
@@ -145,8 +145,10 @@ def verify_task(args: argparse.Namespace, task: str) -> list[str]:
         for error in result.errors:
             failures.append(f"{task}/{space}: {error}")
         action_dim = _safe_action_dim(dataset)
-        print(f"  [{'ok ' if result.ok else 'ERR'}] {space}: "
-              f"{len(dataset)} episodes validated, action_dim={action_dim}")
+        print(
+            f"  [{'ok ' if result.ok else 'ERR'}] {space}: "
+            f"{len(dataset)} episodes validated, action_dim={action_dim}"
+        )
     if a4_dataset is not None:
         result = validate_a4_dataset(a4_dataset)
         for warning in result.warnings:
@@ -162,9 +164,11 @@ def verify_task(args: argparse.Namespace, task: str) -> list[str]:
         if bad:
             failures.append(f"{task}/A4: bad chunk-feature shapes {bad}")
         n_chunks = sum(f.shape[0] for f in features)
-        print(f"  [{'ok ' if result.ok else 'ERR'}] {A4_OBJ_CENTRIC_CHUNK}: "
-              f"{len(a4_dataset)} episodes, "
-              f"{n_chunks} chunks x {A4_FEATURE_DIM} features")
+        print(
+            f"  [{'ok ' if result.ok else 'ERR'}] {A4_OBJ_CENTRIC_CHUNK}: "
+            f"{len(a4_dataset)} episodes, "
+            f"{n_chunks} chunks x {A4_FEATURE_DIM} features"
+        )
 
     # -- matched-condition checks across action spaces ----------------------
     reference_space = next(iter(hdf5_datasets))
@@ -210,10 +214,12 @@ def verify_task(args: argparse.Namespace, task: str) -> list[str]:
         f"{info['episodes_per_split']['val']}/{info['episodes_per_split']['test']}"
         for pose, info in split_meta["per_pose"].items()
     )
-    print(f"  [ok ] splits: train={len(splits['train'])} val={len(splits['val'])} "
-          f"test={len(splits['test'])} ({split_meta['n_groups']} content groups; "
-          f"per-pose train/val/test {pose_note}) "
-          f"-> {artifact_mode}:{path.relative_to(_artifact_root(args))}")
+    print(
+        f"  [ok ] splits: train={len(splits['train'])} val={len(splits['val'])} "
+        f"test={len(splits['test'])} ({split_meta['n_groups']} content groups; "
+        f"per-pose train/val/test {pose_note}) "
+        f"-> {artifact_mode}:{path.relative_to(_artifact_root(args))}"
+    )
 
     # -- per space: norm stats + batches + model consumption ----------------
     for space, dataset in hdf5_datasets.items():
@@ -263,15 +269,12 @@ def _verify_a2_a3_distinct(
             failures.append(f"{task}/{label}: A2/A3 conversion error {conversion_err:.3e}")
         if abs(yaw) <= YAW_IDENTITY_TOL_RAD:
             if pair_diff > CONVERSION_TOL:
-                failures.append(
-                    f"{task}/{label}: yaw=0 exports differ by {pair_diff:.3e}"
-                )
+                failures.append(f"{task}/{label}: yaw=0 exports differ by {pair_diff:.3e}")
         else:
             yawed_episodes += 1
             if pair_diff < MIN_DISTINCT_DELTA:
                 failures.append(
-                    f"{task}/{label}: yaw={yaw:+.4f} but A2/A3 max diff is only "
-                    f"{pair_diff:.3e}"
+                    f"{task}/{label}: yaw={yaw:+.4f} but A2/A3 max diff is only {pair_diff:.3e}"
                 )
 
     if task == paths.ALEX_V2_TASK and yawed_episodes == 0:
@@ -344,17 +347,17 @@ def _verify_space_consumption(
         tensors = collate_torch(first)
         linear = torch.nn.Linear(sampler.obs_dim, args.horizon * dataset.action_dim)
         with torch.no_grad():
-            out = linear(tensors["obs"]).reshape(
-                batch_size, args.horizon, dataset.action_dim
-            )
+            out = linear(tensors["obs"]).reshape(batch_size, args.horizon, dataset.action_dim)
         if out.shape != tensors["actions"].shape:
             failures.append(f"{label}: torch forward shape mismatch")
         torch_note = "torch ok"
     except ImportError:
         pass
 
-    print(f"  [ok ] {space}: {len(sampler)} samples, batch obs{first['obs'].shape} "
-          f"actions{first['actions'].shape}, dummy loss {loss:.3f}, {torch_note}")
+    print(
+        f"  [ok ] {space}: {len(sampler)} samples, batch obs{first['obs'].shape} "
+        f"actions{first['actions'].shape}, dummy loss {loss:.3f}, {torch_note}"
+    )
     return failures
 
 

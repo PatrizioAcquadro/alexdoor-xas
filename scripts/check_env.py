@@ -119,9 +119,7 @@ def _check_provenance() -> tuple[list[str], list[str]]:
     if branch is None:
         failures.append("Isaac Lab git state unavailable (not a git checkout?)")
     elif branch != EXPECTED_ISAAC_LAB_BRANCH:
-        failures.append(
-            f"Isaac Lab branch is {branch!r}, expected {EXPECTED_ISAAC_LAB_BRANCH!r}"
-        )
+        failures.append(f"Isaac Lab branch is {branch!r}, expected {EXPECTED_ISAAC_LAB_BRANCH!r}")
     status = _git(OFFICIAL_ISAAC_LAB_ROOT, "status", "--porcelain")
     if status is None:
         failures.append("Isaac Lab worktree status is unavailable")

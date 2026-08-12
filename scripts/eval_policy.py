@@ -299,17 +299,13 @@ def _evaluate(run=None) -> int:
                 "closed_loop/rollout_count": overall["rollout_count"],
                 "closed_loop/success_count": overall["success_count"],
                 "closed_loop/success_rate": overall["success_rate"],
-                "closed_loop/time_to_success_median_s": overall["time_to_success_s"][
-                    "median"
-                ],
+                "closed_loop/time_to_success_median_s": overall["time_to_success_s"]["median"],
                 "closed_loop/time_to_success_p90_s": overall["time_to_success_s"]["p90"],
                 "closed_loop/contact_force_mean_n": overall["contact_force_n"]["mean"],
                 "closed_loop/contact_force_p95_n": overall["contact_force_n"]["p95"],
                 "closed_loop/contact_force_maximum_n": overall["contact_force_n"]["maximum"],
                 "closed_loop/impulse_ns": overall["impulse_ns"],
-                "closed_loop/force_limit_exceedance_count": overall[
-                    "force_limit_exceedance_count"
-                ],
+                "closed_loop/force_limit_exceedance_count": overall["force_limit_exceedance_count"],
                 "closed_loop/adapter_accepted_rate": overall["adapter"]["accepted_rate"],
                 "closed_loop/adapter_corrected_rate": overall["adapter"]["corrected_rate"],
                 "closed_loop/adapter_rejected_rate": overall["adapter"]["rejected_rate"],

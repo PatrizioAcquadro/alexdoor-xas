@@ -77,9 +77,7 @@ def parse_config() -> tuple[str, PolicyConfig, Path | None, dict | None]:
         "train.device": args.device,
         "train.overfit_episodes": args.overfit,
     }
-    config_from_dict = (
-        act_config_from_dict if args.policy == "act" else diffusion_config_from_dict
-    )
+    config_from_dict = act_config_from_dict if args.policy == "act" else diffusion_config_from_dict
     load_config = load_act_config if args.policy == "act" else load_diffusion_config
 
     if args.resume is not None:
@@ -88,13 +86,8 @@ def parse_config() -> tuple[str, PolicyConfig, Path | None, dict | None]:
         try:
             run_dir = resolve_resume_directory(args.resume, args.policy)
             resolved = load_resolved_config(run_dir)
-            if (
-                resolved.get("run_type") != "training"
-                or resolved.get("policy") != args.policy
-            ):
-                raise ValueError(
-                    f"--resume must name a {args.policy.upper()} training run"
-                )
+            if resolved.get("run_type") != "training" or resolved.get("policy") != args.policy:
+                raise ValueError(f"--resume must name a {args.policy.upper()} training run")
             return args.policy, config_from_dict(resolved["config"]), run_dir, resolved
         except (ActConfigError, DiffusionConfigError, KeyError, ValueError) as error:
             parser.error(str(error))
@@ -235,10 +228,7 @@ def main() -> int:
         if cfg.train.device.startswith("cuda")
         else "CPU"
     )
-    print(
-        f"[train_policy:{policy_name}] run={run_id} "
-        f"device={cfg.train.device} ({device_info})"
-    )
+    print(f"[train_policy:{policy_name}] run={run_id} device={cfg.train.device} ({device_info})")
 
     def eval_model():
         return ema.module if ema is not None else model
@@ -264,9 +254,7 @@ def main() -> int:
             try:
                 import wandb
             except ImportError as error:
-                raise RuntimeError(
-                    'W&B tracking requires: pip install -e ".[tracking]"'
-                ) from error
+                raise RuntimeError('W&B tracking requires: pip install -e ".[tracking]"') from error
             tracking = wandb.init(
                 dir=str(paths.OUTPUTS_DIR),
                 config={
@@ -431,9 +419,7 @@ def _epoch_metrics(policy_name: str, stats) -> dict[str, float]:
     }
 
 
-def _best_checkpoint_meta(
-    policy_name: str, stats, run_id: str, using_ema: bool
-) -> dict:
+def _best_checkpoint_meta(policy_name: str, stats, run_id: str, using_ema: bool) -> dict:
     if policy_name == "act":
         return {"epoch": stats.epoch, "val_l1": stats.val_l1, "run_id": run_id}
     return {
@@ -449,9 +435,7 @@ def _validate_last_checkpoint(payload: dict, run_id: str, policy_name: str) -> N
         payload.get("format") != LAST_CHECKPOINT_FORMATS[policy_name]
         or payload.get("run_id") != run_id
     ):
-        raise ValueError(
-            f"last.pt does not match the requested {policy_name.upper()} run"
-        )
+        raise ValueError(f"last.pt does not match the requested {policy_name.upper()} run")
 
 
 def _record_error(run_dir: Path, error: BaseException) -> None:

@@ -103,9 +103,7 @@ def _check_static_usd(usd_path: Path) -> str:
         print(f"[door] ignored unresolved non-USD assets: {unresolved_non_usd}", flush=True)
 
     hinges = [
-        prim.GetPath().pathString
-        for prim in stage.Traverse()
-        if prim.IsA(UsdPhysics.RevoluteJoint)
+        prim.GetPath().pathString for prim in stage.Traverse() if prim.IsA(UsdPhysics.RevoluteJoint)
     ]
     if hinges != [EXPECTED_HINGE_PRIM_PATH]:
         raise RuntimeError(
@@ -184,8 +182,7 @@ def _run_live_environment(asset_ref: RobotAssetRef, hinge_prim_path: str) -> dic
             max_frame_drift = max(max_frame_drift, drift)
             if drift > args.frame_drift_tol:
                 raise RuntimeError(
-                    f"door frame drift at step {step}: {drift:.6g} m > "
-                    f"{args.frame_drift_tol:.6g} m"
+                    f"door frame drift at step {step}: {drift:.6g} m > {args.frame_drift_tol:.6g} m"
                 )
             bound = _door_position_bound(door, door_id)
             max_door_bound = max(max_door_bound, bound)
