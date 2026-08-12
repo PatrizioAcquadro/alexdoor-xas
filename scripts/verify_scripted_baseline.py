@@ -103,7 +103,6 @@ def _engine_cfg(env) -> DataEngineCfg:
         task=paths.ALEX_V2_TASK,
         robot=paths.ALEX_V2_ROBOT_TAG,
         limitations=ALEX_V2_LIMITATIONS,
-        scene=str(env.cfg.door_task_scene.spawn.usd_path),
     )
 
 
@@ -114,7 +113,7 @@ def _assert_determinism(env, engine_cfg: DataEngineCfg, controller_cfg) -> float
     max_diff = traces_equal(first, second, tol=args.determinism_tol)
     if not first.outcome.success:
         raise RuntimeError(
-            f"fixed-start episode must succeed; failure={first.outcome.failure_label!r} "
+            f"fixed-start episode must succeed; termination={first.outcome.termination_reason!r} "
             f"final_angle={first.outcome.final_door_angle:.4f} rad"
         )
     return max_diff
@@ -125,8 +124,8 @@ def _assert_artifacts(artifacts) -> None:
         raise RuntimeError("scripted gate produced the wrong episode count")
     for label, episode in zip(("fixed", "randomized"), artifacts.episodes, strict=True):
         if episode.outcome is None or not episode.outcome.success:
-            failure = None if episode.outcome is None else episode.outcome.failure_label
-            raise RuntimeError(f"{label} Alex V2 episode failed: {failure!r}")
+            termination = None if episode.outcome is None else episode.outcome.termination_reason
+            raise RuntimeError(f"{label} Alex V2 episode failed: {termination!r}")
         if episode.meta.task != paths.ALEX_V2_TASK:
             raise RuntimeError(f"{label} episode carries task {episode.meta.task!r}")
         if episode.meta.robot != paths.ALEX_V2_ROBOT_TAG:

@@ -26,11 +26,9 @@ from alexdoor_xas.action.spaces import EE_DELTA_DIM
 
 from .episode import EpisodeBuffer, EpisodeMeta, EpisodeOutcome, EpisodeStep
 
-SCHEMA_VERSION = "phase2.v1"
-"""phase2.v1 is an additive superset of phase2.v0: optional proprio keys
-(``joint_pos``/``joint_vel``/``joint_pos_target``) and contact keys
-(``sensed``/``force_n``) for force-sensing robot envs. v0 files stay readable;
-:func:`read_episode` never branches on the version."""
+SCHEMA_VERSION = "phase2.v2"
+"""phase2.v2 replaces interpreted failure labels with factual termination data."""
+LEGACY_SCHEMA_VERSIONS = ("phase2.v0", "phase2.v1")
 _STEP_TABLES = ("obs_ref", "proprio", "object_state", "contact", "safety")
 
 
@@ -95,9 +93,23 @@ def read_episode(path: str | Path) -> EpisodeBuffer:
 
     with h5py.File(Path(path), "r") as h5:
         meta = EpisodeMeta(**{k: _from_h5(v) for k, v in h5["meta"].attrs.items()})
+        schema_version = str(_from_h5(h5.attrs.get("schema_version", "")))
         outcome_raw = {k: _from_h5(v) for k, v in h5["outcome"].attrs.items()}
-        outcome_raw["failure_label"] = outcome_raw["failure_label"] or None
+        # phase2.v0/v1 carried an interpreted failure_label. It is deliberately
+        # ignored rather than exposed through the v2 model-facing API.
+        outcome_raw.pop("failure_label", None)
         outcome_raw["success"] = bool(outcome_raw["success"])
+        if schema_version in LEGACY_SCHEMA_VERSIONS:
+            outcome_raw.setdefault("termination_reason", "not_recorded")
+            outcome_raw.setdefault("environment_terminated", None)
+            outcome_raw.setdefault("environment_truncated", None)
+        else:
+            outcome_raw["environment_terminated"] = _optional_bool(
+                outcome_raw.get("environment_terminated")
+            )
+            outcome_raw["environment_truncated"] = _optional_bool(
+                outcome_raw.get("environment_truncated")
+            )
         outcome = EpisodeOutcome(**outcome_raw)
 
         steps_group = h5["steps"]
@@ -188,4 +200,16 @@ def _from_h5(value: Any) -> Any:
     return value
 
 
-__all__ = ["SCHEMA_VERSION", "episode_filename", "read_episode", "write_episode"]
+def _optional_bool(value: Any) -> bool | None:
+    if value in (None, ""):
+        return None
+    return bool(value)
+
+
+__all__ = [
+    "LEGACY_SCHEMA_VERSIONS",
+    "SCHEMA_VERSION",
+    "episode_filename",
+    "read_episode",
+    "write_episode",
+]

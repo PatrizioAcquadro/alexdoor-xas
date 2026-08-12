@@ -180,43 +180,6 @@ def force_trace_evidence(
     }
 
 
-def rollout_failure_label(
-    *,
-    success: bool,
-    n_ticks: int,
-    max_ticks: int,
-    contact_ticks: int,
-    n_rejected: int,
-    notes: str,
-    termination_reason: str = "",
-) -> str | None:
-    """Coarse per-rollout failure taxonomy (None on success).
-
-    Mirrors the data-engine convention of labeling every non-success; kept
-    deliberately coarse — the later unified report needs stable buckets, not
-    per-run prose. ``termination_reason`` (``RolloutResult.termination_reason``)
-    disambiguates env truncation from a plain tick-budget timeout.
-    """
-    if termination_reason == "invalid_simulator_state":
-        return "invalid_simulator_state"
-    if success:
-        return None
-    # Rejections take precedence over no_contact: a rejection storm executes
-    # zero motion and therefore zero contact — labeling it no_contact would
-    # misdiagnose an adapter/frame problem as a policy-reach problem.
-    if termination_reason == "rejection_stop" or "rejected" in notes:
-        return "stopped_on_rejection"
-    if n_rejected > 0:
-        return "commands_rejected"
-    if termination_reason == "env_truncated":
-        return "env_truncated"
-    if contact_ticks == 0:
-        return "no_contact"
-    if n_ticks >= max_ticks:
-        return "timeout_no_success"
-    return "policy_stopped_early"
-
-
 def summarize_decision_warnings(decisions) -> dict[str, Any]:
     """Count warning messages and preserve structured per-event evidence."""
     counts: Counter[str] = Counter()
@@ -288,7 +251,7 @@ def final_ee_state(env, result) -> dict[str, Any]:
     that case. The Alex V2 rollout accessor exposes both position and XYZW
     orientation; an accessor without orientation records ``None`` explicitly.
     """
-    if result.env_truncated:
+    if result.environment_terminated or result.environment_truncated:
         raise RuntimeError("cannot capture final EE state after env auto-reset/truncation")
     pose = env.ee_pose_w()
     if not isinstance(pose, tuple) or len(pose) != 2:
@@ -637,7 +600,6 @@ __all__ = [
     "determinism_probe_update",
     "force_trace_evidence",
     "final_ee_state",
-    "rollout_failure_label",
     "rollout_trace_hash",
     "rollout_traces_payload",
     "scripted_reference_payload",

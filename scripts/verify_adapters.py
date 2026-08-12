@@ -112,7 +112,7 @@ def _reference_episode(env):
     if not episode.outcome.success:
         raise RuntimeError(
             f"reference scripted episode must succeed; "
-            f"failure={episode.outcome.failure_label!r} "
+            f"termination={episode.outcome.termination_reason!r} "
             f"final_angle={episode.outcome.final_door_angle:.4f} rad"
         )
     return episode

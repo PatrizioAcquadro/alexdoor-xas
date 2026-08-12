@@ -43,8 +43,8 @@ def write_run_report(
     # Runs without force sensing keep the original table.
     has_force = any(m.get("mean_contact_force_n") is not None for m in per_episode_metrics)
     lines += ["## Episodes", ""]
-    header = "| seed | randomized | steps | final angle (deg) | success | failure label |"
-    rule = "|------|-----------|-------|-------------------|---------|---------------|"
+    header = "| seed | randomized | steps | final angle (deg) | success | termination |"
+    rule = "|------|-----------|-------|-------------------|---------|-------------|"
     if has_force:
         header += " contact ticks | mean force (N) | max force (N) |"
         rule += "---------------|----------------|---------------|"
@@ -58,7 +58,7 @@ def write_run_report(
         row = (
             f"| {m['seed']} | {'yes' if m['randomized'] else 'no'} | {m['n_steps']} "
             f"| {final_deg} | {'yes' if m['success'] else 'no'} "
-            f"| {m['failure_label'] or '—'} |"
+            f"| {m['termination_reason']} |"
         )
         if has_force:
             row += (

@@ -81,28 +81,10 @@ parser.add_argument(
     help="Record the run under outputs/ only; never write datasets/ (multi-pose passes).",
 )
 parser.add_argument(
-    "--door-yaw-deg",
-    type=float,
-    default=None,
-    help="Door-task pose variation: yaw about the hinge axis, degrees (default 0).",
-)
-parser.add_argument(
-    "--door-offset-x",
-    type=float,
-    default=None,
-    help="Door-task pose variation: world-x translation in meters (default 0).",
-)
-parser.add_argument(
-    "--door-offset-y",
-    type=float,
-    default=None,
-    help="Door-task pose variation: world-y translation in meters (default 0).",
-)
-parser.add_argument(
     "--door-pose-id",
     type=str,
     default=None,
-    help="Pose label recorded into episodes and manifests (e.g. D0).",
+    help="Canonical D0-D4 scene ID (default: D0).",
 )
 parser.add_argument(
     "--clean-shutdown",
@@ -127,9 +109,6 @@ try:
             "video": args.video,
             "clean_shutdown": args.clean_shutdown,
             "export": False if args.no_export else None,
-            "door_yaw_deg": args.door_yaw_deg,
-            "door_offset_x": args.door_offset_x,
-            "door_offset_y": args.door_offset_y,
             "door_pose_id": args.door_pose_id,
         },
     )
@@ -169,8 +148,7 @@ def _make_env():
     cfg = DoorPushAlexV2EnvCfg()
     cfg.seed = run_config.run.seed
     cfg.sim.device = args.device
-    cfg.door_yaw_rad = math.radians(run_config.run.door_yaw_deg)
-    cfg.door_offset_xy = (run_config.run.door_offset_x, run_config.run.door_offset_y)
+    cfg.door_pose_id = run_config.run.door_pose_id
     return gym.make(
         door_task.DOOR_PUSH_ALEX_V2_ENV_ID, cfg=cfg, render_mode=render_mode
     ).unwrapped
@@ -185,12 +163,6 @@ def main() -> int:
             f"{datetime.now(UTC).date().isoformat()}_seed{run_config.run.seed}"
         )
         experiment = run_config.run.experiment or DEFAULT_EXPERIMENT
-        door_pose_kwargs = {
-            "door_pose_id": run_config.run.door_pose_id,
-            "door_yaw_rad": math.radians(run_config.run.door_yaw_deg),
-            "door_offset_xy": (run_config.run.door_offset_x, run_config.run.door_offset_y),
-            "scene": str(env.cfg.door_task_scene.spawn.usd_path),
-        }
         calibration = env.alex_v2_calibration()
         engine_cfg = DataEngineCfg(
             task=paths.ALEX_V2_TASK,
@@ -198,7 +170,7 @@ def main() -> int:
             limitations=ALEX_V2_LIMITATIONS,
             success_angle_rad=math.radians(run_config.run.success_angle_deg),
             max_ticks=run_config.run.max_ticks,
-            **door_pose_kwargs,
+            door_pose_id=run_config.run.door_pose_id,
         )
         controller_cfg = apply_controller_overrides(
             alex_v2_push_cfg(calibration), run_config.controller_overrides
@@ -251,8 +223,7 @@ def main() -> int:
             f"final_angle_mean={math.degrees(agg['final_door_angle_rad']['mean']):.1f} deg",
             flush=True,
         )
-        if agg["failure_labels"]:
-            print(f"[metrics] failures={agg['failure_labels']}", flush=True)
+        print(f"[metrics] terminations={agg['termination_reasons']}", flush=True)
         print(f"[videos] status={artifacts.videos['status']}", flush=True)
         for video in artifacts.videos["files"]:
             print(f"[videos] {video}", flush=True)

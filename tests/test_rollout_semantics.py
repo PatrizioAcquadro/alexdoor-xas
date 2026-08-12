@@ -27,7 +27,6 @@ from alexdoor_xas.policies.common.rollout_eval import (
     determinism_probe_reference,
     determinism_probe_report,
     determinism_probe_update,
-    rollout_failure_label,
     rollout_trace_hash,
 )
 from conftest import TEST_ROBOT_LIMITS, FakeDoorPushEnv, FakeForceDoorPushEnv
@@ -338,7 +337,8 @@ def test_step_hook_does_not_capture_auto_reset_tick() -> None:
     )
 
     assert result.n_ticks == 2
-    assert result.env_truncated is True
+    assert result.environment_truncated is True
+    assert result.environment_terminated is False
     assert observed_ticks == [1]
 
 
@@ -352,8 +352,8 @@ def test_env_truncation_freezes_pre_reset_state() -> None:
     result = rollout_chunks(
         env, _push_source(3), A2Adapter(TEST_ROBOT_LIMITS), success_angle_rad=SUCCESS_RAD
     )
-    assert result.termination_reason == "env_truncated"
-    assert result.env_truncated is True
+    assert result.termination_reason == "environment_truncated"
+    assert result.environment_truncated is True
     assert result.n_ticks == truncate_at
     # Final state = last valid pre-step read, never the post-reset zeros.
     assert result.final_angle_rad > 0.0
@@ -369,24 +369,6 @@ def test_silent_mid_rollout_reset_fails_loudly() -> None:
     env.reset(seed=0)
     with pytest.raises(RuntimeError, match="auto-reset mid-rollout"):
         rollout_chunks(env, _push_source(3), A2Adapter(TEST_ROBOT_LIMITS), max_ticks=9)
-
-
-def test_failure_label_covers_new_reasons() -> None:
-    base = dict(success=False, n_ticks=10, max_ticks=600, contact_ticks=3, n_rejected=0, notes="")
-    assert rollout_failure_label(**base, termination_reason="env_truncated") == "env_truncated"
-    assert (
-        rollout_failure_label(**base, termination_reason="rejection_stop")
-        == "stopped_on_rejection"
-    )
-    assert (
-        rollout_failure_label(**{**base, "n_ticks": 600}, termination_reason="tick_budget")
-        == "timeout_no_success"
-    )
-    assert (
-        rollout_failure_label(**base, termination_reason="policy_exhausted")
-        == "policy_stopped_early"
-    )
-    assert rollout_failure_label(**{**base, "success": True}) is None
 
 
 def test_force_env_records_same_termination_fields() -> None:
@@ -452,16 +434,6 @@ def test_non_finite_a3_frame_state_is_an_explicit_simulator_failure(field: str) 
     assert result.termination_reason == "invalid_simulator_state"
     assert result.n_ticks == 0
     assert result.decisions_per_tick == []
-
-
-def test_invalid_simulator_state_has_a_distinct_failure_label() -> None:
-    base = dict(success=False, n_ticks=0, max_ticks=600, contact_ticks=0, n_rejected=0, notes="")
-    assert (
-        rollout_failure_label(
-            **base, termination_reason="invalid_simulator_state"
-        )
-        == "invalid_simulator_state"
-    )
 
 
 def test_calibrated_first_contact_correction_is_enforced_in_execution() -> None:

@@ -52,7 +52,10 @@ def test_run_episode_succeeds_and_matches_schema() -> None:
 
     assert episode.outcome is not None
     assert episode.outcome.success
-    assert episode.outcome.failure_label is None
+    assert episode.outcome.termination_reason == "controller_done"
+    assert episode.outcome.environment_terminated is False
+    assert episode.outcome.environment_truncated is False
+    assert "failure_label" not in episode.outcome.to_dict()
     assert episode.outcome.final_door_angle >= math.pi / 4
     assert episode.outcome.n_steps == episode.n_steps > 0
     assert episode.meta.action_space == A2_EE_DELTA
@@ -310,12 +313,12 @@ def test_reexport_replaces_the_version_dir(tmp_path) -> None:
 
 
 def test_door_pose_obs_terms_recorded_and_round_trip(tmp_path) -> None:
-    yaw = 0.7
+    yaw = 0.1
     origin = (1.0, -2.0, 0.5)
     episode = run_episode(
         FakeDoorPushEnv(yaw_rad=yaw, origin=origin),
         plan_episodes(1, 0, 0)[0],
-        make_test_engine_cfg(door_pose_id="D3", door_yaw_rad=yaw),
+        make_test_engine_cfg(door_pose_id="D3"),
     )
 
     step = episode.steps[0]
@@ -535,7 +538,7 @@ def test_run_baseline_refuses_direct_export_from_posed_runs(tmp_path) -> None:
             n_fixed=1,
             n_randomized=0,
             base_seed=0,
-            engine_cfg=make_test_engine_cfg(door_pose_id="D1", door_yaw_rad=0.05),
+            engine_cfg=make_test_engine_cfg(door_pose_id="D1"),
         )
     assert not (tmp_path / "datasets").exists()
     # export=False stays allowed for posed runs (the multi-pose flow).
@@ -548,7 +551,7 @@ def test_run_baseline_refuses_direct_export_from_posed_runs(tmp_path) -> None:
         n_fixed=1,
         n_randomized=0,
         base_seed=0,
-        engine_cfg=make_test_engine_cfg(door_pose_id="D1", door_yaw_rad=0.05),
+        engine_cfg=make_test_engine_cfg(door_pose_id="D1"),
         export=False,
     )
     assert artifacts.exports == {}

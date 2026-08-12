@@ -1,18 +1,34 @@
-"""Minimal single-door task USD fixture for AlexDoor-XAS.
-
-The fixture is generated inside the repo's ignored ``outputs/`` tree and keeps
-the actual door asset referenced in place from :data:`alexdoor_xas.paths.DOOR_USD`.
-It deliberately avoids the combined hallway scene, THOR objects, and any
-floorplan payloads.
-"""
+"""Canonical and diagnostic single-door USD layers for AlexDoor-XAS."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 
 from alexdoor_xas import paths
 
-DOOR_TASK_USD: Path = paths.OUTPUTS_DIR / "door_task" / "door_task.usda"
+
+@dataclass(frozen=True)
+class DoorPose:
+    """One frozen canonical door pose."""
+
+    pose_id: str
+    yaw_rad: float
+    xy_offset_m: tuple[float, float]
+
+
+_CANONICAL_DOOR_POSES = {
+    "D0": DoorPose("D0", 0.00, (0.00, 0.00)),
+    "D1": DoorPose("D1", +0.05, (+0.02, 0.00)),
+    "D2": DoorPose("D2", -0.05, (0.00, -0.02)),
+    "D3": DoorPose("D3", +0.10, (+0.02, +0.02)),
+    "D4": DoorPose("D4", -0.10, (+0.02, -0.02)),
+}
+CANONICAL_DOOR_POSES: Mapping[str, DoorPose] = MappingProxyType(_CANONICAL_DOOR_POSES)
+DEFAULT_DOOR_POSE_ID = "D0"
+DOOR_TASK_USD: Path = paths.DOOR_SCENE_DIR / "D0.usda"
 
 # Door.usd uses OmniPBR.mdl, an Isaac built-in material. Pure PXR does not get
 # Kit's MDL search paths, so this one material asset is allowed unresolved.
@@ -27,42 +43,86 @@ _FORBIDDEN_REFERENCES = (
 )
 
 
-def door_task_usd() -> Path:
-    """Return the deterministic single-door task USD, creating it if needed."""
-    return ensure_door_task_usd()
+def canonical_door_pose(pose_id: str = DEFAULT_DOOR_POSE_ID) -> DoorPose:
+    """Return a frozen pose by ID."""
+    try:
+        return CANONICAL_DOOR_POSES[pose_id]
+    except KeyError as exc:
+        raise ValueError(
+            f"unknown canonical door pose {pose_id!r}; expected one of "
+            f"{tuple(CANONICAL_DOOR_POSES)}"
+        ) from exc
 
 
-def door_task_pose_usd_path(door_yaw_rad: float, door_xy_offset_m: tuple[float, float]) -> Path:
-    """Deterministic USD path for a door-task pose (default pose -> DOOR_TASK_USD).
+def canonical_door_scene_path(pose_id: str = DEFAULT_DOOR_POSE_ID) -> Path:
+    """Return the canonical scene-layer path for ``pose_id``."""
+    canonical_door_pose(pose_id)
+    return paths.DOOR_SCENE_DIR / f"{pose_id}.usda"
 
-    Non-default poses get their own file next to the default one so concurrent
-    per-pose generation processes never overwrite each other's scene.
-    """
-    if door_yaw_rad == 0.0 and tuple(door_xy_offset_m) == (0.0, 0.0):
-        return DOOR_TASK_USD
-    name = (
-        f"door_task_yaw{door_yaw_rad:+.4f}"
-        f"_dx{door_xy_offset_m[0]:+.3f}_dy{door_xy_offset_m[1]:+.3f}.usda"
+
+def door_task_usd(pose_id: str = DEFAULT_DOOR_POSE_ID) -> Path:
+    """Return a canonical scene layer, creating it if needed."""
+    return ensure_door_task_usd(pose_id)
+
+
+def ensure_door_task_usd(pose_id: str = DEFAULT_DOOR_POSE_ID) -> Path:
+    """Create or refresh one canonical D0-D4 scene layer."""
+    pose = canonical_door_pose(pose_id)
+    return _ensure_door_task_usd(
+        canonical_door_scene_path(pose_id), pose.yaw_rad, pose.xy_offset_m
     )
-    return DOOR_TASK_USD.parent / name
 
 
-def ensure_door_task_usd(
-    path: Path | None = None,
-    door_yaw_rad: float = 0.0,
-    door_xy_offset_m: tuple[float, float] = (0.0, 0.0),
+def ensure_canonical_door_scenes() -> tuple[Path, ...]:
+    """Generate all and only the five canonical scene layers, then audit them."""
+    generated = tuple(ensure_door_task_usd(pose_id) for pose_id in CANONICAL_DOOR_POSES)
+    audit_canonical_door_scene_directory()
+    return generated
+
+
+def audit_canonical_door_scene_directory() -> None:
+    """Fail unless ``outputs/door_scene`` contains exactly D0.usda-D4.usda."""
+    expected = {f"{pose_id}.usda" for pose_id in CANONICAL_DOOR_POSES}
+    if not paths.DOOR_SCENE_DIR.is_dir():
+        raise FileNotFoundError(
+            f"canonical door-scene directory is missing: {paths.DOOR_SCENE_DIR}"
+        )
+    actual = {entry.name for entry in paths.DOOR_SCENE_DIR.iterdir()}
+    if actual != expected:
+        raise ValueError(
+            "canonical door-scene directory must contain exactly "
+            f"{sorted(expected)}; found {sorted(actual)}"
+        )
+    for pose_id in CANONICAL_DOOR_POSES:
+        validate_door_task_usd(canonical_door_scene_path(pose_id))
+
+
+def ensure_diagnostic_door_task_usd(
+    path: str | Path,
+    *,
+    door_yaw_rad: float,
+    door_xy_offset_m: tuple[float, float],
 ) -> Path:
-    """Create or refresh the deterministic single-door task USD and validate it.
+    """Generate a numeric diagnostic pose at an explicit cache-only path."""
+    usd_path = Path(path).expanduser()
+    cache_root = paths.RUNTIME_CACHE_ROOT.resolve()
+    try:
+        usd_path.resolve().relative_to(cache_root)
+    except ValueError as exc:
+        raise ValueError(
+            f"diagnostic scenes must be written under the runtime cache {cache_root}: {usd_path}"
+        ) from exc
+    if usd_path.suffix != ".usda":
+        raise ValueError(f"diagnostic scene path must end in .usda: {usd_path}")
+    return _ensure_door_task_usd(usd_path, float(door_yaw_rad), tuple(door_xy_offset_m))
 
-    ``door_yaw_rad`` / ``door_xy_offset_m`` author a door-task pose: the whole
-    door assembly is rotated by yaw about the Doorframe's (hinge) world
-    position, then translated in world XY. The ``FixDoorframe`` world-side
-    anchor is computed from the composed (posed) transform, so it follows the
-    pose automatically. The default pose authors byte-identical USD to before.
-    """
-    usd_path = (
-        Path(path) if path is not None else door_task_pose_usd_path(door_yaw_rad, door_xy_offset_m)
-    )
+
+def _ensure_door_task_usd(
+    usd_path: Path,
+    door_yaw_rad: float,
+    door_xy_offset_m: tuple[float, float],
+) -> Path:
+    """Author one deterministic layer and replace it only when content changes."""
     usd_path = usd_path.expanduser()
     usd_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -341,9 +401,16 @@ def _layer_text(layer) -> str:
 
 
 __all__ = [
+    "CANONICAL_DOOR_POSES",
+    "DEFAULT_DOOR_POSE_ID",
     "DOOR_TASK_USD",
-    "door_task_pose_usd_path",
+    "DoorPose",
+    "audit_canonical_door_scene_directory",
+    "canonical_door_pose",
+    "canonical_door_scene_path",
     "door_task_usd",
+    "ensure_canonical_door_scenes",
+    "ensure_diagnostic_door_task_usd",
     "ensure_door_task_usd",
     "validate_door_task_usd",
 ]

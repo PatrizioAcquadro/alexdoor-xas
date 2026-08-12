@@ -1,0 +1,70 @@
+#usda 1.0
+(
+    defaultPrim = "World"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "World"
+{
+    def Cube "Floor" (
+        prepend apiSchemas = ["PhysicsCollisionAPI"]
+    )
+    {
+        double size = 1
+        float3 xformOp:scale = (2, 2, 0.05)
+        double3 xformOp:translate = (0, 0, -0.025)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+    }
+
+    def DomeLight "Light"
+    {
+        float inputs:intensity = 400
+    }
+
+    def Xform "DoorTaskDoor" (
+        prepend apiSchemas = ["PhysicsArticulationRootAPI"]
+        prepend references = @/home/pacquadr/Desktop/CombinedScene/Door.usd@</DoorObject>
+    )
+    {
+        over "Doorframe" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI"]
+        )
+        {
+            bool physics:kinematicEnabled = 0
+            bool physics:rigidBodyEnabled = 1
+            uniform bool physics:startsAsleep = 1
+        }
+
+        def PhysicsFixedJoint "FixDoorframe"
+        {
+            rel physics:body1 = </World/DoorTaskDoor/Doorframe>
+            bool physics:jointEnabled = 1
+            point3f physics:localPos0 = (-0.7007639, -0.4460541, 1.0096998)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (1, 0, 0, 0)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+        }
+
+        over "Door" (
+            prepend apiSchemas = ["PhysicsMassAPI"]
+        )
+        {
+            point3f physics:centerOfMass = (0, 0, 0)
+            float3 physics:diagonalInertia = (1, 1, 1)
+            float physics:mass = 25
+            quatf physics:principalAxes = (1, 0, 0, 0)
+        }
+
+        over "Handle" (
+            prepend apiSchemas = ["PhysicsMassAPI"]
+        )
+        {
+            point3f physics:centerOfMass = (0, 0, 0)
+            float3 physics:diagonalInertia = (0.01, 0.01, 0.01)
+            float physics:mass = 1
+            quatf physics:principalAxes = (1, 0, 0, 0)
+        }
+    }
+}
+

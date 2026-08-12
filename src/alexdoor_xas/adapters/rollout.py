@@ -281,7 +281,8 @@ TERMINATION_REASONS = (
     "success",
     "policy_exhausted",
     "rejection_stop",
-    "env_truncated",
+    "environment_terminated",
+    "environment_truncated",
     "invalid_simulator_state",
     "tick_budget",
 )
@@ -291,8 +292,8 @@ TERMINATION_REASONS = (
   executed control tick, independent of policy chunk size);
 - ``policy_exhausted`` — the chunk source returned ``None``;
 - ``rejection_stop`` — a rejected command with ``stop_on_reject``;
-- ``env_truncated`` — ``env.step`` reported terminated/truncated (the env
-  auto-reset internally; no post-reset state is consumed);
+- ``environment_terminated`` / ``environment_truncated`` — the corresponding
+  factual flag was returned by ``env.step``;
 - ``invalid_simulator_state`` — a required numeric simulator state or adapter
   limit was invalid; no command is adapted from that snapshot;
 - ``tick_budget`` — the rollout's ``max_ticks`` budget ran out.
@@ -312,7 +313,7 @@ class RolloutResult:
     contact_per_tick: list[bool | None] = field(default_factory=list)
     """Post-step force-sensed contact flag per executed tick (``None`` when the
     env exposes no contact sensing). Additive: existing consumers ignore it.
-    On ``env_truncated`` the final tick has no valid post-step read, so these
+    On environment termination the final tick has no valid post-step read, so these
     lists are one entry shorter than ``n_ticks``."""
     force_n_per_tick: list[float | None] = field(default_factory=list)
     """Post-step |contact force| in newtons per executed tick (``None`` when
@@ -327,9 +328,9 @@ class RolloutResult:
     """First-crossing success (``None`` when no threshold was given). A
     cross-then-rebound trajectory stays successful with its original
     crossing tick."""
-    env_truncated: bool = False
-    """``env.step`` flagged terminated/truncated: the env auto-reset itself and
-    ``final_angle_rad`` is the last valid pre-step read."""
+    environment_terminated: bool = False
+    environment_truncated: bool = False
+    """Factual Gymnasium flags; the final angle is the last valid pre-step read."""
 
     @property
     def door_angle_change_rad(self) -> float:
@@ -344,7 +345,8 @@ class RolloutResult:
             "termination_reason": self.termination_reason,
             "first_success_tick": self.first_success_tick,
             "success": self.success,
-            "env_truncated": self.env_truncated,
+            "environment_terminated": self.environment_terminated,
+            "environment_truncated": self.environment_truncated,
             "notes": self.notes,
             "log": self.log.to_dict(),
         }
@@ -376,8 +378,8 @@ def rollout_chunks(
     (success and its crossing tick are latched either way — a later rebound
     cannot unlabel it).
 
-    ``env.step`` termination/truncation ends the rollout immediately with
-    ``env_truncated``: a ``DirectRLEnv`` auto-resets inside ``step``, so no
+    ``env.step`` termination/truncation ends the rollout immediately with its
+    factual environment reason: a ``DirectRLEnv`` auto-resets inside ``step``, so no
     post-reset state is read (the final angle is the last valid pre-step
     read). A defensive episode-counter guard (``env.episode_length_buf``)
     additionally fails loudly if an unreported mid-rollout reset slipped
@@ -417,7 +419,8 @@ def rollout_chunks(
     notes = ""
     reason: str | None = None
     first_success_tick: int | None = None
-    env_truncated = False
+    environment_terminated = False
+    environment_truncated = False
     contact_ever_sensed = ctx.contact_sensed is True
 
     def crossed() -> bool:
@@ -459,8 +462,9 @@ def rollout_chunks(
                 # The env auto-reset inside step: everything readable now is
                 # post-reset state. Keep the last valid pre-step context as
                 # the final state and stop without any further env reads.
-                env_truncated = True
-                reason = "env_truncated"
+                environment_terminated = terminated
+                environment_truncated = truncated
+                reason = "environment_terminated" if terminated else "environment_truncated"
                 notes = (
                     f"env reported {'termination' if terminated else 'truncation'} "
                     f"at tick {ticks}; rollout state frozen at the last valid read"
@@ -494,7 +498,9 @@ def rollout_chunks(
         reason = "tick_budget"
         notes = notes or f"tick budget exhausted ({max_ticks})"
 
-    if not env_truncated and hasattr(env, "episode_length_buf"):
+    if not (environment_terminated or environment_truncated) and hasattr(
+        env, "episode_length_buf"
+    ):
         env_ticks = int(_numpy(env.episode_length_buf).reshape(-1)[0])
         if env_ticks < ticks:
             raise RuntimeError(
@@ -515,7 +521,8 @@ def rollout_chunks(
         termination_reason=reason,
         first_success_tick=first_success_tick,
         success=(first_success_tick is not None) if success_angle_rad is not None else None,
-        env_truncated=env_truncated,
+        environment_terminated=environment_terminated,
+        environment_truncated=environment_truncated,
     )
 
 

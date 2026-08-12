@@ -102,7 +102,9 @@ class EpisodeRecord:
     obs: dict[str, np.ndarray]  # per-step arrays, float64 (bools become 0/1)
     success: bool
     final_door_angle: float
-    failure_label: str | None
+    termination_reason: str
+    environment_terminated: bool | None
+    environment_truncated: bool | None
     extras: dict[str, Any]
     buffer: EpisodeBuffer = field(repr=False)  # source buffer (sanity checks)
 
@@ -163,7 +165,9 @@ def load_episode_record(path: str | Path) -> EpisodeRecord:
         obs=obs,
         success=buffer.outcome.success,
         final_door_angle=buffer.outcome.final_door_angle,
-        failure_label=buffer.outcome.failure_label,
+        termination_reason=buffer.outcome.termination_reason,
+        environment_terminated=buffer.outcome.environment_terminated,
+        environment_truncated=buffer.outcome.environment_truncated,
         extras=buffer.extras,
         buffer=buffer,
     )
@@ -258,7 +262,9 @@ class A4EpisodeRecord:
     chunks: tuple[ObjectCentricChunk, ...]
     success: bool
     final_door_angle: float
-    failure_label: str | None
+    termination_reason: str
+    environment_terminated: bool | None
+    environment_truncated: bool | None
     n_steps: int
     control_dt: float
 
@@ -318,7 +324,7 @@ def _a4_record(data: dict[str, Any]) -> A4EpisodeRecord:
     )
     _require_keys(
         outcome,
-        ("success", "final_door_angle", "failure_label", "n_steps"),
+        ("success", "final_door_angle", "n_steps"),
         episode_label,
     )
     chunks = data.get("chunks", [])
@@ -331,7 +337,9 @@ def _a4_record(data: dict[str, Any]) -> A4EpisodeRecord:
         chunks=tuple(ObjectCentricChunk.from_dict(c) for c in chunks),
         success=_required_bool(outcome["success"], f"{episode_label}: outcome.success"),
         final_door_angle=float(outcome["final_door_angle"]),
-        failure_label=outcome.get("failure_label"),
+        termination_reason=str(outcome.get("termination_reason", "not_recorded")),
+        environment_terminated=_optional_bool(outcome.get("environment_terminated")),
+        environment_truncated=_optional_bool(outcome.get("environment_truncated")),
         n_steps=int(outcome["n_steps"]),
         control_dt=float(meta["control_dt"]),
     )
@@ -353,6 +361,14 @@ def _require_keys(data: dict[str, Any], keys: tuple[str, ...], label: str) -> No
 def _required_bool(value: Any, label: str) -> bool:
     if not isinstance(value, bool):
         raise ValueError(f"{label} must be a JSON boolean")
+    return value
+
+
+def _optional_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise ValueError("environment termination flags must be JSON booleans or null")
     return value
 
 

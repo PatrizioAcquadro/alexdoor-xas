@@ -19,11 +19,22 @@ from pathlib import Path
 REPO_ROOT: Path = Path(__file__).resolve().parents[2]
 
 DATASETS_DIR: Path = REPO_ROOT / "datasets"   # reusable exported episodes (Phase 2+)
-OUTPUTS_DIR: Path = REPO_ROOT / "outputs"     # per-run artifacts (metrics/plots/…)
+OUTPUTS_DIR: Path = REPO_ROOT / "outputs"     # canonical scenes + learned-policy runs
 KNOWLEDGE_DIR: Path = REPO_ROOT / "knowledge"
 WIKI_DIR: Path = KNOWLEDGE_DIR / "wiki"
 # Backward-compatible name for the canonical documentation directory.
 DOCS_DIR: Path = WIKI_DIR
+
+# Runtime caches and arbitrary generated artifacts never belong in outputs/.
+RUNTIME_CACHE_ROOT: Path = Path(
+    os.environ.get("ALEXDOOR_CACHE_ROOT", str(Path.home() / ".cache" / "alexdoor-xas"))
+).expanduser()
+DIAGNOSTIC_SCENES_DIR: Path = RUNTIME_CACHE_ROOT / "door_scenes"
+CALIBRATION_CACHE_DIR: Path = RUNTIME_CACHE_ROOT / "calibration"
+VERIFICATION_CACHE_DIR: Path = RUNTIME_CACHE_ROOT / "verification"
+SCRIPTED_RUNS_CACHE_DIR: Path = RUNTIME_CACHE_ROOT / "scripted_runs"
+DATASET_INSPECTION_CACHE_DIR: Path = RUNTIME_CACHE_ROOT / "dataset_inspection"
+WANDB_CACHE_DIR: Path = RUNTIME_CACHE_ROOT / "wandb"
 
 # ── External asset root (referenced in place, overridable) ───────────────────
 ASSETS_ROOT: Path = Path(
@@ -48,7 +59,7 @@ ALEX_V2_DATASET_VERSION = "v2_pose"
 ALEX_V2_ROBOT_TAG = "alex_v2_fullbody_fixedbase_standard_forearm_v0"
 ALEX_V2_DATASETS_DIR: Path = DATASETS_DIR / ALEX_V2_TASK
 ALEX_V2_OUTPUTS_DIR: Path = OUTPUTS_DIR / ALEX_V2_TASK
-ALEX_V2_CHECKPOINTS_DIR: Path = ALEX_V2_OUTPUTS_DIR / "checkpoints"
+DOOR_SCENE_DIR: Path = OUTPUTS_DIR / "door_scene"
 
 # ── Scenes (CombinedScene) ───────────────────────────────────────────────────
 SCENES_ROOT: Path = ASSETS_ROOT / "CombinedScene"

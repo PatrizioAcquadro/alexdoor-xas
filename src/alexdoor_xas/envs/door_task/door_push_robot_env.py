@@ -45,9 +45,7 @@ class DoorPushRobotEnv(DirectRLEnv):
     cfg: DoorPushRobotEnvCfg
 
     def __init__(self, cfg: DoorPushRobotEnvCfg, render_mode: str | None = None, **kwargs):
-        usd_path = ensure_door_task_usd(
-            door_yaw_rad=cfg.door_yaw_rad, door_xy_offset_m=tuple(cfg.door_offset_xy)
-        )
+        usd_path = ensure_door_task_usd(cfg.door_pose_id)
         cfg.door_task_scene.spawn.usd_path = str(usd_path)
         if cfg.robot is None:
             raise RuntimeError("DoorPushRobotEnv requires an injected robot articulation config")

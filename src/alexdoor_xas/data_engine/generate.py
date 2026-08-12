@@ -29,7 +29,7 @@ from alexdoor_xas.assets.alex_v2_contract import (
     RobotAssetRef,
     validate_alex_v2_manifest,
 )
-from alexdoor_xas.eval.failures import label_episode
+from alexdoor_xas.assets.door_task import DEFAULT_DOOR_POSE_ID, canonical_door_pose
 from alexdoor_xas.policies.scripted import (
     DoorPushController,
     DoorPushControllerCfg,
@@ -56,21 +56,29 @@ class DataEngineCfg:
     robot: str
     limitations: tuple[str, ...]
     """Known limitations of the run setup, surfaced in the run report."""
-    scene: str = "outputs/door_task/door_task.usda"
+    scene: str = ""
     policy: str = "scripted"
     success_angle_rad: float = DEFAULT_SUCCESS_ANGLE_RAD
     max_ticks: int = DEFAULT_MAX_TICKS
-    door_pose_id: str | None = None
-    """Label of the door-task pose this run was generated at (e.g. ``D0``).
-    ``None`` = the default pose. The pose itself is fixed per process (the
-    door-task USD is authored at env construction), so it is engine-level."""
-    door_yaw_rad: float = 0.0
-    """Door-task yaw about the hinge axis (rad) authored into the scene USD."""
-    door_offset_xy: tuple[float, float] = (0.0, 0.0)
-    """Door-task world-frame XY translation (m) authored into the scene USD."""
+    door_pose_id: str = DEFAULT_DOOR_POSE_ID
+    """Canonical door pose selected by ID; routine generation never accepts raw transforms."""
+
+    def __post_init__(self) -> None:
+        canonical_door_pose(self.door_pose_id)
+        expected_scene = f"outputs/door_scene/{self.door_pose_id}.usda"
+        if self.scene and self.scene != expected_scene:
+            raise ValueError(
+                f"scene {self.scene!r} conflicts with canonical pose {self.door_pose_id!r}; "
+                f"expected {expected_scene!r}"
+            )
+        object.__setattr__(self, "scene", expected_scene)
 
     def to_dict(self) -> dict[str, object]:
-        return asdict(self)
+        values = asdict(self)
+        pose = canonical_door_pose(self.door_pose_id)
+        values["door_yaw_rad"] = pose.yaw_rad
+        values["door_offset_xy"] = list(pose.xy_offset_m)
+        return values
 
 
 @dataclass(frozen=True)
@@ -218,9 +226,14 @@ def run_episode(
     }
 
     notes = ""
+    termination_reason = "tick_budget"
+    environment_terminated = False
+    environment_truncated = False
+    final_angle = float("nan")
     last_command = None
     for tick in range(engine_cfg.max_ticks):
         angle, velocity = _hinge_state(env)
+        final_angle = angle
         ee_pos_w, ee_quat_w = _ee_pose(env)
         contact_sensed: bool | None = None
         contact_force_n = 0.0
@@ -237,7 +250,11 @@ def run_episode(
             )
         )
         last_command = command
-        if command.done or command.timed_out:
+        if command.done:
+            termination_reason = "controller_done"
+            break
+        if command.timed_out:
+            termination_reason = "controller_timeout"
             break
 
         proprio: dict[str, np.ndarray] = {"ee_pos_w": ee_pos_w, "ee_quat_w_xyzw": ee_quat_w}
@@ -287,9 +304,17 @@ def run_episode(
 
         action = torch.as_tensor(delta_world, dtype=torch.float32).reshape(1, -1)
         try:
-            env.step(action)
+            step_result = env.step(action)
         except RuntimeError as error:  # non-finite sim state raised by the env
             notes = f"env.step failed: {error}"
+            termination_reason = "step_error"
+            break
+        environment_terminated, environment_truncated = _step_termination_flags(step_result)
+        if environment_terminated:
+            termination_reason = "environment_terminated"
+            break
+        if environment_truncated:
+            termination_reason = "environment_truncated"
             break
         if render_hook is not None:
             render_hook(tick)
@@ -299,7 +324,12 @@ def run_episode(
     # clamp telemetry) would silently be post-reset state. The env's episode
     # counter zeroes on reset, so a counter smaller than the executed step
     # count is unambiguous evidence of a mid-episode reset. Fail loudly.
-    if buffer.n_steps and hasattr(env, "episode_length_buf"):
+    if (
+        buffer.n_steps
+        and not environment_terminated
+        and not environment_truncated
+        and hasattr(env, "episode_length_buf")
+    ):
         env_ticks = int(_numpy(env.episode_length_buf)[0])
         if env_ticks < buffer.n_steps:
             raise RuntimeError(
@@ -314,7 +344,11 @@ def run_episode(
     # force/contact response to the final executed action is only visible in
     # the env state at loop exit — capture it so the dataset admission bound
     # covers the response to every executed action, including the last one.
-    if buffer.n_steps and has_force_contact:
+    if (
+        buffer.n_steps
+        and has_force_contact
+        and not (environment_terminated or environment_truncated)
+    ):
         buffer.extras["terminal_contact"] = {
             "sensed": bool(_numpy(env.contact_sensed())[0]),
             "force_n": float(np.linalg.norm(_numpy(env.contact_force_w())[0])),
@@ -326,7 +360,8 @@ def run_episode(
             ),
         }
 
-    final_angle, _ = _hinge_state(env)
+    if not (environment_terminated or environment_truncated) and termination_reason != "step_error":
+        final_angle, _ = _hinge_state(env)
     chunk_log = controller.finalize()
     timed_out = bool(last_command is not None and last_command.timed_out)
     controller_done = bool(last_command is not None and last_command.done)
@@ -374,19 +409,23 @@ def run_episode(
         EpisodeOutcome(
             success=success,
             final_door_angle=final_angle,
-            failure_label=label_episode(
-                final_angle_rad=final_angle,
-                success_angle_rad=engine_cfg.success_angle_rad,
-                controller_done=controller_done,
-                timed_out=timed_out,
-                last_phase=str(last_command.phase) if last_command is not None else "unknown",
-                notes=notes,
-            ),
             n_steps=buffer.n_steps,
+            termination_reason=termination_reason,
+            environment_terminated=environment_terminated,
+            environment_truncated=environment_truncated,
             notes=notes,
         )
     )
     return buffer
+
+
+def _step_termination_flags(step_result: Any) -> tuple[bool, bool]:
+    """Extract Gymnasium termination flags from a duck-typed env step result."""
+    if not isinstance(step_result, tuple) or len(step_result) < 5:
+        return False, False
+    return bool(_numpy(step_result[2]).reshape(-1)[0]), bool(
+        _numpy(step_result[3]).reshape(-1)[0]
+    )
 
 
 def traces_equal(

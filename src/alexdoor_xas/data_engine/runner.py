@@ -90,17 +90,11 @@ def run_baseline(
     # default-pose dataset (and its splits/norm stats) the trained checkpoints
     # depend on. Posed runs remain output-only unless a future dataset workflow
     # explicitly defines how multiple poses are selected and published.
-    non_default_pose = (
-        engine_cfg.door_pose_id is not None
-        or engine_cfg.door_yaw_rad != 0.0
-        or tuple(engine_cfg.door_offset_xy) != (0.0, 0.0)
-    )
+    non_default_pose = engine_cfg.door_pose_id != "D0"
     if export and non_default_pose:
         raise RuntimeError(
             "refusing to export datasets from a run with a non-default door pose "
-            f"(door_pose_id={engine_cfg.door_pose_id!r}, "
-            f"door_yaw_rad={engine_cfg.door_yaw_rad}, "
-            f"door_offset_xy={tuple(engine_cfg.door_offset_xy)}); rerun with "
+            f"(door_pose_id={engine_cfg.door_pose_id!r}); rerun with "
             "export disabled (--no-export / run.export=false)"
         )
 

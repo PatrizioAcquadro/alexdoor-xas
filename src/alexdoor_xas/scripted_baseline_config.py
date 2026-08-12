@@ -16,6 +16,7 @@ from hydra.core.global_hydra import GlobalHydra
 from omegaconf import OmegaConf
 
 from alexdoor_xas import paths
+from alexdoor_xas.assets.door_task import DEFAULT_DOOR_POSE_ID, canonical_door_pose
 from alexdoor_xas.policies.scripted import DoorPushControllerCfg
 
 CONFIG_DIR: Path = paths.REPO_ROOT / "configs"
@@ -35,9 +36,6 @@ RUN_FIELD_NAMES = frozenset(
         "video",
         "clean_shutdown",
         "export",
-        "door_yaw_deg",
-        "door_offset_x",
-        "door_offset_y",
         "door_pose_id",
     }
 )
@@ -61,10 +59,7 @@ class ScriptedBaselineRunCfg:
     video: bool = False
     clean_shutdown: bool = False
     export: bool = True
-    door_yaw_deg: float = 0.0
-    door_offset_x: float = 0.0
-    door_offset_y: float = 0.0
-    door_pose_id: str | None = None
+    door_pose_id: str = DEFAULT_DOOR_POSE_ID
 
 
 @dataclass(frozen=True)
@@ -169,16 +164,11 @@ def _build_run_cfg(node: dict[str, Any]) -> ScriptedBaselineRunCfg:
     if not math.isfinite(success_angle_deg):
         raise ScriptedBaselineConfigError("run.success_angle_deg must be finite")
 
-    door_yaw_deg = _coerce_float("run.door_yaw_deg", node.get("door_yaw_deg", 0.0))
-    door_offset_x = _coerce_float("run.door_offset_x", node.get("door_offset_x", 0.0))
-    door_offset_y = _coerce_float("run.door_offset_y", node.get("door_offset_y", 0.0))
-    for name, value in (
-        ("run.door_yaw_deg", door_yaw_deg),
-        ("run.door_offset_x", door_offset_x),
-        ("run.door_offset_y", door_offset_y),
-    ):
-        if not math.isfinite(value):
-            raise ScriptedBaselineConfigError(f"{name} must be finite")
+    door_pose_id = _optional_str("run.door_pose_id", node.get("door_pose_id")) or "D0"
+    try:
+        canonical_door_pose(door_pose_id)
+    except ValueError as error:
+        raise ScriptedBaselineConfigError(str(error)) from error
 
     return ScriptedBaselineRunCfg(
         episodes=episodes,
@@ -191,10 +181,7 @@ def _build_run_cfg(node: dict[str, Any]) -> ScriptedBaselineRunCfg:
         video=_coerce_bool("run.video", node.get("video", False)),
         clean_shutdown=_coerce_bool("run.clean_shutdown", node.get("clean_shutdown", False)),
         export=_coerce_bool("run.export", node.get("export", True)),
-        door_yaw_deg=door_yaw_deg,
-        door_offset_x=door_offset_x,
-        door_offset_y=door_offset_y,
-        door_pose_id=_optional_str("run.door_pose_id", node.get("door_pose_id")),
+        door_pose_id=door_pose_id,
     )
 
 

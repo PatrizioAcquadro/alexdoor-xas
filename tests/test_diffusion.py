@@ -712,7 +712,9 @@ def test_open_loop_report_with_receding_horizon_stride(tmp_path) -> None:
         },
         success=True,
         final_door_angle=0.8,
-        failure_label=None,
+        termination_reason="controller_done",
+        environment_terminated=False,
+        environment_truncated=False,
         extras={},
         buffer=None,
     )

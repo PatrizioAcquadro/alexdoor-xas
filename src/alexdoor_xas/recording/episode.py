@@ -18,6 +18,16 @@ import numpy as np
 
 from alexdoor_xas.action.spaces import EE_DELTA_DIM
 
+TERMINATION_REASONS = (
+    "controller_done",
+    "controller_timeout",
+    "tick_budget",
+    "environment_terminated",
+    "environment_truncated",
+    "step_error",
+)
+LEGACY_TERMINATION_REASON = "not_recorded"
+
 
 @dataclass(frozen=True)
 class EpisodeMeta:
@@ -94,9 +104,15 @@ class EpisodeOutcome:
 
     success: bool
     final_door_angle: float
-    failure_label: str | None
     n_steps: int
+    termination_reason: str
+    environment_terminated: bool | None
+    environment_truncated: bool | None
     notes: str = ""
+
+    def __post_init__(self) -> None:
+        if self.termination_reason not in (*TERMINATION_REASONS, LEGACY_TERMINATION_REASON):
+            raise ValueError(f"unknown factual termination reason: {self.termination_reason!r}")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -140,4 +156,11 @@ class EpisodeBuffer:
         return np.stack([np.asarray(getter(step), dtype=np.float64) for step in self.steps])
 
 
-__all__ = ["EpisodeBuffer", "EpisodeMeta", "EpisodeOutcome", "EpisodeStep"]
+__all__ = [
+    "LEGACY_TERMINATION_REASON",
+    "TERMINATION_REASONS",
+    "EpisodeBuffer",
+    "EpisodeMeta",
+    "EpisodeOutcome",
+    "EpisodeStep",
+]

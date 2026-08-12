@@ -8,6 +8,11 @@ import pytest
 
 from alexdoor_xas import paths
 from alexdoor_xas.assets.door_task import (
+    CANONICAL_DOOR_POSES,
+    audit_canonical_door_scene_directory,
+    canonical_door_scene_path,
+    ensure_canonical_door_scenes,
+    ensure_diagnostic_door_task_usd,
     ensure_door_task_usd,
     validate_door_task_usd,
 )
@@ -20,7 +25,7 @@ def test_ensure_door_task_usd_is_deterministic() -> None:
     second_path = ensure_door_task_usd()
 
     assert usd_path == second_path
-    assert usd_path == paths.OUTPUTS_DIR / "door_task" / "door_task.usda"
+    assert usd_path == paths.OUTPUTS_DIR / "door_scene" / "D0.usda"
     assert usd_path.is_file()
     assert second_path.read_text() == first_text
 
@@ -143,8 +148,6 @@ def test_door_task_pose_authoring_pivots_at_doorframe_and_validates() -> None:
 
     from pxr import Gf, Usd, UsdGeom
 
-    from alexdoor_xas.assets.door_task import door_task_pose_usd_path
-
     def frame_world_xf(usd_path):
         stage = Usd.Stage.Open(str(usd_path), Usd.Stage.LoadAll)
         frame = stage.GetPrimAtPath("/World/DoorTaskDoor/Doorframe")
@@ -160,9 +163,9 @@ def test_door_task_pose_authoring_pivots_at_doorframe_and_validates() -> None:
     pivot = default_xf.ExtractTranslation()
 
     yaw = 0.10
-    offset = (0.02, -0.03)
-    posed_path = ensure_door_task_usd(door_yaw_rad=yaw, door_xy_offset_m=offset)
-    assert posed_path == door_task_pose_usd_path(yaw, offset)
+    offset = (0.02, 0.02)
+    posed_path = ensure_door_task_usd("D3")
+    assert posed_path == canonical_door_scene_path("D3")
     assert posed_path != default_path
 
     _, posed_xf = frame_world_xf(posed_path)
@@ -182,12 +185,53 @@ def test_door_task_pose_authoring_pivots_at_doorframe_and_validates() -> None:
     validate_door_task_usd(posed_path)
 
 
-def test_door_task_pose_usd_paths_are_distinct_per_pose() -> None:
-    from alexdoor_xas.assets.door_task import door_task_pose_usd_path
+def test_canonical_pose_registry_and_paths_are_exact() -> None:
+    assert {
+        pose_id: (pose.yaw_rad, pose.xy_offset_m)
+        for pose_id, pose in CANONICAL_DOOR_POSES.items()
+    } == {
+        "D0": (0.00, (0.00, 0.00)),
+        "D1": (+0.05, (+0.02, 0.00)),
+        "D2": (-0.05, (0.00, -0.02)),
+        "D3": (+0.10, (+0.02, +0.02)),
+        "D4": (-0.10, (+0.02, -0.02)),
+    }
+    assert [canonical_door_scene_path(p).name for p in CANONICAL_DOOR_POSES] == [
+        "D0.usda",
+        "D1.usda",
+        "D2.usda",
+        "D3.usda",
+        "D4.usda",
+    ]
 
-    default = door_task_pose_usd_path(0.0, (0.0, 0.0))
-    a = door_task_pose_usd_path(0.05, (0.02, 0.0))
-    b = door_task_pose_usd_path(-0.05, (0.02, 0.0))
-    c = door_task_pose_usd_path(0.05, (0.0, 0.02))
-    assert default == paths.OUTPUTS_DIR / "door_task" / "door_task.usda"
-    assert len({default, a, b, c}) == 4
+
+def test_canonical_scene_directory_audit_rejects_extra_layer(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(paths, "DOOR_SCENE_DIR", tmp_path / "door_scene")
+    ensure_canonical_door_scenes()
+    assert sorted(path.name for path in paths.DOOR_SCENE_DIR.iterdir()) == [
+        "D0.usda",
+        "D1.usda",
+        "D2.usda",
+        "D3.usda",
+        "D4.usda",
+    ]
+    (paths.DOOR_SCENE_DIR / "D5.usda").write_text("diagnostic")
+    with pytest.raises(ValueError, match="must contain exactly"):
+        audit_canonical_door_scene_directory()
+
+
+def test_noncanonical_scene_requires_explicit_cache_path(tmp_path, monkeypatch) -> None:
+    cache_root = tmp_path / "cache"
+    monkeypatch.setattr(paths, "RUNTIME_CACHE_ROOT", cache_root)
+    diagnostic = ensure_diagnostic_door_task_usd(
+        cache_root / "door_scenes" / "probe.usda",
+        door_yaw_rad=0.123,
+        door_xy_offset_m=(0.04, -0.03),
+    )
+    assert diagnostic.is_file()
+    with pytest.raises(ValueError, match="runtime cache"):
+        ensure_diagnostic_door_task_usd(
+            tmp_path / "outside.usda",
+            door_yaw_rad=0.123,
+            door_xy_offset_m=(0.04, -0.03),
+        )

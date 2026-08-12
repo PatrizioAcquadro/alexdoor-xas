@@ -29,7 +29,7 @@ def _make_episode(n_steps: int = 3) -> EpisodeBuffer:
         task="door_push",
         action_space=A2_EE_DELTA,
         robot="proxy_ee_sphere_v0",
-        scene="outputs/door_task/door_task.usda",
+        scene="outputs/door_scene/D0.usda",
         policy="scripted",
         seed=7,
         sim_dt=1 / 120,
@@ -62,7 +62,12 @@ def _make_episode(n_steps: int = 3) -> EpisodeBuffer:
     }
     buffer.set_outcome(
         EpisodeOutcome(
-            success=True, final_door_angle=0.9, failure_label=None, n_steps=n_steps
+            success=True,
+            final_door_angle=0.9,
+            n_steps=n_steps,
+            termination_reason="controller_done",
+            environment_terminated=False,
+            environment_truncated=False,
         )
     )
     return buffer
@@ -76,8 +81,10 @@ def test_zero_step_episode_round_trip(tmp_path) -> None:
     buffer.outcome = EpisodeOutcome(
         success=False,
         final_door_angle=0.0,
-        failure_label="insufficient_final_angle",
         n_steps=0,
+        termination_reason="tick_budget",
+        environment_terminated=False,
+        environment_truncated=False,
     )
 
     path = write_episode(buffer, tmp_path)
@@ -106,7 +113,14 @@ def test_outcome_step_count_must_match() -> None:
     buffer.outcome = None
     with pytest.raises(ValueError, match="does not match"):
         buffer.set_outcome(
-            EpisodeOutcome(success=False, final_door_angle=0.0, failure_label=None, n_steps=5)
+            EpisodeOutcome(
+                success=False,
+                final_door_angle=0.0,
+                n_steps=5,
+                termination_reason="tick_budget",
+                environment_terminated=False,
+                environment_truncated=False,
+            )
         )
 
 
@@ -134,6 +148,27 @@ def test_episode_round_trip(tmp_path) -> None:
     )
     assert loaded.extras["a4_chunks"] == original.extras["a4_chunks"]
     assert loaded.extras["variation"] is None
+
+
+@requires_h5py
+@pytest.mark.parametrize("schema_version", ["phase2.v0", "phase2.v1"])
+def test_legacy_episode_reads_without_failure_label(tmp_path, schema_version) -> None:
+    import h5py
+
+    path = write_episode(_make_episode(), tmp_path)
+    with h5py.File(path, "r+") as h5:
+        h5.attrs["schema_version"] = schema_version
+        outcome = h5["outcome"].attrs
+        del outcome["termination_reason"]
+        del outcome["environment_terminated"]
+        del outcome["environment_truncated"]
+        outcome["failure_label"] = "obsolete_interpretation"
+
+    loaded = read_episode(path)
+    assert loaded.outcome.termination_reason == "not_recorded"
+    assert loaded.outcome.environment_terminated is None
+    assert loaded.outcome.environment_truncated is None
+    assert "failure_label" not in loaded.outcome.to_dict()
 
 
 @requires_h5py

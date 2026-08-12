@@ -42,7 +42,9 @@ def episode_metrics(episode: EpisodeBuffer) -> dict[str, Any]:
         "seed": episode.meta.seed,
         "randomized": episode.extras.get("variation") is not None,
         "success": episode.outcome.success,
-        "failure_label": episode.outcome.failure_label,
+        "termination_reason": episode.outcome.termination_reason,
+        "environment_terminated": episode.outcome.environment_terminated,
+        "environment_truncated": episode.outcome.environment_truncated,
         "final_door_angle_rad": episode.outcome.final_door_angle,
         "max_door_angle_rad": float(angles.max()) if angles.size else 0.0,
         "time_to_threshold_s": time_to_threshold,
@@ -98,9 +100,7 @@ def aggregate_metrics(per_episode: list[dict[str, Any]]) -> dict[str, Any]:
     times = [
         m["time_to_threshold_s"] for m in successes if m["time_to_threshold_s"] is not None
     ]
-    failure_counts = Counter(
-        m["failure_label"] for m in per_episode if m["failure_label"] is not None
-    )
+    termination_counts = Counter(m["termination_reason"] for m in per_episode)
     summary = {
         "n_episodes": len(per_episode),
         "n_fixed": sum(1 for m in per_episode if not m["randomized"]),
@@ -113,7 +113,7 @@ def aggregate_metrics(per_episode: list[dict[str, Any]]) -> dict[str, Any]:
             "max": float(finite_finals.max()) if finite_finals.size else math.nan,
         },
         "mean_time_to_threshold_s": float(np.mean(times)) if times else None,
-        "failure_labels": dict(failure_counts),
+        "termination_reasons": dict(termination_counts),
     }
     # Force block only for runs with force-sensed episodes.
     force_eps = [m for m in per_episode if m.get("mean_contact_force_n") is not None]

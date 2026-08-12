@@ -179,7 +179,7 @@ def _rollout(env, policy, seed: int, variation) -> dict[str, Any]:
         max_ticks=args.max_ticks,
         success_angle_rad=DEFAULT_SUCCESS_ANGLE_RAD,
     )
-    if result.env_truncated:
+    if result.environment_terminated or result.environment_truncated:
         raise RuntimeError(f"rollout hit env truncation at tick {result.n_ticks}")
     if result.n_ticks == 0 or result.n_ticks > args.max_ticks:
         raise RuntimeError(f"rollout ran {result.n_ticks} ticks (budget {args.max_ticks})")

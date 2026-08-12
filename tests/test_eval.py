@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from alexdoor_xas.data_engine import plan_episodes, run_episode
-from alexdoor_xas.eval import FAILURE_LABELS, aggregate_metrics, episode_metrics, label_episode
+from alexdoor_xas.eval import aggregate_metrics, episode_metrics
 from alexdoor_xas.policies.act.config import ActModelCfg
 from alexdoor_xas.policies.common.eval_metadata import checkpoint_metadata
 from alexdoor_xas.policies.scripted import DoorPushControllerCfg
@@ -79,58 +79,6 @@ def test_force_metrics_details_and_aggregate_block() -> None:
     assert "contact_force_n" not in proxy_summary
 
 
-@pytest.mark.parametrize(
-    ("kwargs", "expected"),
-    [
-        (
-            dict(
-                final_angle_rad=1.0,
-                controller_done=True,
-                timed_out=False,
-                last_phase="done",
-            ),
-            None,
-        ),
-        (
-            dict(
-                final_angle_rad=float("nan"),
-                controller_done=False,
-                timed_out=False,
-                last_phase="push",
-            ),
-            "non_finite_state",
-        ),
-        (
-            dict(final_angle_rad=0.1, controller_done=False, timed_out=True, last_phase="contact"),
-            "phase_timeout_contact",
-        ),
-        (
-            dict(final_angle_rad=0.1, controller_done=False, timed_out=False, last_phase="push"),
-            "env_truncated_before_completion",
-        ),
-        (
-            dict(final_angle_rad=0.1, controller_done=True, timed_out=False, last_phase="done"),
-            "insufficient_final_angle",
-        ),
-        (
-            dict(
-                final_angle_rad=0.2,
-                controller_done=False,
-                timed_out=False,
-                last_phase="push",
-                notes="env.step failed: NaN",
-            ),
-            "non_finite_state",
-        ),
-    ],
-)
-def test_label_episode_cases(kwargs, expected) -> None:
-    label = label_episode(success_angle_rad=math.pi / 4, **kwargs)
-    assert label == expected
-    if label is not None:
-        assert label in FAILURE_LABELS
-
-
 def test_episode_and_aggregate_metrics_on_success_and_timeout() -> None:
     ok = _episode()
     # An unreachable contact budget forces phase_timeout_contact.
@@ -139,7 +87,7 @@ def test_episode_and_aggregate_metrics_on_success_and_timeout() -> None:
 
     m_ok = episode_metrics(ok)
     assert m_ok["success"] is True
-    assert m_ok["failure_label"] is None
+    assert m_ok["termination_reason"] == "controller_done"
     assert m_ok["time_to_threshold_s"] is not None
     assert m_ok["max_door_angle_rad"] >= math.pi / 4
     assert m_ok["contact_ticks"] > 0
@@ -147,13 +95,16 @@ def test_episode_and_aggregate_metrics_on_success_and_timeout() -> None:
 
     m_failed = episode_metrics(failed)
     assert m_failed["success"] is False
-    assert m_failed["failure_label"] == "phase_timeout_contact"
+    assert m_failed["termination_reason"] == "controller_timeout"
 
     summary = aggregate_metrics([m_ok, m_failed])
     assert summary["n_episodes"] == 2
     assert summary["n_success"] == 1
     assert summary["success_rate"] == pytest.approx(0.5)
-    assert summary["failure_labels"] == {"phase_timeout_contact": 1}
+    assert summary["termination_reasons"] == {
+        "controller_done": 1,
+        "controller_timeout": 1,
+    }
     assert summary["final_door_angle_rad"]["max"] >= math.pi / 4
 
 

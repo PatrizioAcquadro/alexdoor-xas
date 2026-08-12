@@ -22,8 +22,8 @@ from alexdoor_xas.action.spaces import (
     A3_OBJ_REL_EE_DELTA,
     EE_DELTA_DIM,
 )
-from alexdoor_xas.eval.failures import FAILURE_LABELS
 from alexdoor_xas.eval.sanity import check_alex_episode
+from alexdoor_xas.recording import LEGACY_TERMINATION_REASON, TERMINATION_REASONS
 
 from .loader import (
     A4ChunkDataset,
@@ -35,7 +35,7 @@ from .loader import (
 )
 from .sampling import A4_FEATURE_DIM, A4_PHASE_VOCAB, episode_chunk_features
 
-KNOWN_SCHEMA_VERSIONS = ("phase2.v0", "phase2.v1")
+KNOWN_SCHEMA_VERSIONS = ("phase2.v0", "phase2.v1", "phase2.v2")
 REQUIRED_DATASET_META_KEYS = (
     "task",
     "action_space",
@@ -144,16 +144,7 @@ def validate_episode(
     except ValueError as exc:
         result.errors.append(f"{label}: core obs preset failed: {exc}")
 
-    if record.success and record.failure_label is not None:
-        result.errors.append(
-            f"{label}: success episode carries failure_label {record.failure_label!r}"
-        )
-    if record.failure_label is not None and record.failure_label not in FAILURE_LABELS:
-        result.errors.append(
-            f"{label}: failure_label {record.failure_label!r} not in the frozen vocabulary"
-        )
-    if not record.success and record.failure_label is None:
-        result.errors.append(f"{label}: failed episode has no failure_label")
+    _check_termination_data(record, result, label, legacy=record.schema_version != "phase2.v2")
 
     # Force-sensing episodes get the full Phase 2.5 rollout sanity checks.
     if "joint_pos" in record.obs:
@@ -505,16 +496,32 @@ def _check_a4_outcome(
         result.errors.append(f"{label}: final_door_angle must be finite")
     if record.n_steps <= 0:
         result.errors.append(f"{label}: outcome.n_steps must be positive")
-    if record.success and record.failure_label is not None:
+    _check_termination_data(
+        record, result, label, legacy=record.termination_reason == "not_recorded"
+    )
+
+
+def _check_termination_data(record, result: ValidationResult, label: str, *, legacy: bool) -> None:
+    allowed = (*TERMINATION_REASONS, LEGACY_TERMINATION_REASON)
+    if record.termination_reason not in allowed:
         result.errors.append(
-            f"{label}: success episode carries failure_label {record.failure_label!r}"
+            f"{label}: unknown termination_reason {record.termination_reason!r}"
         )
-    if record.failure_label is not None and record.failure_label not in FAILURE_LABELS:
-        result.errors.append(
-            f"{label}: failure_label {record.failure_label!r} not in the frozen vocabulary"
-        )
-    if not record.success and record.failure_label is None:
-        result.errors.append(f"{label}: failed episode has no failure_label")
+    if legacy:
+        if record.termination_reason != LEGACY_TERMINATION_REASON:
+            result.errors.append(f"{label}: legacy episode termination_reason must be not_recorded")
+        if record.environment_terminated is not None or record.environment_truncated is not None:
+            result.errors.append(f"{label}: legacy environment termination flags must be unknown")
+        return
+    if not isinstance(record.environment_terminated, bool) or not isinstance(
+        record.environment_truncated, bool
+    ):
+        result.errors.append(f"{label}: phase2.v2 environment termination flags must be booleans")
+        return
+    if record.termination_reason == "environment_terminated" and not record.environment_terminated:
+        result.errors.append(f"{label}: environment_terminated reason requires its factual flag")
+    if record.termination_reason == "environment_truncated" and not record.environment_truncated:
+        result.errors.append(f"{label}: environment_truncated reason requires its factual flag")
 
 
 def _compare_hdf5_records(
@@ -544,8 +551,16 @@ def _compare_hdf5_records(
         result.errors.append(f"{label}: outcome.success differs")
     if not np.isclose(candidate.final_door_angle, reference.final_door_angle, rtol=1e-6, atol=1e-9):
         result.errors.append(f"{label}: outcome.final_door_angle differs")
-    if reference.failure_label != candidate.failure_label:
-        result.errors.append(f"{label}: outcome.failure_label differs")
+    if (
+        reference.termination_reason,
+        reference.environment_terminated,
+        reference.environment_truncated,
+    ) != (
+        candidate.termination_reason,
+        candidate.environment_terminated,
+        candidate.environment_truncated,
+    ):
+        result.errors.append(f"{label}: factual termination data differs")
     try:
         reference_obs = obs_matrix(reference, "core")
         candidate_obs = obs_matrix(candidate, "core")
@@ -577,8 +592,16 @@ def _compare_a4_record(
         result.errors.append(f"{label}: outcome.success differs")
     if not np.isclose(candidate.final_door_angle, reference.final_door_angle, rtol=1e-6, atol=1e-9):
         result.errors.append(f"{label}: outcome.final_door_angle differs")
-    if reference.failure_label != candidate.failure_label:
-        result.errors.append(f"{label}: outcome.failure_label differs")
+    if (
+        reference.termination_reason,
+        reference.environment_terminated,
+        reference.environment_truncated,
+    ) != (
+        candidate.termination_reason,
+        candidate.environment_terminated,
+        candidate.environment_truncated,
+    ):
+        result.errors.append(f"{label}: factual termination data differs")
 
 
 __all__ = [

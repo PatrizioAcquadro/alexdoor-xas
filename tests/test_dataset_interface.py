@@ -121,8 +121,9 @@ def test_dataset_loads_records_with_stacked_arrays(proxy_a2) -> None:
     assert record.n_steps > 0
     assert record.actions.shape == (record.n_steps, EE_DELTA_DIM)
     assert record.t.shape == (record.n_steps,)
-    assert record.schema_version == "phase2.v1"
-    assert record.success and record.failure_label is None
+    assert record.schema_version == "phase2.v2"
+    assert record.success and record.termination_reason == "controller_done"
+    assert "failure_label" not in record.__dataclass_fields__
     assert {"ee_pos_w", "ee_quat_w_xyzw", "door_angle_rad", "inferred"} <= set(record.obs)
     assert proxy_a2.by_id(record.episode_id) is record
     with pytest.raises(KeyError):
@@ -310,13 +311,13 @@ def test_validate_catches_planted_defects(proxy_a2) -> None:
     assert any("inconsistent step counts" in e for e in truncated.errors)
 
 
-def test_validate_rejects_unknown_failure_labels(proxy_a2) -> None:
+def test_validate_rejects_unknown_termination_reason(proxy_a2) -> None:
     record = proxy_a2[0]
     result = validate_episode(
-        dataclasses.replace(record, success=False, failure_label="novel_failure_mode")
+        dataclasses.replace(record, success=False, termination_reason="novel_interpretation")
     )
 
-    assert any("not in the frozen vocabulary" in error for error in result.errors)
+    assert any("unknown termination_reason" in error for error in result.errors)
 
 
 def test_validate_rejects_bad_timing_and_control_dt(proxy_a2) -> None:

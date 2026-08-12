@@ -26,19 +26,16 @@ htmlcov/
 /datasets/*
 !/datasets/README.md
 
-# Raw run output stays local. Small, deliberately curated evidence can be
-# committed under outputs/curated/.
+# Learned-policy runs stay local. The five canonical source layers are tracked.
 /outputs/*
 !/outputs/README.md
-!/outputs/curated/
-/outputs/curated/**
-!/outputs/curated/**/
-!/outputs/curated/**/*.md
-!/outputs/curated/**/*.json
-!/outputs/curated/**/*.csv
-!/outputs/curated/**/*.png
-!/outputs/curated/**/*.svg
-!/outputs/curated/**/*.txt
+!/outputs/door_scene/
+/outputs/door_scene/*
+!/outputs/door_scene/D0.usda
+!/outputs/door_scene/D1.usda
+!/outputs/door_scene/D2.usda
+!/outputs/door_scene/D3.usda
+!/outputs/door_scene/D4.usda
 
 # ── Large / machine-local sim artifacts ──────────────────────────────────────
 *.log

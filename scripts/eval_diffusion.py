@@ -139,7 +139,6 @@ from alexdoor_xas.policies.common.rollout_eval import (  # noqa: E402
     determinism_probe_update,
     final_ee_state,
     force_trace_evidence,
-    rollout_failure_label,
     scripted_reference_payload,
     seed_protocol,
     summarize_decision_warnings,
@@ -231,15 +230,6 @@ def _run_rollout(
         "randomized": variation is not None,
         **_door_pose_payload(),
         "success": success,
-        "failure_label": rollout_failure_label(
-            success=success,
-            n_ticks=result.n_ticks,
-            max_ticks=dp_cfg.rollout.max_ticks,
-            contact_ticks=contact["contact_ticks"],
-            n_rejected=result.log.n_rejected,
-            notes=result.notes,
-            termination_reason=result.termination_reason,
-        ),
         "termination_reason": result.termination_reason,
         "first_success_tick": result.first_success_tick,
         "time_to_success_s": (
@@ -247,7 +237,8 @@ def _run_rollout(
             if result.first_success_tick is not None
             else None
         ),
-        "env_truncated": result.env_truncated,
+        "environment_terminated": result.environment_terminated,
+        "environment_truncated": result.environment_truncated,
         "start_pose_settle": settle_report,
         "initial_angle_rad": result.initial_angle_rad,
         "final_angle_rad": result.final_angle_rad,
