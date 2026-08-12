@@ -42,8 +42,6 @@ class DoorPushAlexV2Executor(DoorPushRobotEnv):
     """
 
     cfg: DoorPushAlexV2EnvCfg
-    candidate_only = False
-
     def __init__(
         self,
         cfg: DoorPushAlexV2EnvCfg,

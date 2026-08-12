@@ -12,9 +12,9 @@ position-only differential IK over six right-arm joints at the
 collision-derived tool point. Keep the six-dimensional A2/A3 interface but do
 not actuate requested rotation. Filter task force to the door panel.
 
-The live calibration verifier must reproduce the asset, tool frame, reset,
-Jacobian, contact, and scripted behavior checks before writing
-`configs/alex_v2_door.json`.
+`configs/alex_v2_door.json` is the single calibration source. Changes are made
+directly and accepted only after the benchmark-scene, scripted-baseline, and
+adapter gates pass.
 
 ## Consequences
 
@@ -27,5 +27,7 @@ See [[topics/alex-v2-benchmark|Alex V2 Benchmark]].
 
 ## Version Notes
 
+- 2026-08-12 — Removed the duplicate authoring pipeline and retained direct
+  config validation through the maintained runtime gates.
 - 2026-08-11 — Calibration state was reduced to operational parameters; live
-  verification remains the authoring gate.
+  verification remains required for changes.

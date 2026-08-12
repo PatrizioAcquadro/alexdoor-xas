@@ -14,15 +14,10 @@ from .door_push_alex_v2_env_cfg import DoorPushAlexV2EnvCfg
 from .door_push_alex_v2_executor import DoorPushAlexV2Executor
 
 
-class AlexV2TaskNotReadyError(RuntimeError):
-    """Raised when the exact V2 runtime cannot be constructed safely."""
-
-
 class DoorPushAlexV2Env(DoorPushAlexV2Executor):
     """Production V2 task; only fully gated calibration reaches execution."""
 
     cfg: DoorPushAlexV2EnvCfg
-    candidate_only = False
 
     def __init__(
         self,
@@ -43,4 +38,4 @@ class DoorPushAlexV2Env(DoorPushAlexV2Executor):
         )
 
 
-__all__ = ["AlexV2TaskNotReadyError", "DoorPushAlexV2Env"]
+__all__ = ["DoorPushAlexV2Env"]

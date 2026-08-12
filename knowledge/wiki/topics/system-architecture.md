@@ -24,7 +24,7 @@ Closed-loop evaluation loads the source run's frozen configuration and self-cont
 
 ## Storage boundary
 
-`outputs/` is limited to `README.md`, canonical `door_scene/D0.usda`-`D4.usda`, learned runs under `door_push_alex_v2/{act,diffusion}/`, and optional standard SDK state under `wandb/`. Reusable episodes remain under `datasets/`. Scripted-run staging, calibration authoring evidence, verification evidence, and arbitrary scenes live under `~/.cache/alexdoor-xas/`.
+`outputs/` is limited to `README.md`, canonical `door_scene/D0.usda`-`D4.usda`, learned runs under `door_push_alex_v2/{act,diffusion}/`, and optional standard SDK state under `wandb/`. Reusable episodes remain under `datasets/`. Scripted-run staging, verification evidence, and arbitrary scenes live under `~/.cache/alexdoor-xas/`.
 
 ## Runtime boundary
 
@@ -39,6 +39,7 @@ The workstation is authoritative for Isaac asset validation, calibration, datase
 
 ## Version Notes
 
+- 2026-08-12 — Removed calibration authoring and retained one directly validated runtime config.
 - 2026-08-12 — Replaced the custom W&B wrapper and configuration with direct, environment-controlled SDK logging in the four learned-policy scripts.
 - 2026-08-12 — Added the canonical scene/output boundary, exclusive learned runs, resumable training state, and frozen-protocol evaluation routing.
 - 2026-08-12 — Removed alternate simulator runtimes and consolidated routine validation into five Alex V2 gates.

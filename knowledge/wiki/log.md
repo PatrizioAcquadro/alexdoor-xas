@@ -218,3 +218,13 @@ removal of unused hooks and duplicate warning fields.
 
 Verified wiki structure and links, source references, Markdown whitespace,
 protected raw boundaries, and removal of obsolete rollout interfaces.
+
+## 2026-08-12 — update : Runtime-only calibration
+
+Documented the active JSON as the single calibration source, removal of the
+authoring workflow, and the maintained runtime gates required for changes.
+
+## 2026-08-12 — lint : Runtime-only calibration
+
+Verified wiki structure and links, source references, Markdown whitespace,
+protected raw boundaries, and removal of active calibration-authoring references.

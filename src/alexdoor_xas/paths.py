@@ -22,12 +22,12 @@ DATASETS_DIR: Path = REPO_ROOT / "datasets"  # reusable exported episodes (Phase
 OUTPUTS_DIR: Path = REPO_ROOT / "outputs"  # canonical scenes + learned-policy runs
 KNOWLEDGE_DIR: Path = REPO_ROOT / "knowledge"
 WIKI_DIR: Path = KNOWLEDGE_DIR / "wiki"
+ALEX_V2_CALIBRATION: Path = REPO_ROOT / "configs" / "alex_v2_door.json"
 
 # Runtime caches and arbitrary generated artifacts never belong in outputs/.
 RUNTIME_CACHE_ROOT: Path = Path(
     os.environ.get("ALEXDOOR_CACHE_ROOT", str(Path.home() / ".cache" / "alexdoor-xas"))
 ).expanduser()
-CALIBRATION_CACHE_DIR: Path = RUNTIME_CACHE_ROOT / "calibration"
 VERIFICATION_CACHE_DIR: Path = RUNTIME_CACHE_ROOT / "verification"
 SCRIPTED_RUNS_CACHE_DIR: Path = RUNTIME_CACHE_ROOT / "scripted_runs"
 

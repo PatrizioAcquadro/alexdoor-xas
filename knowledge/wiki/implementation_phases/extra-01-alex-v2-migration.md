@@ -19,8 +19,8 @@ door-panel force sensing. The active calibration is now
 #### Key Decisions and Problems
 
 - Requested rotation remains represented but is not actuated.
-- Live verification gates calibration authoring; gates and runtime history are
-  not stored in the active config.
+- Calibration changes are made directly in the active config and require the
+  maintained runtime gates; gate history is not stored in the config.
 - Simulation results are not physical-robot safety evidence.
 
 #### Tests
@@ -30,5 +30,7 @@ smoke checks cover the maintained path.
 
 ## Version Notes
 
+- 2026-08-12 — Removed the completed calibration-authoring workflow; the active
+  config and maintained runtime gates now form the complete calibration path.
 - 2026-08-11 — Replaced candidate/validated calibration contracts with one
   minimal operational calibration.

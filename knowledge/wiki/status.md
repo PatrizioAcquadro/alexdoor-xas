@@ -28,11 +28,11 @@ The canonical experiment pages preserve these conclusions. The former compact ev
 
 ## Output boundary
 
-`outputs/` contains only `README.md`, `door_scene/D0.usda`-`D4.usda`, learned ACT/Diffusion runs under `door_push_alex_v2/{act,diffusion}/<run_id>/`, and optional standard W&B state under `wandb/`. Reusable datasets remain in `datasets/`; verifier evidence, calibration authoring evidence, scripted staging, and arbitrary scenes belong under `~/.cache/alexdoor-xas/`.
+`outputs/` contains only `README.md`, `door_scene/D0.usda`-`D4.usda`, learned ACT/Diffusion runs under `door_push_alex_v2/{act,diffusion}/<run_id>/`, and optional standard W&B state under `wandb/`. Reusable datasets remain in `datasets/`; verifier evidence, scripted staging, and arbitrary scenes belong under `~/.cache/alexdoor-xas/`.
 
 ## Retired workflows
 
-Gilbreth pilot and sweep orchestration, cluster environments, Slurm, transfer and return packaging, scale-dataset construction, multi-pose merge, smoke matrix aggregation, and unified-evaluation orchestration are no longer part of the executable repository. Existing local datasets and checkpoints remain usable and are not rewritten.
+Gilbreth pilot and sweep orchestration, cluster environments, Slurm, transfer and return packaging, scale-dataset construction, multi-pose merge, smoke matrix aggregation, unified-evaluation orchestration, and calibration authoring are no longer part of the executable repository. Existing local datasets and checkpoints remain usable and are not rewritten.
 
 The former generic door-task and surrogate-robot simulator runtimes are also retired. Test-only fake environments remain deterministic software doubles, not supported runtime paths.
 

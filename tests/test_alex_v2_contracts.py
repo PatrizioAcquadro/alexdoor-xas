@@ -520,13 +520,12 @@ class _FakeRobotCfg:
 
 
 def _calibration() -> AlexV2DoorCalibration:
-    payload = {
-        "status": "validated",
-        "base_pose": {
+    return AlexV2DoorCalibration(
+        base_pose={
             "position_m": [-0.55, -0.25, 0.95],
             "orientation_xyzw": [0.0, 0.0, 1.0, 0.0],
         },
-        "ready_joint_pos": {
+        ready_joint_pos={
             "RIGHT_SHOULDER_Y": 0.2,
             "RIGHT_SHOULDER_X": -0.2,
             "RIGHT_SHOULDER_Z": 0.1,
@@ -534,16 +533,14 @@ def _calibration() -> AlexV2DoorCalibration:
             "RIGHT_WRIST_Z": 0.05,
             "RIGHT_WRIST_X": 0.1,
         },
-        # Synthetic test bounds only. Production values require a measured V2 arc.
-        "reach_shell_m": [0.2, 0.8],
-        "tool_frame": {
+        tool_frame={
             "translation_m": [0.11, 0.0, -0.06],
             "orientation_xyzw": [0.0, 0.0, 0.0, 1.0],
         },
-        "controller": {"contact_force_threshold_n": 2.5},
-        "randomization_bounds": {},
-    }
-    return AlexV2DoorCalibration(Path("candidate.json"), payload)
+        reach_shell_m=(0.2, 0.8),
+        controller={"contact_force_threshold_n": 2.5},
+        randomization_bounds={},
+    )
 
 
 def test_v2_runtime_injects_dedicated_asset_and_calibrated_init_state() -> None:

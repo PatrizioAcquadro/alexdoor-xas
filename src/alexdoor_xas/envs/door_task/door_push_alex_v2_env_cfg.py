@@ -5,7 +5,7 @@ from __future__ import annotations
 from isaaclab.sensors import ContactSensorCfg
 from isaaclab.utils.configclass import configclass
 
-from alexdoor_xas.calibration.alex_v2_door import default_calibration_path
+from alexdoor_xas import paths
 
 from .alex_v2_runtime import ALEX_V2_PRIM_PATH
 from .door_push_robot_env_cfg import DoorPushRobotEnvCfg
@@ -32,7 +32,7 @@ ALEX_V2_ARM_JOINT_NAMES = (
 class DoorPushAlexV2EnvCfg(DoorPushRobotEnvCfg):
     """V2 task config; production construction requires validated calibration."""
 
-    calibration_path: str = str(default_calibration_path())
+    calibration_path: str = str(paths.ALEX_V2_CALIBRATION)
     ee_body_name = ALEX_V2_EE_BODY_NAME
     arm_joint_names = ALEX_V2_ARM_JOINT_NAMES
     ee_contact = ContactSensorCfg(
