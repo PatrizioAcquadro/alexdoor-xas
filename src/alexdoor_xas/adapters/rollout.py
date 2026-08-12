@@ -1,17 +1,6 @@
-"""Model-agnostic closed-loop rollout through adapter-v1.
+"""Model-agnostic closed-loop A2/A3 execution.
 
-This is the execution path learned policies (ACT, Diffusion Policy, later VLA)
-share for evaluation: a *chunk source* (any callable — a learned policy, a
-replay of recorded actions, a scripted planner) emits ``(H, 6)`` action chunks,
-every step passes through an adapter (:class:`A2Adapter` for world-frame
-deltas, :class:`A3Adapter` for door-frame deltas), and the adapted command is
-what the env executes. Nothing here depends on a specific model.
-
-The env is duck-typed through the benchmark accessor surface
-(``door_frame_pose_w`` / ``hinge_state`` / ``ee_pose_w`` and optional
-accessors probed via ``hasattr``) — the same protocol the data engine uses,
-so the fakes in ``tests/conftest.py`` and the Isaac env work
-unchanged. No Isaac imports; torch only at the ``env.step`` boundary.
+Each command is adapted against fresh validated state before ``env.step``.
 """
 
 from __future__ import annotations
@@ -30,9 +19,7 @@ from alexdoor_xas.envs.door_task.contact_force import decode_contact_flag
 from .base import AdapterDecision, AdapterLog, AdapterStatus, StepContext
 from .limits import RobotLimitsCfg
 
-ChunkSource = Callable[[StepContext], Any]
-"""Emits the next ``(H, 6)`` action chunk given the current step context, or
-``None`` to end the rollout."""
+ChunkSource = Callable[[StepContext], Any]  # None ends the rollout
 
 
 class InvalidSimulatorStateError(RuntimeError):
@@ -287,12 +274,7 @@ def read_step_context(
 
 
 def step_env(env, delta_world: np.ndarray) -> tuple[bool, bool]:
-    """Execute one adapted world-frame EE delta; returns ``(terminated, truncated)``.
-
-    A ``DirectRLEnv`` auto-resets *inside* ``env.step`` when either flag is
-    set, so any state read after a flagged step is post-reset — callers must
-    stop consuming the env immediately.
-    """
+    """Execute one delta and return termination flags without reading post-reset state."""
     action = torch.as_tensor(
         np.asarray(delta_world, dtype=np.float64), dtype=torch.float32
     ).reshape(1, -1)
@@ -313,23 +295,11 @@ TERMINATION_REASONS = (
     "invalid_simulator_state",
     "tick_budget",
 )
-"""Every rollout ends with exactly one of these:
-
-- ``success`` — the hinge crossed the success threshold (checked after every
-  executed control tick, independent of policy chunk size);
-- ``policy_exhausted`` — the chunk source returned ``None``;
-- ``rejection_stop`` — a rejected command with ``stop_on_reject``;
-- ``environment_terminated`` / ``environment_truncated`` — the corresponding
-  factual flag was returned by ``env.step``;
-- ``invalid_simulator_state`` — a required numeric simulator state or adapter
-  limit was invalid; no command is adapted from that snapshot;
-- ``tick_budget`` — the rollout's ``max_ticks`` budget ran out.
-"""
 
 
 @dataclass
 class RolloutResult:
-    """One adapter-mediated rollout: door motion + the full decision log."""
+    """Door motion, termination state, and adapter decisions for one rollout."""
 
     n_ticks: int
     initial_angle_rad: float
@@ -337,27 +307,15 @@ class RolloutResult:
     log: AdapterLog
     notes: str = ""
     decisions_per_tick: list[AdapterDecision] = field(default_factory=list)
+    # Post-step values; a terminating auto-reset tick has no valid sample.
     contact_per_tick: list[bool | None] = field(default_factory=list)
-    """Post-step force-sensed contact flag per executed tick (``None`` when the
-    env exposes no contact sensing). Additive: existing consumers ignore it.
-    On environment termination the final tick has no valid post-step read, so these
-    lists are one entry shorter than ``n_ticks``."""
     force_n_per_tick: list[float | None] = field(default_factory=list)
-    """Post-step |contact force| in newtons per executed tick (``None`` when
-    the env exposes no ``contact_force_w``)."""
     termination_reason: str = "tick_budget"
-    """One of :data:`TERMINATION_REASONS`."""
+    # Exact first crossing; zero means the reset state already met the threshold.
     first_success_tick: int | None = None
-    """Executed-tick count at the first success-threshold crossing (0 = the
-    reset state already satisfied it); ``None`` = never crossed or no
-    threshold was given. Chunk-size independent by construction."""
     success: bool | None = None
-    """First-crossing success (``None`` when no threshold was given). A
-    cross-then-rebound trajectory stays successful with its original
-    crossing tick."""
     environment_terminated: bool = False
     environment_truncated: bool = False
-    """Factual Gymnasium flags; the final angle is the last valid pre-step read."""
 
     @property
     def door_angle_change_rad(self) -> float:
@@ -383,7 +341,6 @@ class RolloutResult:
 class _RolloutStart:
     door_frame: ObjectFrame
     joint_limits: dict[str, np.ndarray] | None
-    execution_limits: RobotLimitsCfg | None
     ctx: StepContext
 
 
@@ -492,7 +449,6 @@ class _RolloutRuntime:
                 self.env,
                 self.start.door_frame,
                 self.start.joint_limits,
-                self.start.execution_limits,
             )
         except InvalidSimulatorStateError as exc:
             self.state.reason = "invalid_simulator_state"
@@ -537,7 +493,7 @@ def _read_rollout_start(env, adapter) -> _RolloutStart:
     door_frame = read_door_frame(env)
     joint_limits = read_joint_limits(env)
     ctx = read_step_context(env, door_frame, joint_limits, execution_limits)
-    return _RolloutStart(door_frame, joint_limits, execution_limits, ctx)
+    return _RolloutStart(door_frame, joint_limits, ctx)
 
 
 def _invalid_start_result(
@@ -577,36 +533,10 @@ def rollout_chunks(
     post_success_diagnostic: bool = False,
     step_hook: Callable[[int], None] | None = None,
 ) -> RolloutResult:
-    """Drive the env with adapter-mediated chunks until success/exhaustion/budget.
+    """Execute adapted chunks on a reset env until a factual stop condition.
 
-    ``adapter`` is anything with ``process(delta, ctx) -> (applied, decision)``
-    (:class:`A2Adapter` for world-frame chunks, :class:`A3Adapter` for
-    door-frame chunks). Every emitted step is adapted against a fresh context
-    and executed; a rejected step executes zero motion (tick accounting stays
-    aligned with the source's chunk clock) unless ``stop_on_reject``.
-
-    ``success_angle_rad`` enables per-tick success semantics: the hinge
-    threshold is checked after **every executed control tick**, so
-    ``first_success_tick`` is the exact first crossing independent of the
-    policy's chunk size, and the rollout stops there unless
-    ``post_success_diagnostic`` explicitly requests post-success execution
-    (success and its crossing tick are latched either way — a later rebound
-    cannot unlabel it).
-
-    ``env.step`` termination/truncation ends the rollout immediately with its
-    factual environment reason: a ``DirectRLEnv`` auto-resets inside ``step``, so no
-    post-reset state is read (the final angle is the last valid pre-step
-    read). A defensive episode-counter guard (``env.episode_length_buf``)
-    additionally fails loudly if an unreported mid-rollout reset slipped
-    through — analogous to the data-engine guard.
-
-    When provided, ``step_hook`` runs after every completed, non-truncated
-    environment step. It receives the one-based tick count and may fail the
-    rollout; video capture uses this boundary so a missing frame cannot be
-    silently accepted.
-
-    The env must already be reset; the door frame is read once up front (the
-    stage-read pose is static for the episode in this build).
+    Success is checked per tick. Termination freezes the last pre-reset state;
+    ``step_hook`` runs only after completed, non-terminated steps.
     """
     log: AdapterLog = adapter.log
     try:
@@ -648,12 +578,7 @@ def rollout_chunks(
 
 
 def replay_source(actions) -> ChunkSource:
-    """Chunk source that replays a recorded ``(N, 6)`` action sequence.
-
-    The Phase 3.1 gate uses this to prove replay equivalence: a recorded
-    episode's actions pushed through the adapters reproduce the same door
-    motion (headless physics is deterministic in this build).
-    """
+    """Return a chunk source that replays recorded ``(N, 6)`` actions."""
     remaining = [np.asarray(action, dtype=np.float64).reshape(EE_DELTA_DIM) for action in actions]
     iterator = iter(remaining)
 
@@ -665,17 +590,3 @@ def replay_source(actions) -> ChunkSource:
             return None
 
     return source
-
-
-__all__ = [
-    "TERMINATION_REASONS",
-    "ChunkSource",
-    "InvalidSimulatorStateError",
-    "RolloutResult",
-    "read_door_frame",
-    "read_joint_limits",
-    "read_step_context",
-    "replay_source",
-    "rollout_chunks",
-    "step_env",
-]

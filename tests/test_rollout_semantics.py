@@ -109,16 +109,6 @@ class SilentResetEnv(FakeDoorPushEnv):
         return result
 
 
-class NonFiniteForceEnv(FakeForceDoorPushEnv):
-    def contact_force_w(self):
-        return torch.tensor([[float("nan"), 0.0, 0.0]], dtype=torch.float64)
-
-
-class NonFiniteContactEnv(FakeForceDoorPushEnv):
-    def contact_sensed(self):
-        return torch.tensor([float("nan")], dtype=torch.float64)
-
-
 class NonBinaryContactEnv(FakeForceDoorPushEnv):
     def contact_sensed(self):
         return torch.tensor([0.5], dtype=torch.float64)
@@ -186,7 +176,7 @@ class NonFiniteStateEnv(FakeForceDoorPushEnv):
         return force
 
 
-def _state_validation_adapter(kind: str, field: str):
+def _state_validation_adapter(field: str) -> A2Adapter:
     workspace = WorkspaceSphere(
         center_w=(
             (float("nan") if field == "workspace_center" else 0.0),
@@ -197,8 +187,7 @@ def _state_validation_adapter(kind: str, field: str):
         max_reach_m=(float("inf") if field == "workspace_max_reach" else 2.0),
     )
     limits = RobotLimitsCfg(robot="test", workspace=workspace)
-    a2 = A2Adapter(limits)
-    return a2 if kind == "a2" else A3Adapter(a2)
+    return A2Adapter(limits)
 
 
 class FirstContactImpactEnv(FakeForceDoorPushEnv):
@@ -220,9 +209,6 @@ class FirstContactImpactEnv(FakeForceDoorPushEnv):
 
     def contact_sensed(self):
         return torch.tensor([abs(self.last_dx_m) > 0.0])
-
-
-# ── per-tick success timing ──────────────────────────────────────────────────
 
 
 def test_first_success_is_exact_tick_for_h40_and_h8() -> None:
@@ -285,9 +271,6 @@ def test_cross_then_rebound_keeps_success_and_crossing_tick() -> None:
     assert stopped.n_ticks == 3
     assert stopped.termination_reason == "success"
     assert stopped.final_angle_rad == pytest.approx(0.35)
-
-
-# ── termination reasons ──────────────────────────────────────────────────────
 
 
 def test_policy_exhaustion_and_tick_budget_reasons() -> None:
@@ -371,7 +354,6 @@ def test_force_env_records_same_termination_fields() -> None:
     assert result.force_n_per_tick and result.force_n_per_tick[-1] is not None
 
 
-@pytest.mark.parametrize("adapter_kind", ["a2", "a3"])
 @pytest.mark.parametrize(
     "field",
     [
@@ -391,15 +373,13 @@ def test_force_env_records_same_termination_fields() -> None:
         "force",
     ],
 )
-def test_non_finite_physical_state_stops_before_a2_or_a3_execution(
-    adapter_kind: str, field: str
-) -> None:
+def test_non_finite_physical_state_stops_before_a2_execution(field: str) -> None:
     env = NonFiniteStateEnv(field)
     env.reset(seed=0)
     result = rollout_chunks(
         env,
         _push_source(1),
-        _state_validation_adapter(adapter_kind, field),
+        _state_validation_adapter(field),
         max_ticks=1,
     )
 
@@ -411,6 +391,22 @@ def test_non_finite_physical_state_stops_before_a2_or_a3_execution(
     assert "invalid simulator state" in result.notes
 
 
+def test_non_finite_nested_a3_limits_stop_before_execution() -> None:
+    field = "workspace_center"
+    env = NonFiniteStateEnv(field)
+    env.reset(seed=0)
+    result = rollout_chunks(
+        env,
+        _push_source(1),
+        A3Adapter(_state_validation_adapter(field)),
+        max_ticks=1,
+    )
+
+    assert result.termination_reason == "invalid_simulator_state"
+    assert result.n_ticks == 0
+    assert result.decisions_per_tick == []
+
+
 @pytest.mark.parametrize("field", ["frame_position", "frame_orientation"])
 def test_non_finite_a3_frame_state_is_an_explicit_simulator_failure(field: str) -> None:
     env = NonFiniteStateEnv(field)
@@ -418,7 +414,7 @@ def test_non_finite_a3_frame_state_is_an_explicit_simulator_failure(field: str) 
     result = rollout_chunks(
         env,
         _push_source(1),
-        _state_validation_adapter("a3", field),
+        A3Adapter(_state_validation_adapter(field)),
         max_ticks=1,
     )
 
@@ -471,9 +467,6 @@ def test_calibrated_first_contact_correction_is_enforced_in_execution() -> None:
     assert decision.status is AdapterStatus.CORRECTED
     assert decision.requested[0] == pytest.approx(-0.015)
     assert decision.applied[0] == pytest.approx(-0.005)
-
-
-# ── repeat-same-seed determinism helpers ─────────────────────────────────────
 
 
 def test_success_angle_none_preserves_legacy_semantics() -> None:

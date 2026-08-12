@@ -1,14 +1,4 @@
-"""Adapter-v1 (Phase 3.1): action representations -> executable robot commands.
-
-The Adapter role of the system separation (guidelines §5): predicted actions
-in any of the frozen spaces execute only through this layer, which validates,
-corrects or rejects them against robot limits and door geometry, and logs
-every decision. See ``knowledge/wiki/topics/action-representations-and-adapters.md``.
-
-No Isaac imports — envs enter duck-typed via the frozen Phase 2 accessor
-surface, so the layer is unit-testable and reusable by ACT / Diffusion Policy
-/ VLA rollout evaluation alike.
-"""
+"""Validate, transform, and execute A2-A4 action representations."""
 
 from .a2 import A2Adapter
 from .a3 import A3Adapter, validate_object_frame

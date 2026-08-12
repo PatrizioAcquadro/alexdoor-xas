@@ -1,13 +1,6 @@
-"""Alex V2 execution limits and door-panel geometry for adapter checks.
+"""Alex V2 adapter limits and door-panel geometry.
 
-Alex V2 reach limits are constructed from validated door calibration plus a
-caller-supplied live shoulder center; this module never invents or persists a
-workspace center.
-
-:class:`DoorPanelGeometry` duplicates the panel constants of the scripted
-controller's ``DoorPushControllerCfg`` on purpose: adapters must not import
-policies, as documented in the action-representation wiki page, so a unit test
-pins the two instead.
+Panel geometry mirrors the scripted controller and is pinned by tests.
 """
 
 from __future__ import annotations
@@ -44,26 +37,16 @@ class WorkspaceSphere:
 
 @dataclass(frozen=True)
 class RobotLimitsCfg:
-    """Execution limits one robot's adapters enforce.
-
-    ``max_pos_delta_m`` / ``max_rot_delta_rad`` mirror the env clamps (the env
-    stays the hard back-stop; the adapter clamps first and *logs* the
-    correction). ``workspace`` may be ``None`` for synthetic test doubles.
-    """
+    """Limits enforced and logged before the environment's hard clamps."""
 
     robot: str
     max_pos_delta_m: float = 0.02
     max_rot_delta_rad: float = 0.05
     workspace: WorkspaceSphere | None = None
-    reach_margin_m: float = 0.02
-    """Slack on the max-reach check: commands are judged against the *measured*
-    reach, which the physical EE can transiently exceed by PD tracking error."""
+    reach_margin_m: float = 0.02  # accommodates measured PD tracking overshoot
     contact_surface_x_m: float | None = None
-    """Panel-frame X coordinate of Alex's collision-derived tool point at contact."""
     contact_approach_start_clearance_m: float | None = None
-    """Calibrated align standoff where bounded first-contact approach begins."""
     contact_approach_max_step_m: float | None = None
-    """Calibrated translation-norm bound for an unsensed inward contact transition."""
 
 
 def alex_v2_limits(
@@ -98,8 +81,7 @@ def alex_v2_limits(
             min_reach_m=float(min_reach_m),
             max_reach_m=float(max_reach_m),
         ),
-        # Alex exposes the collision-derived tool point, so contact is at the
-        # physical panel thickness.
+        # Alex exposes the collision-derived tool point at the panel surface.
         contact_surface_x_m=DoorPanelGeometry().panel_thickness_m,
         contact_approach_start_clearance_m=contact_approach_start_clearance_m,
         contact_approach_max_step_m=contact_approach_max_step_m,
@@ -123,12 +105,7 @@ def limits_for_robot(
 
 @dataclass(frozen=True)
 class DoorPanelGeometry:
-    """Measured door-panel geometry in the panel frame.
-
-    The panel occupies ``x in [0, thickness]``, ``y in [0, width]``,
-    ``z in [-height/2, height/2]`` (the hinge origin sits at panel mid-height).
-    The handle protrudes from the +X push face inside the handle band.
-    """
+    """Panel-frame geometry: hinge origin, Z axis, and +X push face."""
 
     panel_width_m: float = 0.83
     panel_height_m: float = 2.0
@@ -178,16 +155,5 @@ class DoorPanelGeometry:
         return bool(on_face and within_panel)
 
 
+# The door stops against the wall at 90 degrees.
 MAX_HINGE_ANGLE_RAD = math.pi / 2.0
-"""Physical hinge travel: the door stops against the wall at 90 degrees."""
-
-
-__all__ = [
-    "ALEX_V2_ROBOT_TAG",
-    "MAX_HINGE_ANGLE_RAD",
-    "DoorPanelGeometry",
-    "RobotLimitsCfg",
-    "WorkspaceSphere",
-    "alex_v2_limits",
-    "limits_for_robot",
-]

@@ -1,17 +1,4 @@
-"""A2 adapter: world-frame end-effector delta -> executable robot command.
-
-Adapter-v1 for ``A2_ee_delta``: validates one 6-dim per-tick EE delta (or an
-``(H, 6)`` chunk of them) against the robot's execution limits, clamps it, and
-returns the delta the env should execute. The env's own per-tick clamps remain
-the hard back-stop — the adapter clamps *first* so the correction is decided
-and logged before anything reaches the simulator.
-
-Checks implemented here: shape/finiteness, per-tick position/rotation clamps,
-workspace reachability (robots with a measured workspace model), and
-warn-level joint position/velocity limit flags (envs that report joint state).
-Acceleration limits, collision queries beyond the door panel, and slip
-detection are documented future checks in the action-representation wiki page.
-"""
+"""Validate and adapt world-frame 6D end-effector deltas for execution."""
 
 from __future__ import annotations
 
@@ -23,9 +10,7 @@ from alexdoor_xas.action.spaces import EE_DELTA_DIM
 from .base import AdapterDecision, AdapterLog, AdapterStatus, AdapterWarning, StepContext
 from .limits import RobotLimitsCfg
 
-# Joint-limit flag bands, mirroring eval/sanity.py: unclamped dls-IK targets
-# drift up to ~48 mrad past a position limit while the drive clamps at the
-# limit — a known benign mode, flagged but never rejected.
+# DLS-IK targets may drift about 48 mrad past drive-clamped limits.
 JOINT_LIMIT_IGNORE_RAD = 0.01
 JOINT_LIMIT_WARN_RAD = 0.1
 
@@ -47,11 +32,7 @@ class A2Adapter:
         self._velocity_warning_counts: dict[int, int] = {}
 
     def process(self, delta_world, ctx: StepContext) -> tuple[np.ndarray, AdapterDecision]:
-        """Adapt one 6-dim world-frame EE delta; returns (applied, decision).
-
-        A rejected command applies zero motion (the caller still steps the env
-        so tick accounting stays aligned with the policy's chunk clock).
-        """
+        """Return the applied delta and its logged decision; rejection applies zero motion."""
         checks: dict[str, bool] = {}
         warnings: list[str] = []
         warning_records: list[AdapterWarning] = []
@@ -185,58 +166,6 @@ class A2Adapter:
         applied[:3] *= limit / translation_norm
         return True
 
-    def process_chunk(
-        self, deltas_world, ctx: StepContext
-    ) -> tuple[np.ndarray, list[AdapterDecision]]:
-        """Adapt an ``(H, 6)`` action chunk against the *current* context.
-
-        Reachability is checked against the cumulative predicted EE position,
-        so a chunk that walks out of the workspace is cut at the first
-        rejected step (that step and the rest apply zero motion).
-        """
-        deltas = np.asarray(deltas_world, dtype=np.float64)
-        if deltas.ndim != 2 or deltas.shape[1] != EE_DELTA_DIM:
-            raise ValueError(f"A2 chunk must have shape (H, {EE_DELTA_DIM}), got {deltas.shape}")
-        applied = np.zeros_like(deltas)
-        decisions: list[AdapterDecision] = []
-        ee_pos = np.asarray(ctx.ee_pos_w, dtype=np.float64).reshape(3).copy()
-        rejected = False
-        for i, delta in enumerate(deltas):
-            if rejected:
-                decision = self.log.record(
-                    AdapterDecision(
-                        status=AdapterStatus.REJECTED,
-                        reason="chunk cut: an earlier step of this chunk was rejected",
-                        checks={"chunk_prefix_ok": False},
-                        requested=np.asarray(delta, dtype=np.float64),
-                        applied=np.zeros(EE_DELTA_DIM),
-                    )
-                )
-                decisions.append(decision)
-                continue
-            step_ctx = StepContext(
-                door_frame=ctx.door_frame,
-                hinge_angle_rad=ctx.hinge_angle_rad,
-                hinge_velocity_rad_s=ctx.hinge_velocity_rad_s,
-                ee_pos_w=ee_pos.copy(),
-                ee_quat_w_xyzw=ctx.ee_quat_w_xyzw,
-                contact_sensed=ctx.contact_sensed,
-                contact_force_n=ctx.contact_force_n,
-                joint_state=ctx.joint_state if i == 0 else None,
-                joint_limits=ctx.joint_limits if i == 0 else None,
-                joint_names=ctx.joint_names,
-                tick_index=ctx.tick_index,
-                rollout_phase=ctx.rollout_phase,
-            )
-            step_applied, decision = self.process(delta, step_ctx)
-            decisions.append(decision)
-            if decision.status is AdapterStatus.REJECTED:
-                rejected = True
-                continue
-            applied[i] = step_applied
-            ee_pos += step_applied[:3]
-        return applied, decisions
-
     def _joint_limit_flags(self, ctx: StepContext) -> list[AdapterWarning]:
         if ctx.joint_state is None or ctx.joint_limits is None:
             return []
@@ -330,6 +259,3 @@ class A2Adapter:
             )
         )
         return applied, decision
-
-
-__all__ = ["JOINT_LIMIT_IGNORE_RAD", "JOINT_LIMIT_WARN_RAD", "A2Adapter"]

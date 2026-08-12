@@ -1,16 +1,6 @@
-"""A3 adapter: object-relative (door-frame) EE delta -> A2 execution.
+"""Convert A3 door-frame deltas to A2 world-frame commands.
 
-Adapter-v1 for ``A3_obj_rel_ee_delta``: validates that the object frame is
-available and trustworthy, re-expresses the door-frame delta in world
-coordinates (`action/frames.frame_delta_to_world` — the frozen A3 -> A2
-conversion), and delegates execution to the :class:`A2Adapter`.
-
-Transform assumption (recorded in every decision's checks): the door frame is
-the hinge-anchored ``Doorframe`` body frame, read from the USD stage at reset
-and **static** for the whole episode — live articulation pose reads return
-zeros for the referenced door in this Isaac Lab build (CLAUDE.md gotchas).
-Push/pull semantics survive the transform: the delta is rotated, never
-mirrored, so a door-frame ``-x`` push stays a push on the panel's +X face.
+The hinge-anchored door frame is static per episode and must be a proper rotation.
 """
 
 from __future__ import annotations
@@ -54,7 +44,7 @@ class A3Adapter:
         return self.a2.log
 
     def process(self, delta_door_frame, ctx: StepContext) -> tuple[np.ndarray, AdapterDecision]:
-        """Adapt one 6-dim door-frame EE delta; returns (applied_world, decision)."""
+        """Return the applied world-frame delta and its decision."""
         requested = np.asarray(delta_door_frame, dtype=np.float64).reshape(-1)
         frame_reason = validate_object_frame(ctx.door_frame)
         hinge_ok = bool(np.isfinite(ctx.hinge_angle_rad))
@@ -70,13 +60,12 @@ class A3Adapter:
             )
             return np.zeros(EE_DELTA_DIM), decision
         if requested.shape != (EE_DELTA_DIM,) or not np.isfinite(requested).all():
-            # Let A2 produce the canonical shape/finiteness rejection.
+            # A2 owns the canonical delta validation.
             return self.a2.process(requested, ctx)
 
         delta_world = frame_delta_to_world(requested, ctx.door_frame)
         applied, a2_decision = self.a2.process(delta_world, ctx)
-        # Annotate the recorded decision with the A3 view of the command and
-        # the transform assumption (static hinge-anchored door frame).
+        # Preserve the A3 request and static-frame assumption in the decision.
         checks = dict(a2_decision.checks)
         checks["object_frame_trusted"] = True
         checks["door_frame_static_stage_read"] = True
@@ -91,6 +80,3 @@ class A3Adapter:
         )
         self.log.decisions[-1] = annotated
         return applied, annotated
-
-
-__all__ = ["A3Adapter", "validate_object_frame"]

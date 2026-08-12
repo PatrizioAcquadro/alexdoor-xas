@@ -1,15 +1,4 @@
-"""Adapter-v1 core types: decision statuses, per-command decisions, and logs.
-
-Every adapter call resolves to one :class:`AdapterDecision` — the command was
-either **accepted** as-is, **corrected** (executed after a bounded fix, e.g. a
-per-tick clamp), or **rejected** (not executed; the applied command is zero
-motion). Decisions carry the requested and applied commands plus per-check
-outcomes, so a run's adapter behavior is reconstructable from its log alone
-(guidelines §5: safety/logging are part of the research system).
-
-Pure Python/numpy — no Isaac imports. Environments enter only through the
-duck-typed Phase 2 accessor surface (see :mod:`alexdoor_xas.adapters.rollout`).
-"""
+"""Adapter decisions, warnings, logs, and per-tick state."""
 
 from __future__ import annotations
 
@@ -44,14 +33,7 @@ class AdapterWarning:
 
 @dataclass(frozen=True)
 class AdapterDecision:
-    """Outcome of adapting one command (a per-tick delta or an A4 chunk).
-
-    ``checks`` maps check name -> passed; a failed check either downgraded the
-    status (with ``reason`` naming it) or was corrected. ``warnings`` are
-    non-blocking observations (e.g. joint-limit drift within the known benign
-    band). ``requested``/``applied`` are the command before/after adaptation;
-    a rejected command applies zero motion.
-    """
+    """Recorded validation outcome; rejection applies zero motion."""
 
     status: AdapterStatus
     reason: str = ""
@@ -115,20 +97,13 @@ class AdapterLog:
 
 @dataclass(frozen=True)
 class StepContext:
-    """Per-tick world state the adapters check commands against.
-
-    Mirrors the scripted controller's :class:`DoorPushObservation` but stays
-    adapter-owned (adapters never import policies). ``joint_state`` /
-    ``joint_limits`` carry the env's optional proprio accessors when available
-    (Alex); EE orientation is captured even though the current adapters do not command
-    it directly; contact/force fields are ``None`` when sensing is unavailable.
-    """
+    """Validated state used to adapt one command; optional fields may be ``None``."""
 
     door_frame: ObjectFrame | None
     hinge_angle_rad: float
     hinge_velocity_rad_s: float
     ee_pos_w: np.ndarray  # (3,)
-    ee_quat_w_xyzw: np.ndarray | None = None  # (4,); populated by env snapshots
+    ee_quat_w_xyzw: np.ndarray | None = None  # (4,); validated but not commanded
     contact_sensed: bool | None = None
     contact_force_n: float | None = None
     joint_state: dict[str, np.ndarray] | None = None
@@ -136,6 +111,3 @@ class StepContext:
     joint_names: tuple[str, ...] | None = None
     tick_index: int | None = None
     rollout_phase: str = "unknown"
-
-
-__all__ = ["AdapterDecision", "AdapterLog", "AdapterStatus", "AdapterWarning", "StepContext"]

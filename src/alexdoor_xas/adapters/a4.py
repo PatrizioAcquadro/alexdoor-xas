@@ -1,25 +1,7 @@
-"""A4 adapter: object-centric chunks -> guarded A3/A2 execution.
+"""Validate and execute A4 object-centric chunks through A3/A2.
 
-Adapter-v1 for ``A4_obj_centric_chunk``: interprets an
-:class:`~alexdoor_xas.action.spaces.ObjectCentricChunk` sequence (phase,
-panel-frame contact target, intended hinge delta, duration), validates it
-against door geometry and the robot's workspace, plans the guarded
-approach -> pre-contact -> contact -> push sequence, and executes it
-closed-loop by emitting per-tick door-frame deltas through the
-:class:`A3Adapter` -> :class:`A2Adapter` path.
-
-Semantics (frozen): a chunk's ``motion_hinge_delta_rad`` is **controller
-intent** — the Phase 2 chunk logs stay intent labels. The adapter adds the
-achieved side: every execution result reports ``requested_hinge_delta_rad``
-vs ``achieved_hinge_delta_rad`` plus contact reached/missed, so intent and
-outcome are never conflated.
-
-Planning uses only the chunk's contact target ``(y, z)``: the x coordinate is
-recomputed from the panel geometry and the phase's clearance (the chunk's x
-carries the emitter's EE-at-face convention and is sanity-checked, not
-trusted). Push direction: the panel's push face is +X, so positive hinge
-deltas (opening) are executable; negative deltas mean pulling, which this
-no-grasp scene cannot do — rejected, not corrected.
+Hinge deltas are intent; results record achieved motion. Target X is recomputed
+from panel geometry, and pull commands are rejected in this push-only scene.
 """
 
 from __future__ import annotations
@@ -45,7 +27,7 @@ _CONTACT_PHASES = ("contact", "push", "hold")
 
 @dataclass(frozen=True)
 class A4AdapterCfg:
-    """Guarded-execution geometry and budgets for one calibrated Alex V2 setup."""
+    """Calibrated geometry, tolerances, and stage budgets."""
 
     approach_standoff_m: float
     align_standoff_m: float
@@ -58,20 +40,12 @@ class A4AdapterCfg:
     align_tol_m: float = 0.010
     pre_contact_tol_m: float = 0.005
 
-    budget_headroom: float = 3.0
-    """Stage tick budget = max(min_stage_budget, duration_ticks * headroom):
-    chunk durations are intent recorded from one executor; another executor
-    (or a re-simulated one) legitimately tracks slower."""
+    budget_headroom: float = 3.0  # allows slower executors than the recorded intent
     min_stage_budget_ticks: int = 150
-    push_stall_ticks: int = 60
-    """Consecutive near-zero hinge-velocity ticks in PUSH before declaring the
-    push stalled (insufficient door motion)."""
+    push_stall_ticks: int = 60  # consecutive near-zero-velocity ticks
     push_stall_min_vel_rad_s: float = 1e-3
-    target_nudge_tol_m: float = 0.02
-    """Off-panel contact targets within this distance are corrected (clamped
-    onto the panel); beyond it the chunk is rejected."""
-    target_x_face_tol_m: float = 0.05
-    """Warn when the chunk's x deviates from the EE-at-face convention by more."""
+    target_nudge_tol_m: float = 0.02  # larger off-panel errors are rejected
+    target_x_face_tol_m: float = 0.05  # warning threshold for emitter convention
 
 
 def alex_v2_a4_cfg(calibration: AlexV2DoorCalibration) -> A4AdapterCfg:
@@ -100,8 +74,6 @@ _PHASE_CLEARANCE_ATTR = {
 
 @dataclass(frozen=True)
 class _Stage:
-    """One executable stage of the guarded plan."""
-
     phase: str
     target_panel_yz: tuple[float, float]
     clearance_m: float
@@ -159,12 +131,7 @@ class StageResult:
 
 @dataclass
 class A4ExecutionResult:
-    """What executing one A4 chunk sequence did to the world.
-
-    ``status`` is the *adaptation* outcome (accepted / corrected / rejected);
-    ``completed`` + ``failure`` describe the *execution* outcome. A rejected
-    sequence executes nothing.
-    """
+    """Adaptation and execution outcomes for one A4 sequence."""
 
     status: AdapterStatus
     reason: str
@@ -285,19 +252,13 @@ class A4Adapter:
     def log(self) -> AdapterLog:
         return self.a3.log
 
-    # -- validation ------------------------------------------------------------
-
     def validate_chunk(
         self,
         chunk: ObjectCentricChunk,
         entry_angle_rad: float,
         door_frame=None,
     ) -> tuple[ObjectCentricChunk, AdapterDecision]:
-        """Validate one chunk at its predicted entry hinge angle.
-
-        Returns the (possibly corrected) chunk and the decision. A rejected
-        chunk is returned unchanged; callers must not execute it.
-        """
+        """Return the validated chunk and decision at its predicted entry angle."""
         state = _ChunkValidationState(chunk)
         try:
             target, numeric = self._parse_chunk(state)
@@ -494,10 +455,7 @@ class A4Adapter:
                 [geo.surface_x_m(0.0), target_panel[1], target_panel[2]], dtype=np.float64
             )
             probes.append((f"contact point at {angle_name} angle", contact, angle))
-        # The approach waypoint matters even for contact/push chunks: guarded
-        # execution synthesizes the approach prefix from the same target, and
-        # the measured Alex failure mode is exactly this waypoint folding
-        # inside min reach.
+        # Guarded execution synthesizes this waypoint; Alex can fold inside min reach.
         approach = np.array(
             [geo.surface_x_m(self.cfg.approach_standoff_m), target_panel[1], target_panel[2]],
             dtype=np.float64,
@@ -560,15 +518,8 @@ class A4Adapter:
                 total += value
         return total
 
-    # -- planning ----------------------------------------------------------------
-
     def plan(self, chunks: Sequence[ObjectCentricChunk]) -> list[_Stage]:
-        """Turn validated chunks into the guarded executable stage sequence.
-
-        Inserts synthesized approach/pre-contact stages when the sequence jumps
-        straight to a contact/push/hold chunk (guarded approach: never command
-        the contact clearance from far away).
-        """
+        """Insert a guarded approach before direct contact, push, or hold chunks."""
         stages: list[_Stage] = []
         seen_pre_contact = False
         for chunk in chunks:
@@ -611,19 +562,13 @@ class A4Adapter:
             )
         return stages
 
-    # -- execution ---------------------------------------------------------------
-
     def execute(
         self,
         env,
         chunks: ObjectCentricChunk | Sequence[ObjectCentricChunk],
         max_ticks: int = 1800,
     ) -> A4ExecutionResult:
-        """Validate, plan, and execute a chunk (sequence) on a reset env.
-
-        A validation rejection rejects the whole sequence and commands no
-        motion (guarded execution never partially runs an invalid plan).
-        """
+        """Execute a validated sequence; any invalid chunk rejects it without motion."""
         if isinstance(chunks, ObjectCentricChunk):
             chunks = [chunks]
         chunks = list(chunks)
@@ -760,7 +705,6 @@ class A4Adapter:
                 execution.env,
                 execution.door_frame,
                 execution.joint_limits,
-                self.limits,
             )
 
         result = StageResult(
@@ -897,12 +841,3 @@ class A4Adapter:
         if stage.phase == "hold":
             return execution.stage_ticks >= stage.hold_ticks, "hold duration elapsed"
         raise ValueError(f"unplannable stage phase {stage.phase!r}")
-
-
-__all__ = [
-    "A4Adapter",
-    "A4AdapterCfg",
-    "A4ExecutionResult",
-    "StageResult",
-    "alex_v2_a4_cfg",
-]

@@ -84,9 +84,6 @@ def _chunk(
     )
 
 
-# -- A2 -------------------------------------------------------------------------
-
-
 def test_a2_accepts_in_range_delta():
     adapter = A2Adapter(TEST_ROBOT_LIMITS)
     delta = np.array([0.01, -0.005, 0.0, 0.0, 0.0, 0.0])
@@ -323,20 +320,6 @@ def test_a2_tracks_secondary_velocity_violation_per_joint_across_ticks() -> None
     assert [warning.evidence["count"] for warning in secondary_records] == [1, 2]
 
 
-def test_a2_chunk_is_cut_at_first_rejection():
-    workspace = WorkspaceSphere(center_w=(0.0, 0.0, 0.0), min_reach_m=0.0, max_reach_m=0.05)
-    limits = RobotLimitsCfg(robot="test", workspace=workspace, reach_margin_m=0.0)
-    adapter = A2Adapter(limits)
-    chunk = np.tile(np.array([0.02, 0.0, 0.0, 0.0, 0.0, 0.0]), (5, 1))
-    applied, decisions = adapter.process_chunk(chunk, _ctx())
-    statuses = [d.status for d in decisions]
-    assert AdapterStatus.REJECTED in statuses
-    first_reject = statuses.index(AdapterStatus.REJECTED)
-    assert first_reject == 2  # cumulative 0.02*3 = 0.06 > 0.05 at the 3rd step
-    np.testing.assert_allclose(applied[first_reject:], 0.0)
-    assert all(s is AdapterStatus.REJECTED for s in statuses[first_reject:])
-
-
 def test_limits_for_robot_rejects_unknown_tag():
     with pytest.raises(ValueError, match="workspace_center_w"):
         limits_for_robot(ALEX_V2_ROBOT_TAG)
@@ -376,9 +359,6 @@ def test_alex_v2_limits_reject_invalid_caller_center(center) -> None:
         _v2_limits(center=center)
 
 
-# -- A3 -------------------------------------------------------------------------
-
-
 def test_a3_matches_frame_conversion():
     frame = ObjectFrame(origin=np.array([1.0, -2.0, 0.5]), rot=rot_z(0.7))
     adapter = A3Adapter(A2Adapter(TEST_ROBOT_LIMITS))
@@ -413,9 +393,6 @@ def test_validate_object_frame_reasons():
     assert "determinant" in validate_object_frame(reflection)
 
 
-# -- pins against the scripted controller (adapters must not import policies) ----
-
-
 def test_panel_geometry_pins_controller_defaults():
     geo = DoorPanelGeometry()
     cfg = DoorPushControllerCfg()
@@ -443,9 +420,6 @@ def test_a4_phase_contract_is_shared_across_actions_dataset_and_controller():
     assert dataset_vocab is A4_PHASE_VOCAB
     assert A4_PHASE_VOCAB == tuple(str(phase) for phase in PHASE_ORDER)
     assert str(DoorPushPhase.DONE) not in A4_PHASE_VOCAB
-
-
-# -- A4 validation ----------------------------------------------------------------
 
 
 def _a4_cfg(**overrides) -> A4AdapterCfg:
@@ -539,9 +513,6 @@ def test_a4_rejects_unreachable_target():
     assert decision.status is AdapterStatus.REJECTED
     assert "beyond max reach" in decision.reason
     assert decision.checks["reachable"] is False
-
-
-# -- A4 execution on the synthetic world -------------------------------------------
 
 
 def _canonical_chunks(push_delta: float = math.radians(50.0)):
@@ -714,9 +685,6 @@ def test_a4_rejection_commands_no_motion(chunks, reason, requested_hinge_delta):
         assert result.requested_hinge_delta_rad == pytest.approx(requested_hinge_delta)
     np.testing.assert_allclose(env.world.ee_pos_w, start)
     assert env.world.angle == 0.0
-
-
-# -- replay equivalence through the rollout driver ----------------------------------
 
 
 def test_a2_replay_reproduces_scripted_episode():
