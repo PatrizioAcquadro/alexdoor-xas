@@ -1,4 +1,4 @@
-# ── Python ───────────────────────────────────────────────────────────────────
+# Python
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -9,14 +9,14 @@ dist/
 .env.*
 !.env.example
 
-# ── Tooling caches ───────────────────────────────────────────────────────────
+# Tooling caches
 .pytest_cache/
 .ruff_cache/
 .coverage
 coverage.xml
 htmlcov/
 
-# ── Generated artifacts (see datasets/README.md, outputs/README.md) ──────────
+# Generated artifacts (see datasets/README.md and outputs/README.md)
 # Datasets are tracked via their README.md; generated data stays local by default.
 /datasets/*
 !/datasets/README.md
@@ -28,9 +28,8 @@ htmlcov/
 /outputs/door_scene/*
 !/outputs/door_scene/D[0-4].usda
 
-# ── Machine-local artifacts ──────────────────────────────────────────────────
-# Keep active binary formats ignored even when written outside the canonical
-# datasets/ and outputs/ directories.
+# Machine-local artifacts
+# Keep active binary formats ignored even outside datasets/ and outputs/.
 *.log
 *.hdf5
 *.mp4
@@ -38,10 +37,10 @@ htmlcov/
 # Binary USD caches; canonical scene layers use tracked .usda files.
 *.usdc
 
-# ── Local phase records ──────────────────────────────────────────────────────
+# Local phase records
 /implementation_phases/
 
-# ── Local assistant state ────────────────────────────────────────────────────
+# Local assistant state
 /.agents/
 /.codex/
 /.claude/
@@ -52,7 +51,7 @@ htmlcov/
 /TODO.md
 /prompts/
 
-# ── Editor / OS cruft ────────────────────────────────────────────────────────
+# Editor and OS files
 /knowledge/.obsidian/
 .idea/
 .vscode/
