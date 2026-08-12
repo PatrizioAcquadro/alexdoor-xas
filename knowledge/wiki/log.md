@@ -155,3 +155,17 @@ manifest, scene, and contact responsibilities.
 Verified all 23 wiki pages, internal links, complete index coverage, nine phase
 pages, Markdown whitespace, protected raw boundaries, and removal of the custom
 Isaac Lab branch and asset-module references from the active system.
+
+## 2026-08-12 — update : Alex V2-only geometry and checkpoints
+
+Documented collision-derived tool-point contact against the physical door panel,
+calibration-bound A4 execution, checkpoint v2-only loading, and exact Alex V2
+robot-asset identity checks. Older checkpoint formats and cross-model transfer
+evaluation are no longer supported.
+
+## 2026-08-12 — lint : Alex V2-only cleanup
+
+Verified all 23 wiki pages, 31 internal links, complete index coverage, nine
+phase pages, Markdown whitespace, protected raw boundaries, and removal of
+active retired-geometry and superseded robot-model references while retaining
+schema-version and collision-shape identifiers unrelated to that retired path.

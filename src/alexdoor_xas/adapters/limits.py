@@ -137,14 +137,13 @@ class DoorPanelGeometry:
     panel_width_m: float = 0.83
     panel_height_m: float = 2.0
     panel_thickness_m: float = 0.036
-    ee_radius_m: float = 0.05
     handle_band_y_m: tuple[float, float] = (0.63, 0.80)
     handle_band_z_m: tuple[float, float] = (0.0, 0.09)
     contact_eps_m: float = 0.002
 
     def surface_x_m(self, clearance_m: float) -> float:
-        """Panel-frame x of the EE center at ``clearance_m`` off the +X face."""
-        return self.panel_thickness_m + self.ee_radius_m + clearance_m
+        """Panel-frame x of the Alex V2 tool point off the +X face."""
+        return self.panel_thickness_m + clearance_m
 
     def on_panel(self, point_panel: np.ndarray, tol_m: float = 0.0) -> bool:
         """Whether a panel-frame contact point lies on the panel face (±tol)."""
@@ -171,12 +170,12 @@ class DoorPanelGeometry:
         )
 
     def geometric_contact(self, ee_panel: np.ndarray) -> bool:
-        """EE-surface-on-panel-face inference (the scripted controller's rule)."""
+        """Tool-point-on-panel-face inference (the scripted controller's rule)."""
         point = np.asarray(ee_panel, dtype=np.float64).reshape(3)
         on_face = point[0] <= self.surface_x_m(self.contact_eps_m)
         within_panel = (
-            -self.ee_radius_m <= point[1] <= self.panel_width_m + self.ee_radius_m
-            and point[0] >= -self.ee_radius_m
+            0.0 <= point[1] <= self.panel_width_m
+            and point[0] >= 0.0
         )
         return bool(on_face and within_panel)
 

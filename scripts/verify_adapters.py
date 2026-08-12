@@ -26,7 +26,7 @@ Gate artifacts go under ``~/.cache/alexdoor-xas/verification/verify_adapters/``.
 Run through the official Isaac Lab launcher::
 
     PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p \
-        scripts/verify_adapters.py --viz none --device cpu
+        scripts/verify_adapters.py --viz none --device cuda:0
 """
 
 from __future__ import annotations
@@ -72,6 +72,8 @@ from alexdoor_xas.adapters import (  # noqa: E402
     A3Adapter,
     A4Adapter,
     AdapterStatus,
+    DoorPanelGeometry,
+    alex_v2_a4_cfg,
     limits_for_robot,
     replay_source,
     rollout_chunks,
@@ -127,7 +129,7 @@ def _fresh_adapters(env):
     )
     a2 = A2Adapter(limits)
     a3 = A3Adapter(a2)
-    return a2, a3, A4Adapter(a3)
+    return a2, a3, A4Adapter(a3, cfg=alex_v2_a4_cfg(env.alex_v2_calibration()))
 
 
 def _assert_replay(env, episode, actions, adapter, label: str, out_dir):
@@ -260,12 +262,13 @@ def _assert_rejected_a4_case(env, out_dir, artifact_name: str, chunk, reason_sub
 
 
 def _assert_a4_rejections(env, out_dir):
+    face_x = DoorPanelGeometry().surface_x_m(0.0)
     cases = [
         (
             "a4_rejected_pull",
             ObjectCentricChunk(
                 phase="push",
-                contact_target_panel=(0.086, 0.29, 0.15),
+                contact_target_panel=(face_x, 0.29, 0.15),
                 motion_hinge_delta_rad=-0.3,
                 duration_ticks=100,
             ),
@@ -275,7 +278,7 @@ def _assert_a4_rejections(env, out_dir):
             "a4_rejected_approach_hinge_motion",
             ObjectCentricChunk(
                 phase="approach",
-                contact_target_panel=(0.086, 0.29, 0.15),
+                contact_target_panel=(face_x, 0.29, 0.15),
                 motion_hinge_delta_rad=0.1,
                 duration_ticks=100,
             ),
@@ -285,7 +288,7 @@ def _assert_a4_rejections(env, out_dir):
             "a4_rejected_hold_hinge_motion",
             ObjectCentricChunk(
                 phase="hold",
-                contact_target_panel=(0.086, 0.29, 0.15),
+                contact_target_panel=(face_x, 0.29, 0.15),
                 motion_hinge_delta_rad=0.1,
                 duration_ticks=100,
             ),
@@ -295,7 +298,7 @@ def _assert_a4_rejections(env, out_dir):
             "a4_rejected_malformed_target",
             ObjectCentricChunk(
                 phase="push",
-                contact_target_panel=(0.086, 0.29),
+                contact_target_panel=(face_x, 0.29),
                 motion_hinge_delta_rad=0.0,
                 duration_ticks=100,
             ),

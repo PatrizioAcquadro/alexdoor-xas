@@ -33,6 +33,7 @@ import numpy as np
 
 from alexdoor_xas.action.frames import rot_z
 from alexdoor_xas.action.spaces import A4_PHASE_VOCAB, EE_DELTA_DIM, ObjectCentricChunk
+from alexdoor_xas.calibration.alex_v2_door import AlexV2DoorCalibration
 
 from .a3 import A3Adapter
 from .base import AdapterDecision, AdapterLog, AdapterStatus, AdapterWarning
@@ -44,18 +45,13 @@ _CONTACT_PHASES = ("contact", "push", "hold")
 
 @dataclass(frozen=True)
 class A4AdapterCfg:
-    """Guarded-execution geometry and budgets (defaults = the Alex preset).
+    """Guarded-execution geometry and budgets for one calibrated Alex V2 setup."""
 
-    Standoffs/clearances are the Phase 2.5 Alex controller values
-    (``alex_fixedbase_push_cfg``); they also work for synthetic test doubles, which
-    has no reach constraints.
-    """
-
-    approach_standoff_m: float = 0.12
-    align_standoff_m: float = 0.06
-    pre_contact_clearance_m: float = 0.010
-    contact_clearance_m: float = -0.005
-    release_standoff_m: float = 0.30
+    approach_standoff_m: float
+    align_standoff_m: float
+    pre_contact_clearance_m: float
+    contact_clearance_m: float
+    release_standoff_m: float
 
     max_step_m: float = 0.015
     approach_tol_m: float = 0.020
@@ -76,6 +72,19 @@ class A4AdapterCfg:
     onto the panel); beyond it the chunk is rejected."""
     target_x_face_tol_m: float = 0.05
     """Warn when the chunk's x deviates from the EE-at-face convention by more."""
+
+
+def alex_v2_a4_cfg(calibration: AlexV2DoorCalibration) -> A4AdapterCfg:
+    """Build A4 execution geometry from the validated Alex V2 calibration."""
+
+    values = calibration.controller
+    return A4AdapterCfg(
+        approach_standoff_m=float(values["approach_standoff_m"]),
+        align_standoff_m=float(values["align_standoff_m"]),
+        pre_contact_clearance_m=float(values["pre_contact_clearance_m"]),
+        contact_clearance_m=float(values["contact_clearance_m"]),
+        release_standoff_m=float(values["release_standoff_m"]),
+    )
 
 
 _PHASE_CLEARANCE_ATTR = {
@@ -183,12 +192,13 @@ class A4Adapter:
     def __init__(
         self,
         a3: A3Adapter,
+        *,
+        cfg: A4AdapterCfg,
         geometry: DoorPanelGeometry | None = None,
-        cfg: A4AdapterCfg | None = None,
     ):
         self.a3 = a3
         self.geometry = geometry or DoorPanelGeometry()
-        self.cfg = cfg or A4AdapterCfg()
+        self.cfg = cfg
 
     @property
     def limits(self) -> RobotLimitsCfg:
@@ -717,4 +727,10 @@ class A4Adapter:
         raise ValueError(f"unplannable stage phase {stage.phase!r}")
 
 
-__all__ = ["A4Adapter", "A4AdapterCfg", "A4ExecutionResult", "StageResult"]
+__all__ = [
+    "A4Adapter",
+    "A4AdapterCfg",
+    "A4ExecutionResult",
+    "StageResult",
+    "alex_v2_a4_cfg",
+]

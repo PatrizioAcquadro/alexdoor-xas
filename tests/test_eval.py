@@ -46,11 +46,11 @@ def test_metrics_prefer_force_sensed_contact() -> None:
     assert metrics["mean_contact_force_n"] > 0.0
 
     # Episodes without force sensing keep the geometric count and report no force.
-    legacy = _episode()
-    legacy_metrics = episode_metrics(legacy)
-    inferred_ticks = sum(1 for step in legacy.steps if step.contact["inferred"])
-    assert legacy_metrics["contact_ticks"] == inferred_ticks
-    assert all(legacy_metrics[key] is None for key in FORCE_METRIC_KEYS)
+    force_less = _episode()
+    force_less_metrics = episode_metrics(force_less)
+    inferred_ticks = sum(1 for step in force_less.steps if step.contact["inferred"])
+    assert force_less_metrics["contact_ticks"] == inferred_ticks
+    assert all(force_less_metrics[key] is None for key in FORCE_METRIC_KEYS)
 
 
 def test_force_metrics_details_and_aggregate_block() -> None:
@@ -74,9 +74,9 @@ def test_force_metrics_details_and_aggregate_block() -> None:
     assert block["p95_max"] == pytest.approx(m["p95_contact_force_n"])
     assert block["mean_contact_ticks"] == pytest.approx(m["contact_ticks"])
 
-    # Proxy-only runs get no force block at all.
-    proxy_summary = aggregate_metrics([episode_metrics(_episode())])
-    assert "contact_force_n" not in proxy_summary
+    # Force-less synthetic runs get no force block at all.
+    synthetic_summary = aggregate_metrics([episode_metrics(_episode())])
+    assert "contact_force_n" not in synthetic_summary
 
 
 def test_episode_and_aggregate_metrics_on_success_and_timeout() -> None:
@@ -245,7 +245,7 @@ def test_sanity_checks_pass_on_clean_episode_and_catch_bad_data() -> None:
     assert result.ok
     assert any("rad/s" in warning for warning in result.warnings)
 
-    # Wrong contact source (e.g. a proxy episode routed into the Alex gate).
+    # Wrong contact source (e.g. inferred geometry routed into the Alex gate).
     bad_contact = dict(episode.steps[0].contact)
     bad_contact["source"] = "inferred_geometric"
     result = check_alex_episode(with_step(episode, 0, contact=bad_contact))
@@ -273,7 +273,7 @@ def test_sanity_checks_pass_on_clean_episode_and_catch_bad_data() -> None:
     assert not result.ok
     assert any("exceeded the 200 N force admission limit" in error for error in result.errors)
 
-    # Proxy episodes (no joint proprio) are rejected outright.
+    # Episodes without joint proprio are rejected outright.
     result = check_alex_episode(_episode())
     assert not result.ok
 

@@ -91,8 +91,8 @@ def _export(tmp_root, env_factory):
 
 
 @pytest.fixture(scope="module")
-def proxy_exports(tmp_path_factory):
-    return _export(tmp_path_factory.mktemp("proxy"), FakeDoorPushEnv)
+def synthetic_exports(tmp_path_factory):
+    return _export(tmp_path_factory.mktemp("synthetic"), FakeDoorPushEnv)
 
 
 @pytest.fixture(scope="module")
@@ -101,8 +101,8 @@ def alex_exports(tmp_path_factory):
 
 
 @pytest.fixture(scope="module")
-def proxy_a2(proxy_exports) -> EpisodeDataset:
-    return EpisodeDataset(proxy_exports[A2_EE_DELTA])
+def synthetic_a2(synthetic_exports) -> EpisodeDataset:
+    return EpisodeDataset(synthetic_exports[A2_EE_DELTA])
 
 
 @pytest.fixture(scope="module")
@@ -113,11 +113,11 @@ def alex_a2(alex_exports) -> EpisodeDataset:
 # ── loading ───────────────────────────────────────────────────────────────────
 
 
-def test_dataset_loads_records_with_stacked_arrays(proxy_a2) -> None:
-    assert len(proxy_a2) == N_EPISODES
-    assert proxy_a2.action_space == A2_EE_DELTA
-    assert proxy_a2.action_dim == EE_DELTA_DIM
-    record = proxy_a2[0]
+def test_dataset_loads_records_with_stacked_arrays(synthetic_a2) -> None:
+    assert len(synthetic_a2) == N_EPISODES
+    assert synthetic_a2.action_space == A2_EE_DELTA
+    assert synthetic_a2.action_dim == EE_DELTA_DIM
+    record = synthetic_a2[0]
     assert record.n_steps > 0
     assert record.actions.shape == (record.n_steps, EE_DELTA_DIM)
     assert record.t.shape == (record.n_steps,)
@@ -125,9 +125,9 @@ def test_dataset_loads_records_with_stacked_arrays(proxy_a2) -> None:
     assert record.success and record.termination_reason == "controller_done"
     assert "failure_label" not in record.__dataclass_fields__
     assert {"ee_pos_w", "ee_quat_w_xyzw", "door_angle_rad", "inferred"} <= set(record.obs)
-    assert proxy_a2.by_id(record.episode_id) is record
+    assert synthetic_a2.by_id(record.episode_id) is record
     with pytest.raises(KeyError):
-        proxy_a2.by_id("no-such-episode")
+        synthetic_a2.by_id("no-such-episode")
 
 
 def test_a1_dataset_has_joint_wide_actions(alex_exports) -> None:
@@ -151,27 +151,27 @@ def test_episode_ids_shared_across_action_spaces(alex_exports) -> None:
 # ── observation presets ───────────────────────────────────────────────────────
 
 
-def test_core_preset_is_9dim_everywhere(proxy_a2, alex_a2) -> None:
-    for dataset in (proxy_a2, alex_a2):
+def test_core_preset_is_9dim_everywhere(synthetic_a2, alex_a2) -> None:
+    for dataset in (synthetic_a2, alex_a2):
         obs = dataset.obs(0, "core")
         assert obs.shape == (dataset[0].n_steps, 9)
         assert np.isfinite(obs).all()
 
 
-def test_core_contact_uses_sensed_when_available(proxy_a2, alex_a2) -> None:
-    assert proxy_a2.obs(0, "core_contact").shape[1] == 10
+def test_core_contact_uses_sensed_when_available(synthetic_a2, alex_a2) -> None:
+    assert synthetic_a2.obs(0, "core_contact").shape[1] == 10
     alex_obs = alex_a2.obs(0, "core_contact")
     assert alex_obs.shape[1] == 10
     np.testing.assert_array_equal(alex_obs[:, -1], alex_a2[0].obs["sensed"])
 
 
-def test_alex_full_preset_requires_force_sensing_episodes(proxy_a2, alex_a2) -> None:
+def test_alex_full_preset_requires_force_sensing_episodes(synthetic_a2, alex_a2) -> None:
     n_joints = FakeForceDoorPushEnv.N_JOINTS
     assert alex_a2.obs(0, "alex_full").shape[1] == 2 * n_joints + 11
     with pytest.raises(ValueError, match="alex_full"):
-        proxy_a2.obs(0, "alex_full")
+        synthetic_a2.obs(0, "alex_full")
     with pytest.raises(ValueError, match="unknown obs preset"):
-        proxy_a2.obs(0, "nope")
+        synthetic_a2.obs(0, "nope")
 
 
 def test_frozen_presets_stay_bit_compatible() -> None:
@@ -287,14 +287,14 @@ def test_a4_validation_rejects_bad_target_width(alex_exports, tmp_path) -> None:
 # ── validation ────────────────────────────────────────────────────────────────
 
 
-def test_validate_passes_on_exported_datasets(proxy_a2, alex_a2, alex_exports) -> None:
-    assert validate_dataset(proxy_a2, A2_EE_DELTA).ok
+def test_validate_passes_on_exported_datasets(synthetic_a2, alex_a2, alex_exports) -> None:
+    assert validate_dataset(synthetic_a2, A2_EE_DELTA).ok
     assert validate_dataset(alex_a2, A2_EE_DELTA).ok
     assert validate_dataset(EpisodeDataset(alex_exports[A3_OBJ_REL_EE_DELTA])).ok
 
 
-def test_validate_catches_planted_defects(proxy_a2) -> None:
-    record = proxy_a2[0]
+def test_validate_catches_planted_defects(synthetic_a2) -> None:
+    record = synthetic_a2[0]
 
     mismatch = validate_episode(record, expected_space=A3_OBJ_REL_EE_DELTA)
     assert any("does not match" in e for e in mismatch.errors)
@@ -311,8 +311,8 @@ def test_validate_catches_planted_defects(proxy_a2) -> None:
     assert any("inconsistent step counts" in e for e in truncated.errors)
 
 
-def test_validate_rejects_unknown_termination_reason(proxy_a2) -> None:
-    record = proxy_a2[0]
+def test_validate_rejects_unknown_termination_reason(synthetic_a2) -> None:
+    record = synthetic_a2[0]
     result = validate_episode(
         dataclasses.replace(record, success=False, termination_reason="novel_interpretation")
     )
@@ -320,8 +320,8 @@ def test_validate_rejects_unknown_termination_reason(proxy_a2) -> None:
     assert any("unknown termination_reason" in error for error in result.errors)
 
 
-def test_validate_rejects_bad_timing_and_control_dt(proxy_a2) -> None:
-    record = proxy_a2[0]
+def test_validate_rejects_bad_timing_and_control_dt(synthetic_a2) -> None:
+    record = synthetic_a2[0]
     bad_t = record.t.copy()
     bad_t[1] += record.meta["control_dt"] * 0.5
     result = validate_episode(dataclasses.replace(record, t=bad_t))
@@ -333,8 +333,8 @@ def test_validate_rejects_bad_timing_and_control_dt(proxy_a2) -> None:
     assert any("control_dt" in error for error in result.errors)
 
 
-def test_validate_rejects_bad_contact_flags_and_sources(proxy_a2) -> None:
-    record = proxy_a2[0]
+def test_validate_rejects_bad_contact_flags_and_sources(synthetic_a2) -> None:
+    record = synthetic_a2[0]
     bad_obs = dict(record.obs)
     bad_obs["inferred"] = bad_obs["inferred"].copy()
     bad_obs["inferred"][0] = 0.5
@@ -349,8 +349,8 @@ def test_validate_rejects_bad_contact_flags_and_sources(proxy_a2) -> None:
     assert any("contact source" in error for error in result.errors)
 
 
-def test_validate_episode_reports_malformed_observation_shape(proxy_a2) -> None:
-    record = proxy_a2[0]
+def test_validate_episode_reports_malformed_observation_shape(synthetic_a2) -> None:
+    record = synthetic_a2[0]
     bad_obs = dict(record.obs)
     bad_obs["door_angle_rad"] = np.asarray(0.0)
 
@@ -372,9 +372,9 @@ def test_validate_rejects_mislabeled_a3_actions(alex_exports) -> None:
 
 
 def test_validate_dataset_dir_reports_malformed_meta_and_action_rank(
-    proxy_exports, tmp_path
+    synthetic_exports, tmp_path
 ) -> None:
-    dataset_dir = _copy_dataset(proxy_exports[A2_EE_DELTA], tmp_path, "bad_meta")
+    dataset_dir = _copy_dataset(synthetic_exports[A2_EE_DELTA], tmp_path, "bad_meta")
     meta_path = dataset_dir / "meta.json"
     meta = json.loads(meta_path.read_text())
     del meta["action_space"]
@@ -384,7 +384,7 @@ def test_validate_dataset_dir_reports_malformed_meta_and_action_rank(
     assert not result.ok
     assert any("action_space" in error for error in result.errors)
 
-    rank_dir = _copy_dataset(proxy_exports[A2_EE_DELTA], tmp_path, "bad_action_rank")
+    rank_dir = _copy_dataset(synthetic_exports[A2_EE_DELTA], tmp_path, "bad_action_rank")
     dataset = EpisodeDataset(rank_dir)
     n_steps = dataset[0].n_steps
     import h5py
@@ -420,16 +420,16 @@ def test_matched_action_space_validation_rejects_same_id_mismatched_content(alex
 # ── normalization ─────────────────────────────────────────────────────────────
 
 
-def test_norm_stats_roundtrip_and_zero_std_guard(proxy_a2, tmp_path) -> None:
-    train_ids = proxy_a2.episode_ids[:3]
-    stats = compute_norm_stats(proxy_a2, train_ids)
+def test_norm_stats_roundtrip_and_zero_std_guard(synthetic_a2, tmp_path) -> None:
+    train_ids = synthetic_a2.episode_ids[:3]
+    stats = compute_norm_stats(synthetic_a2, train_ids)
     assert stats.action.dim == EE_DELTA_DIM
     assert stats.obs.dim == 9 and stats.obs_preset == "core"
-    # The proxy never actuates rotations: those dims are constant zero -> floored.
+    # The synthetic test double never actuates rotations: those dims are constant zero -> floored.
     assert (stats.action.std[3:] == STD_FLOOR).all()
     assert (stats.action.std[:3] > STD_FLOOR).any()
 
-    actions = proxy_a2[0].actions
+    actions = synthetic_a2[0].actions
     np.testing.assert_allclose(
         stats.action.denormalize(stats.action.normalize(actions)), actions, atol=1e-9
     )
@@ -439,16 +439,16 @@ def test_norm_stats_roundtrip_and_zero_std_guard(proxy_a2, tmp_path) -> None:
     np.testing.assert_array_equal(loaded.action.mean, stats.action.mean)
     np.testing.assert_array_equal(loaded.obs.std, stats.obs.std)
     assert loaded.train_episode_ids == tuple(train_ids)
-    assert validate_norm_stats(loaded, proxy_a2, train_ids) == []
+    assert validate_norm_stats(loaded, synthetic_a2, train_ids) == []
 
-    pose_stats = compute_norm_stats(proxy_a2, train_ids, obs_preset="core_door_pose")
+    pose_stats = compute_norm_stats(synthetic_a2, train_ids, obs_preset="core_door_pose")
     assert pose_stats.obs_preset == "core_door_pose"
     assert pose_stats.obs.dim > stats.obs.dim
 
 
-def test_norm_stats_validation_rejects_stale_or_wrong_dimension_stats(proxy_a2) -> None:
-    train_ids = proxy_a2.episode_ids[:3]
-    stats = compute_norm_stats(proxy_a2, train_ids)
+def test_norm_stats_validation_rejects_stale_or_wrong_dimension_stats(synthetic_a2) -> None:
+    train_ids = synthetic_a2.episode_ids[:3]
+    stats = compute_norm_stats(synthetic_a2, train_ids)
 
     stale_action = dataclasses.replace(
         stats.action,
@@ -457,10 +457,10 @@ def test_norm_stats_validation_rejects_stale_or_wrong_dimension_stats(proxy_a2) 
     stale = dataclasses.replace(stats, action=stale_action)
     assert any(
         "recomputed action mean" in error
-        for error in validate_norm_stats(stale, proxy_a2, train_ids)
+        for error in validate_norm_stats(stale, synthetic_a2, train_ids)
     )
 
-    wrong_train = validate_norm_stats(stats, proxy_a2, list(reversed(train_ids)))
+    wrong_train = validate_norm_stats(stats, synthetic_a2, list(reversed(train_ids)))
     assert any("train_episode_ids" in error for error in wrong_train)
 
     bad_action = dataclasses.replace(
@@ -472,7 +472,7 @@ def test_norm_stats_validation_rejects_stale_or_wrong_dimension_stats(proxy_a2) 
     )
     wrong_dim = dataclasses.replace(stats, action=bad_action)
     assert any(
-        "action dim" in error for error in validate_norm_stats(wrong_dim, proxy_a2, train_ids)
+        "action dim" in error for error in validate_norm_stats(wrong_dim, synthetic_a2, train_ids)
     )
 
 
@@ -480,14 +480,14 @@ def test_norm_stats_validation_rejects_stale_or_wrong_dimension_stats(proxy_a2) 
 
 
 def test_verify_dataset_interface_default_does_not_rewrite_artifacts(
-    proxy_exports, tmp_path
+    synthetic_exports, tmp_path
 ) -> None:
     verify = _load_script("scripts/verify_dataset_interface.py")
-    root = proxy_exports[A2_EE_DELTA].parents[2]
+    root = synthetic_exports[A2_EE_DELTA].parents[2]
     split_file = splits_path(root, "door_push", "v0")
     split_file.parent.mkdir(parents=True, exist_ok=True)
     split_file.write_text("sentinel split\n")
-    stats_file = norm_stats_path(proxy_exports[A2_EE_DELTA])
+    stats_file = norm_stats_path(synthetic_exports[A2_EE_DELTA])
     stats_file.write_text("sentinel stats\n")
 
     args = argparse.Namespace(
@@ -508,9 +508,9 @@ def test_verify_dataset_interface_default_does_not_rewrite_artifacts(
     assert stats_file.read_text() == "sentinel stats\n"
 
 
-def test_verify_dataset_interface_requires_a4_by_default(proxy_exports, tmp_path) -> None:
+def test_verify_dataset_interface_requires_a4_by_default(synthetic_exports, tmp_path) -> None:
     verify = _load_script("scripts/verify_dataset_interface.py")
-    source_root = proxy_exports[A2_EE_DELTA].parents[2]
+    source_root = synthetic_exports[A2_EE_DELTA].parents[2]
     root = tmp_path / "datasets"
     shutil.copytree(source_root, root)
     shutil.rmtree(root / "door_push" / A4_OBJ_CENTRIC_CHUNK)
@@ -532,40 +532,42 @@ def test_verify_dataset_interface_requires_a4_by_default(proxy_exports, tmp_path
     )
 
 
-def test_inspect_dataset_uses_split_episode_and_masks_padded_actions(proxy_a2, tmp_path) -> None:
+def test_inspect_dataset_uses_split_episode_and_masks_padded_actions(
+    synthetic_a2, tmp_path
+) -> None:
     inspect = _load_script("scripts/inspect_dataset.py")
-    ids = proxy_a2.episode_ids
+    ids = synthetic_a2.episode_ids
     splits = {"train": [ids[1], ids[2]], "val": [ids[3]], "test": [ids[0]]}
-    save_splits(splits_path(proxy_a2.dataset_dir.parents[2], proxy_a2.task, "v0"), splits)
-    args = argparse.Namespace(dataset=proxy_a2.dataset_dir, split="train")
+    save_splits(splits_path(synthetic_a2.dataset_dir.parents[2], synthetic_a2.task, "v0"), splits)
+    args = argparse.Namespace(dataset=synthetic_a2.dataset_dir, split="train")
 
-    selected = inspect._selected_episode_ids(args, proxy_a2.episode_ids)
-    record = inspect._plot_record(proxy_a2, selected)
+    selected = inspect._selected_episode_ids(args, synthetic_a2.episode_ids)
+    record = inspect._plot_record(synthetic_a2, selected)
 
     assert selected == splits["train"]
     assert record.episode_id == ids[1]
 
-    sampler = ChunkSampler(proxy_a2, horizon=proxy_a2[0].n_steps + 5, episode_ids=[ids[0]])
-    sample = sampler.sample(proxy_a2[0].n_steps - 1)
+    sampler = ChunkSampler(synthetic_a2, horizon=synthetic_a2[0].n_steps + 5, episode_ids=[ids[0]])
+    sample = sampler.sample(synthetic_a2[0].n_steps - 1)
     batch = {
         "actions": sample.actions.reshape(1, *sample.actions.shape),
         "is_pad": sample.is_pad.reshape(1, *sample.is_pad.shape),
     }
     valid = inspect._valid_batch_actions(batch)
-    assert valid.shape == (1, proxy_a2.action_dim)
-    np.testing.assert_array_equal(valid[0], proxy_a2[0].actions[-1])
+    assert valid.shape == (1, synthetic_a2.action_dim)
+    np.testing.assert_array_equal(valid[0], synthetic_a2[0].actions[-1])
 
 
 # ── chunk sampling + batching ─────────────────────────────────────────────────
 
 
-def test_chunk_sampler_windows_and_pads(proxy_a2) -> None:
+def test_chunk_sampler_windows_and_pads(synthetic_a2) -> None:
     horizon = 10
-    sampler = ChunkSampler(proxy_a2, horizon=horizon)
-    assert len(sampler) == sum(r.n_steps for r in proxy_a2.records)
+    sampler = ChunkSampler(synthetic_a2, horizon=horizon)
+    assert len(sampler) == sum(r.n_steps for r in synthetic_a2.records)
     assert sampler.obs_dim == 9 and sampler.action_dim == EE_DELTA_DIM
 
-    record = proxy_a2[0]
+    record = synthetic_a2[0]
     mid = sampler.sample(5)
     assert mid.episode_id == record.episode_id and mid.t_index == 5
     np.testing.assert_array_equal(mid.actions, record.actions[5 : 5 + horizon])
@@ -579,16 +581,16 @@ def test_chunk_sampler_windows_and_pads(proxy_a2) -> None:
     assert (last.actions[1:] == 0.0).all()
 
 
-def test_chunk_sampler_respects_split_restriction(proxy_a2) -> None:
-    chosen = proxy_a2.episode_ids[:2]
-    sampler = ChunkSampler(proxy_a2, horizon=4, episode_ids=chosen)
-    assert len(sampler) == sum(proxy_a2.by_id(e).n_steps for e in chosen)
+def test_chunk_sampler_respects_split_restriction(synthetic_a2) -> None:
+    chosen = synthetic_a2.episode_ids[:2]
+    sampler = ChunkSampler(synthetic_a2, horizon=4, episode_ids=chosen)
+    assert len(sampler) == sum(synthetic_a2.by_id(e).n_steps for e in chosen)
     seen = {sampler.sample(i).episode_id for i in range(len(sampler))}
     assert seen == set(chosen)
 
 
-def test_batch_iterator_is_seeded_and_shaped(proxy_a2) -> None:
-    sampler = ChunkSampler(proxy_a2, horizon=8)
+def test_batch_iterator_is_seeded_and_shaped(synthetic_a2) -> None:
+    sampler = ChunkSampler(synthetic_a2, horizon=8)
     iterator = BatchIterator(sampler, batch_size=16, seed=3)
     first_pass = list(iterator)
     second_pass = list(BatchIterator(sampler, batch_size=16, seed=3))

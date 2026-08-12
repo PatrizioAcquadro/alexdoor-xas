@@ -61,7 +61,7 @@ def _manifest():
     }
 
 
-def test_tool_frame_uses_exact_union_support_not_v1_sphere() -> None:
+def test_tool_frame_uses_exact_collision_union_support() -> None:
     tool = derive_right_gripper_tool_frame(_manifest(), (1.0, 0.0, 0.0))
 
     assert tool.parent_link == "RIGHT_GRIPPER_Z_LINK"

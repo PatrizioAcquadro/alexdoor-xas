@@ -56,8 +56,8 @@ OBS_PRESETS: dict[str, tuple[str, ...]] = {
         "door_angular_velocity_rad_s",
         CONTACT_FLAG_KEY,
     ),
-    # Force-sensing (phase2.v1 / Alex) episodes only: core + full joint state +
-    # contact force. 2J + 11 dims (69 for the 29-joint Alex).
+    # Force-sensing Alex V2 episodes only: core + full joint state + contact
+    # force. 2J + 11 dims (69 for the 29-joint Alex V2 model).
     "alex_full": (
         "ee_pos_w",
         "ee_quat_w_xyzw",

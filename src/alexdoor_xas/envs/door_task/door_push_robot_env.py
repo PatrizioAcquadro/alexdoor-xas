@@ -328,7 +328,7 @@ class DoorPushRobotEnv(DirectRLEnv):
         """
         return self._last_settle_report
 
-    # -- Phase 2.5 accessors (force contact + joint proprio) ----------------------
+    # -- Alex V2 accessors (force contact + joint proprio) -------------------------
 
     def contact_force_w(self) -> torch.Tensor:
         """Gripper<->door contact force (N), world frame, shape ``(num_envs, 3)``.

@@ -1,4 +1,4 @@
-"""Self-contained ACT checkpoint v2 with legacy Phase 3 loading."""
+"""Self-contained ACT checkpoint v2 loading and validation."""
 
 from __future__ import annotations
 
@@ -22,7 +22,6 @@ from alexdoor_xas.policies.common.checkpoint import (
 from alexdoor_xas.policies.common.runs import torch_save_atomic
 
 CHECKPOINT_FORMAT = "alexdoor_xas.act.v2"
-LEGACY_CHECKPOINT_FORMAT = "alexdoor_xas.act.v1"
 
 
 @dataclass(frozen=True)
@@ -87,25 +86,20 @@ def save_checkpoint(
 
 
 def load_checkpoint(path: str | Path, map_location: str = "cpu") -> LoadedCheckpoint:
-    """Load v2 or a legacy v1 checkpoint without consulting the live dataset."""
+    """Load a v2 checkpoint without consulting the live dataset."""
 
     payload = torch.load(Path(path), map_location=map_location, weights_only=True)
     if not isinstance(payload, dict):
         raise ValueError(f"checkpoint {path} must contain a mapping")
     checkpoint_format = payload.get("format")
-    if checkpoint_format not in {CHECKPOINT_FORMAT, LEGACY_CHECKPOINT_FORMAT}:
+    if checkpoint_format != CHECKPOINT_FORMAT:
         raise ValueError(f"unsupported checkpoint format {checkpoint_format!r} in {path}")
     try:
         obs_dim = int(payload["obs_dim"])
         action_dim = int(payload["action_dim"])
         model_cfg = ActModelCfg(**payload["model_cfg"])
         state_dict = payload["state_dict"]
-        source_config = (
-            payload.get("config") if checkpoint_format == LEGACY_CHECKPOINT_FORMAT else None
-        )
-        dataset = dataset_descriptor(
-            source_config if isinstance(source_config, dict) else {"dataset": payload["dataset"]}
-        )
+        dataset = dataset_descriptor({"dataset": payload["dataset"]})
         stats = stats_from_payload(payload["norm_stats"])
         robot_asset = robot_asset_from_payload(payload.get("robot_asset"))
     except (KeyError, TypeError, ValueError) as error:
@@ -136,7 +130,6 @@ def load_checkpoint(path: str | Path, map_location: str = "cpu") -> LoadedCheckp
 
 __all__ = [
     "CHECKPOINT_FORMAT",
-    "LEGACY_CHECKPOINT_FORMAT",
     "LoadedCheckpoint",
     "load_checkpoint",
     "save_checkpoint",

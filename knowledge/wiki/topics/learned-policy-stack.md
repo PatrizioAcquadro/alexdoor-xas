@@ -26,7 +26,7 @@ Each training run freezes the canonical 36-rollout D0-D4 protocol, thresholds, 2
 
 An exact protocol match may publish the first closed-loop result into the source training run. Any change to poses, seeds, randomization, thresholds, force limits, horizon, control settings, or policy execution creates a timestamped sibling evaluation run with `run_type: evaluation`, `source_run_id`, and `source_checkpoint`; the checkpoint is not copied and the source run is not modified. `traces/` is retained only for unsuccessful rollouts, force-limit exceedances, or explicitly selected keys, and `media/` only when explicitly requested.
 
-Legacy Phase 3 v1 inference checkpoints remain loadable without rewriting. `scripts/verify_policy_rollout.py` remains the compact A2/A3 runtime gate and writes temporary evidence under `~/.cache/alexdoor-xas/verification/`.
+ACT and Diffusion accept only self-contained checkpoint v2 files whose robot-asset identity exactly matches the active Alex V2 runtime. Older or unfingerprinted checkpoint formats and cross-model transfer evaluation are unsupported. `scripts/verify_policy_rollout.py` remains the compact A2/A3 runtime gate and writes temporary evidence under `~/.cache/alexdoor-xas/verification/`.
 
 ## Limits
 
@@ -37,7 +37,8 @@ Legacy Phase 3 v1 inference checkpoints remain loadable without rewriting. `scri
 
 ## Version Notes
 
+- 2026-08-12 — Removed pre-v2 checkpoint loading and cross-model transfer; runtime evaluation now requires an exact Alex V2 robot-asset identity match.
 - 2026-08-12 — Replaced repository-owned W&B configuration, wrappers, artifact gates, and simulated tests with direct optional SDK initialization and aggregate logging.
 - 2026-08-12 — Added exclusive timestamped training runs, full resume state, compact training/open-loop artifacts, frozen multi-pose evaluation, protocol-match routing, factual closed-loop metrics, and selective optional artifacts.
 - 2026-08-12 — Unified ACT and Diffusion rollout verification and moved deterministic training gates into pytest.
-- 2026-08-11 — Introduced compact checkpoint v2 and dataset-independent evaluation while retaining read compatibility with Phase 3 v1 files.
+- 2026-08-11 — Introduced compact checkpoint v2 and dataset-independent evaluation.

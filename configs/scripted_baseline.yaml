@@ -15,7 +15,6 @@ controller:
   overrides:
     panel_width_m: null
     panel_thickness_m: null
-    ee_radius_m: null
     push_radius_frac: null
     push_height_m: null
     approach_standoff_m: null

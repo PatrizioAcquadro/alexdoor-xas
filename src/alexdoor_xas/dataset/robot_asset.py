@@ -18,9 +18,9 @@ from alexdoor_xas.assets.alex_v2_contract import (
 def dataset_robot_asset_payload(episodes: Iterable[Any]) -> dict[str, Any] | None:
     """Validate episode provenance and build the dataset-level payload.
 
-    A V2 export must carry one identical reference on every episode and the
+    An Alex V2 export must carry one identical reference on every episode and the
     complete generated manifest in ``episode.extras['robot_asset_manifest']``.
-    Existing V1 exports remain valid with no robot-asset payload.
+    Synthetic non-Alex test exports may omit the robot-asset payload.
     """
     values = list(episodes)
     if not values:

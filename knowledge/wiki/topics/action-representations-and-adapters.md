@@ -35,8 +35,12 @@ checks orthonormality but not determinant +1, so a reflected orthonormal matrix
 is an acknowledged unresolved validation gap.
 
 `src/alexdoor_xas/adapters/a4.py` validates an intent chunk and executes guarded
-approach/contact/push stages through A3 and A2. Stalls and stage timeouts reject
-the chunk. The internal `_run_stage` helper currently ignores
+approach/contact/push stages through A3 and A2. Every A4 adapter requires an
+explicit configuration; `alex_v2_a4_cfg` derives its stage standoffs and
+clearances from the validated Alex V2 door calibration. Contact targets use the
+collision-derived tool point against the physical panel thickness, without a
+synthetic end-effector radius. Stalls and stage timeouts reject the chunk. The
+internal `_run_stage` helper currently ignores
 terminated/truncated values returned by the environment-step callback; the
 approved quality roadmap identifies this as unresolved.
 
@@ -85,6 +89,7 @@ carefully than independently generating one dataset per space; see
 
 ## Version Notes
 
+- 2026-08-12 — Bound A4 execution to validated Alex V2 calibration and replaced synthetic end-effector-radius contact geometry with the collision-derived tool point and physical panel thickness.
 - 2026-07-03 — Canonical A1–A4 tags, matched exports, and scripted A3/A4 use
   were established.
 - 2026-07-05 onward — Explicit adapters and learned rollouts made action

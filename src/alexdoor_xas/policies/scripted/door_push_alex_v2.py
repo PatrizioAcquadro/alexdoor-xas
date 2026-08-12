@@ -12,9 +12,6 @@ def alex_v2_push_cfg(calibration: AlexV2DoorCalibration) -> DoorPushControllerCf
     values = calibration.controller
     return replace(
         DoorPushControllerCfg(),
-        # The env reports the collision-support tool point, not the gripper-link
-        # origin, so no synthetic sphere radius is added to door standoffs.
-        ee_radius_m=0.0,
         push_radius_frac=float(values["push_radius_frac"]),
         push_height_m=float(values["push_height_m"]),
         approach_standoff_m=float(values["approach_standoff_m"]),

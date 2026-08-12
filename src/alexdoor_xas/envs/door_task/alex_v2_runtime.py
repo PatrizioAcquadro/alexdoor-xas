@@ -1,8 +1,8 @@
 """Pure helpers that bind validated Alex V2 calibration to runtime config.
 
-This module deliberately imports neither Isaac Lab nor the V1 Alex config.  It
-is therefore usable in pure tests while the executor calls it after the Isaac
-application has loaded the dedicated V2 articulation configuration.
+This module deliberately does not import Isaac Lab. It is therefore usable in
+pure tests while the executor calls it after the Isaac application has loaded
+the dedicated Alex V2 articulation configuration.
 """
 
 from __future__ import annotations

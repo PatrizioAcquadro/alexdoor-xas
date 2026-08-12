@@ -16,7 +16,6 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from alexdoor_xas import paths
 from alexdoor_xas.assets.alex_v2_contract import (
     RobotAssetRef,
     assert_checkpoint_runtime_compatible,
@@ -66,8 +65,7 @@ class ActPolicy:
         path: str | Path,
         device: str = "cpu",
         *,
-        runtime_asset: RobotAssetRef | None = None,
-        allow_cross_model_evaluation: bool = False,
+        runtime_asset: RobotAssetRef,
     ) -> ActPolicy:
         loaded = load_checkpoint(path, map_location=device)
         policy = cls(loaded.model, loaded.stats, device=device)
@@ -75,16 +73,10 @@ class ActPolicy:
         policy.checkpoint_meta = loaded.meta
         policy.checkpoint_format = loaded.checkpoint_format
         policy.robot_asset = loaded.robot_asset
-        dataset = loaded.config.get("dataset", {})
-        checkpoint_is_v2 = isinstance(dataset, dict) and dataset.get("task") == paths.ALEX_V2_TASK
-        if checkpoint_is_v2 and runtime_asset is None:
-            raise ValueError("Alex V2 policy loading requires a runtime robot asset")
-        if runtime_asset is not None:
-            policy.robot_compatibility_label = assert_checkpoint_runtime_compatible(
-                loaded.robot_asset,
-                runtime_asset,
-                allow_cross_model_evaluation=allow_cross_model_evaluation,
-            )
+        policy.robot_compatibility_label = assert_checkpoint_runtime_compatible(
+            loaded.robot_asset,
+            runtime_asset,
+        )
         return policy
 
     @property

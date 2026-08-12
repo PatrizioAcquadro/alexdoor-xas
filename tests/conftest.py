@@ -143,7 +143,7 @@ class FakeDoorPushEnv:
 
 
 class FakeForceDoorPushEnv(FakeDoorPushEnv):
-    """Force-sensing fake env (the Phase 2.5 Alex-env accessor surface).
+    """Force-sensing synthetic test double for the Alex V2 accessor surface.
 
     Adds the optional duck-typed accessors the data engine probes via
     ``hasattr`` (``contact_sensed`` / ``contact_force_w`` / ``robot_joint_state``
@@ -208,7 +208,7 @@ class FakeForceDoorPushEnv(FakeDoorPushEnv):
         ee_door = self.world.door_frame.point_from_world(self.world.ee_pos_w)
         ee_panel = rot_z(self.world.angle).T @ ee_door
         depth = cfg.surface_x_m(cfg.contact_eps_m) - float(ee_panel[0])
-        within = -cfg.ee_radius_m <= ee_panel[1] <= cfg.panel_width_m + cfg.ee_radius_m
+        within = 0.0 <= ee_panel[1] <= cfg.panel_width_m
         if depth <= 0.0 or not within:
             return 0.0
         return self.FORCE_GAIN_N_PER_M * depth

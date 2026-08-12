@@ -146,7 +146,7 @@ def validate_episode(
 
     _check_termination_data(record, result, label, legacy=record.schema_version != "phase2.v2")
 
-    # Force-sensing episodes get the full Phase 2.5 rollout sanity checks.
+    # Alex V2 force-sensing episodes get the full rollout sanity checks.
     if "joint_pos" in record.obs:
         sanity = check_alex_episode(record.buffer)
         result.errors.extend(sanity.errors)

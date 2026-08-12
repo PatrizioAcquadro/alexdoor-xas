@@ -120,7 +120,7 @@ class StepContext:
     Mirrors the scripted controller's :class:`DoorPushObservation` but stays
     adapter-owned (adapters never import policies). ``joint_state`` /
     ``joint_limits`` carry the env's optional proprio accessors when available
-    (Alex); EE orientation is captured even though v1 adapters do not command
+    (Alex); EE orientation is captured even though the current adapters do not command
     it directly; contact/force fields are ``None`` when sensing is unavailable.
     """
 

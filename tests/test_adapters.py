@@ -24,6 +24,7 @@ from alexdoor_xas.adapters import (
     RobotLimitsCfg,
     StepContext,
     WorkspaceSphere,
+    alex_v2_a4_cfg,
     alex_v2_limits,
     limits_for_robot,
     replay_source,
@@ -34,6 +35,8 @@ from alexdoor_xas.data_engine import plan_episodes, run_episode
 from alexdoor_xas.policies.scripted import DoorPushController, DoorPushControllerCfg
 from alexdoor_xas.policies.scripted.door_push import PHASE_ORDER, DoorPushPhase
 from conftest import TEST_ROBOT_LIMITS, FakeDoorPushEnv, FakeForceDoorPushEnv, make_test_engine_cfg
+
+FACE_X_M = DoorPanelGeometry().surface_x_m(0.0)
 
 
 def _ctx(
@@ -69,7 +72,7 @@ def _v2_limits(center=(1.0, 2.0, 3.0), reach_shell=(0.2, 0.8)):
 
 def _chunk(
     phase: str = "push",
-    target=(0.086, 0.55, -0.30),
+    target=(FACE_X_M, 0.55, -0.30),
     hinge_delta: float = 0.0,
     duration: int = 100,
 ) -> ObjectCentricChunk:
@@ -416,7 +419,6 @@ def test_panel_geometry_pins_controller_defaults():
     cfg = DoorPushControllerCfg()
     assert geo.panel_width_m == cfg.panel_width_m
     assert geo.panel_thickness_m == cfg.panel_thickness_m
-    assert geo.ee_radius_m == cfg.ee_radius_m
     assert geo.contact_eps_m == cfg.contact_eps_m
     assert geo.surface_x_m(0.01) == cfg.surface_x_m(0.01)
 
@@ -443,19 +445,43 @@ def test_a4_phase_contract_is_shared_across_actions_dataset_and_controller():
 # -- A4 validation ----------------------------------------------------------------
 
 
+def _a4_cfg(**overrides) -> A4AdapterCfg:
+    values = {
+        "approach_standoff_m": 0.12,
+        "align_standoff_m": 0.10,
+        "pre_contact_clearance_m": 0.010,
+        "contact_clearance_m": -0.002,
+        "release_standoff_m": 0.30,
+    }
+    values.update(overrides)
+    return A4AdapterCfg(**values)
+
+
 def _a4(limits=TEST_ROBOT_LIMITS, cfg: A4AdapterCfg | None = None) -> A4Adapter:
-    return A4Adapter(A3Adapter(A2Adapter(limits)), cfg=cfg)
+    return A4Adapter(A3Adapter(A2Adapter(limits)), cfg=cfg or _a4_cfg())
+
+
+def test_a4_cfg_is_sourced_from_alex_v2_calibration() -> None:
+    calibration = SimpleNamespace(controller={
+        "approach_standoff_m": 0.12,
+        "align_standoff_m": 0.10,
+        "pre_contact_clearance_m": 0.010,
+        "contact_clearance_m": -0.002,
+        "release_standoff_m": 0.30,
+    })
+
+    assert alex_v2_a4_cfg(calibration) == _a4_cfg()
 
 
 @pytest.mark.parametrize(
     ("chunk", "reason_match"),
     [
         (_chunk(phase="moonwalk"), "unknown A4 phase"),
-        (_chunk(target=(0.086, np.nan, -0.3)), "non-finite"),
+        (_chunk(target=(FACE_X_M, np.nan, -0.3)), "non-finite"),
         (_chunk(duration=0), "duration_ticks"),
         (_chunk(hinge_delta=-0.3), "pulling"),
-        (_chunk(target=(0.086, 1.2, -0.3)), "off the"),
-        (_chunk(target=(0.086, 0.70, 0.05)), "handle band"),
+        (_chunk(target=(FACE_X_M, 1.2, -0.3)), "off the"),
+        (_chunk(target=(FACE_X_M, 0.70, 0.05)), "handle band"),
     ],
 )
 def test_a4_rejects_invalid_chunks(chunk, reason_match):
@@ -472,7 +498,7 @@ def test_a4_rejects_non_push_phase_hinge_motion():
 
 
 def test_a4_rejects_malformed_contact_target_shape():
-    target = (0.086, 0.55)
+    target = (FACE_X_M, 0.55)
     _, decision = _a4().validate_chunk(_chunk(target=target), entry_angle_rad=0.0)
     assert decision.status is AdapterStatus.REJECTED
     assert decision.checks["target_shape"] is False
@@ -482,7 +508,7 @@ def test_a4_rejects_malformed_contact_target_shape():
 
 
 def test_a4_corrects_slightly_off_panel_target():
-    chunk = _chunk(target=(0.086, 0.84, -0.3))  # 0.01 m past the panel edge
+    chunk = _chunk(target=(FACE_X_M, 0.84, -0.3))  # 0.01 m past the panel edge
     fixed, decision = _a4().validate_chunk(chunk, entry_angle_rad=0.0)
     assert decision.status is AdapterStatus.CORRECTED
     assert "nudged" in decision.reason
@@ -514,7 +540,7 @@ def test_a4_rejects_unreachable_target():
 
 
 def _canonical_chunks(push_delta: float = math.radians(50.0)):
-    target = (0.086, 0.55, -0.30)
+    target = (FACE_X_M, 0.55, -0.30)
     return [
         _chunk(phase="approach", target=target, duration=120),
         _chunk(phase="align", target=target, duration=60),
@@ -577,7 +603,7 @@ class _NeverSensesContactEnv(FakeDoorPushEnv):
 def test_a4_reports_missed_contact():
     env = _NeverSensesContactEnv()
     env.reset(seed=0)
-    cfg = A4AdapterCfg(min_stage_budget_ticks=200)
+    cfg = _a4_cfg(min_stage_budget_ticks=200)
     result = _a4(cfg=cfg).execute(env, _chunk(phase="contact", duration=1))
     assert not result.completed
     assert result.failure == "missed_contact"
@@ -597,7 +623,7 @@ class _StuckDoorEnv(FakeDoorPushEnv):
 def test_a4_reports_push_stall():
     env = _StuckDoorEnv()
     env.reset(seed=0)
-    cfg = A4AdapterCfg(push_stall_ticks=15, min_stage_budget_ticks=400)
+    cfg = _a4_cfg(push_stall_ticks=15, min_stage_budget_ticks=400)
     result = _a4(cfg=cfg).execute(env, _chunk(phase="push", hinge_delta=0.5, duration=100))
     assert not result.completed
     assert result.failure == "push_stalled"
@@ -617,7 +643,7 @@ def test_a4_reports_push_stall():
             "non-push phase cannot request hinge motion",
             0.5,
         ),
-        (_chunk(target=(0.086, 0.55)), "contact_target_panel", None),
+        (_chunk(target=(FACE_X_M, 0.55)), "contact_target_panel", None),
         (_chunk(hinge_delta="bad"), "non-numeric", 0.0),
     ],
     ids=("pull", "non-push-motion", "malformed-target", "non-numeric-delta"),

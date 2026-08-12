@@ -29,7 +29,7 @@ def test_action_space_tags_are_canonical() -> None:
 def test_object_centric_chunk_round_trips_through_dict() -> None:
     chunk = spaces.ObjectCentricChunk(
         phase="push",
-        contact_target_panel=(0.086, 0.664, 0.0),
+        contact_target_panel=(0.036, 0.664, 0.0),
         motion_hinge_delta_rad=math.radians(50.0),
         duration_ticks=120,
     )

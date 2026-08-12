@@ -19,11 +19,11 @@ from alexdoor_xas.adapters import (  # noqa: E402
     A2Adapter,
     rollout_chunks,
 )
+from alexdoor_xas.assets.alex_v2_contract import RobotAssetRef  # noqa: E402
 from alexdoor_xas.dataset import DatasetNormStats, EpisodeRecord, NormStats  # noqa: E402
 from alexdoor_xas.policies.common.inspect import open_loop_report  # noqa: E402
 from alexdoor_xas.policies.diffusion.checkpoint import (  # noqa: E402
     CHECKPOINT_FORMAT,
-    LEGACY_CHECKPOINT_FORMAT,
     load_checkpoint,
     save_checkpoint,
 )
@@ -58,6 +58,7 @@ from alexdoor_xas.policies.diffusion.train import (  # noqa: E402
 from conftest import TEST_ROBOT_LIMITS, FakeDoorPushEnv  # noqa: E402
 
 ACTION_DIM = 6
+TEST_ROBOT_ASSET = RobotAssetRef("alex_v2_test", "a" * 64)
 OBS_DIM = 9
 
 TINY_MODEL_CFG = DiffusionModelCfg(
@@ -585,7 +586,7 @@ def test_checkpoint_rejects_unknown_format(tmp_path) -> None:
         load_checkpoint(path)
 
 
-def test_checkpoint_loads_legacy_v1_and_ignores_administrative_fields(tmp_path) -> None:
+def test_checkpoint_rejects_pre_v2_format(tmp_path) -> None:
     config = {
         "dataset": {
             "task": "door_push",
@@ -598,18 +599,12 @@ def test_checkpoint_loads_legacy_v1_and_ignores_administrative_fields(tmp_path) 
     model = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=0)
     path = save_checkpoint(tmp_path / "v2.pt", model, config, _tiny_stats())
     payload = torch.load(path, weights_only=True)
-    payload["format"] = LEGACY_CHECKPOINT_FORMAT
-    payload["config"] = {**config, "train": {"seed": 3}}
-    payload["norm_stats"]["dataset_fingerprint"] = "legacy-field"
-    payload["provenance"] = {"source_git_commit": "legacy-field"}
-    payload.pop("dataset")
-    legacy_path = tmp_path / "v1.pt"
-    torch.save(payload, legacy_path)
+    payload["format"] = CHECKPOINT_FORMAT.removesuffix(".v2") + ".v1"
+    obsolete_path = tmp_path / "obsolete.pt"
+    torch.save(payload, obsolete_path)
 
-    loaded = load_checkpoint(legacy_path)
-
-    assert loaded.checkpoint_format == LEGACY_CHECKPOINT_FORMAT
-    assert loaded.config == config
+    with pytest.raises(ValueError, match="unsupported checkpoint format"):
+        load_checkpoint(obsolete_path)
 
 
 # --- policy wrapper + chunk source (closed-loop smoke, no Isaac) -------------------
@@ -716,24 +711,45 @@ def test_diffusion_policy_from_checkpoint(tmp_path) -> None:
     stats = _tiny_stats()
     config = {
         "dataset": {
-            "task": "door_push",
+            "task": "door_push_alex_v2",
             "space": "A2_ee_delta",
-            "version": "v0",
+            "version": "v2_pose",
             "view_id": None,
             "obs_preset": "core",
         }
     }
-    path = save_checkpoint(tmp_path / "best.pt", model, config, stats, meta={"run_id": "x"})
+    path = save_checkpoint(
+        tmp_path / "best.pt",
+        model,
+        config,
+        stats,
+        meta={"run_id": "x"},
+        robot_asset=TEST_ROBOT_ASSET,
+    )
 
-    policy = DiffusionPolicy.from_checkpoint(path, sampler="ddim", num_inference_steps=5)
+    policy = DiffusionPolicy.from_checkpoint(
+        path,
+        sampler="ddim",
+        num_inference_steps=5,
+        runtime_asset=TEST_ROBOT_ASSET,
+    )
 
     assert policy.action_space == "A2_ee_delta"
     assert policy.obs_preset == "core"
     assert policy.chunk_size == TINY_MODEL_CFG.horizon
     assert policy.checkpoint_meta is not None and policy.checkpoint_meta["run_id"] == "x"
+    assert policy.robot_compatibility_label == "v2_native"
     policy.seed(0)
     chunk = policy.predict(np.zeros(OBS_DIM))
     assert chunk.shape == (TINY_MODEL_CFG.horizon, ACTION_DIM)
+
+    with pytest.raises(ValueError, match="incompatible"):
+        DiffusionPolicy.from_checkpoint(
+            path,
+            sampler="ddim",
+            num_inference_steps=5,
+            runtime_asset=RobotAssetRef("different_alex_v2", "b" * 64),
+        )
 
 
 def test_diffusion_chunk_source_receding_horizon_drives_a2_rollout() -> None:

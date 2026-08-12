@@ -339,7 +339,7 @@ def test_v2_dataset_rejects_missing_or_mixed_episode_provenance() -> None:
 
 
 def test_dataset_payload_rejects_mixed_tasks_even_if_v2_is_not_first() -> None:
-    proxy = SimpleNamespace(
+    other_task = SimpleNamespace(
         meta=SimpleNamespace(
             task="door_push",
             robot_asset_id="",
@@ -356,18 +356,17 @@ def test_dataset_payload_rejects_mixed_tasks_even_if_v2_is_not_first() -> None:
         extras={},
     )
     with pytest.raises(AlexV2ContractError, match="cannot mix episode tasks"):
-        dataset_robot_asset_payload([proxy, v2])
+        dataset_robot_asset_payload([other_task, v2])
 
 
-def test_checkpoint_runtime_gate_fails_closed_and_labels_explicit_transfer() -> None:
+def test_checkpoint_runtime_gate_requires_exact_alex_v2_identity() -> None:
     runtime = validate_alex_v2_manifest(_manifest())
     assert assert_checkpoint_runtime_compatible(runtime, runtime) == "v2_native"
-    with pytest.raises(AlexV2ContractError, match="explicit cross-model evaluation flag"):
+    with pytest.raises(AlexV2ContractError, match="unfingerprinted"):
         assert_checkpoint_runtime_compatible(None, runtime)
-    assert (
-        assert_checkpoint_runtime_compatible(None, runtime, allow_cross_model_evaluation=True)
-        == "v1_to_v2_transfer"
-    )
+    other = RobotAssetRef("other", "b" * 64)
+    with pytest.raises(AlexV2ContractError, match="checkpoint asset 'other'"):
+        assert_checkpoint_runtime_compatible(other, runtime)
 
 
 def test_episode_meta_is_backward_compatible_but_can_carry_asset_identity() -> None:

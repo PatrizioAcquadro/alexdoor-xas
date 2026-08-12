@@ -22,7 +22,8 @@ evaluation.
 
 #### Tests
 
-Current ACT/Diffusion checkpoint tests retain legacy v1 load compatibility.
+Current ACT/Diffusion checkpoint tests validate checkpoint v2 loading and reject
+older checkpoint formats.
 
 ## Version Notes
 

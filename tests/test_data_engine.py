@@ -145,7 +145,7 @@ def test_export_datasets_produces_a2_a3_a4(tmp_path) -> None:
 
 
 def test_force_sensing_env_records_sensed_contact_and_joint_state() -> None:
-    """The engine picks up the Phase 2.5 accessors via hasattr and records the
+    """The engine picks up the Alex V2 accessors via hasattr and records the
     force-sensed contact fields, joint proprio, and joint-name extras."""
     env = FakeForceDoorPushEnv()
     episode = run_episode(env, plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
@@ -326,7 +326,7 @@ def test_door_pose_obs_terms_recorded_and_round_trip(tmp_path) -> None:
 
     step = episode.steps[0]
     assert step.object_state["door_yaw_rad"] == pytest.approx(yaw)
-    # No robot_base_pos_w on the proxy fake -> relative to the world origin.
+    # No robot_base_pos_w on the synthetic test double -> world-relative.
     assert step.object_state["door_rel_pos_x"] == pytest.approx(origin[0])
     assert step.object_state["door_rel_pos_y"] == pytest.approx(origin[1])
     assert step.object_state["door_rel_pos_z"] == pytest.approx(origin[2])

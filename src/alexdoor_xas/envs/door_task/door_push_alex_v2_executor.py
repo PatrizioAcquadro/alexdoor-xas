@@ -38,7 +38,7 @@ class DoorPushAlexV2Executor(DoorPushRobotEnv):
     The inherited scene/reset/observation surface remains useful, while robot
     configuration, end-effector pose, differential IK Jacobian, and contact
     force semantics are supplied here. A dedicated V2 config is injected before
-    ``super()``, so no legacy asset or actuator fallback is possible.
+    ``super()``, so no alternate asset or actuator fallback is possible.
     """
 
     cfg: DoorPushAlexV2EnvCfg

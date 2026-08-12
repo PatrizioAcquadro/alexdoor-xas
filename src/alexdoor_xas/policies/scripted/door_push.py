@@ -58,15 +58,14 @@ class DoorPushControllerCfg:
 
     panel_width_m: float = 0.83
     panel_thickness_m: float = 0.036
-    ee_radius_m: float = 0.05
 
     push_radius_frac: float = 0.8
     """Push point distance from the hinge, as a fraction of the panel width."""
     push_height_m: float = -0.30
     """Push point height in the door frame (0 = hinge-origin height, i.e. panel
-    mid-height). Kept below -0.15 so the sphere pushes the flat panel face and
-    clears the handle, which protrudes from the push face around door-frame
-    y in [0.63, 0.80], z in [0.0, 0.09]."""
+    mid-height). Kept below -0.15 so the tool point stays on the flat panel
+    face and clears the handle, which protrudes around door-frame y in
+    [0.63, 0.80], z in [0.0, 0.09]."""
 
     approach_standoff_m: float = 0.35
     align_standoff_m: float = 0.12
@@ -79,7 +78,7 @@ class DoorPushControllerCfg:
     align_tol_m: float = 0.010
     pre_contact_tol_m: float = 0.005
     contact_eps_m: float = 0.002
-    """Inferred contact: EE surface within this distance of the panel face."""
+    """Inferred contact: tool point within this distance of the panel face."""
 
     target_open_angle_rad: float = math.radians(50.0)
     hold_ticks: int = 30
@@ -116,8 +115,8 @@ class DoorPushControllerCfg:
         return self.push_radius_frac * self.panel_width_m
 
     def surface_x_m(self, clearance_m: float) -> float:
-        """Panel-frame x of the EE center at ``clearance_m`` off the +X face."""
-        return self.panel_thickness_m + self.ee_radius_m + clearance_m
+        """Panel-frame x of the Alex V2 tool point off the +X face."""
+        return self.panel_thickness_m + clearance_m
 
 
 @dataclass(frozen=True)
@@ -181,18 +180,6 @@ class VariationBounds:
     push_height_m_range: tuple[float, float] = (-0.45, -0.15)
 
 
-ALEX_VARIATION_BOUNDS = VariationBounds(
-    start_offset_low=(-0.04, -0.06, -0.05),
-    start_offset_high=(0.06, 0.06, 0.05),
-    push_radius_frac_range=(0.32, 0.40),
-    push_height_m_range=(0.05, 0.18),
-)
-"""Bounds inside the fixed-base Alex right arm's reachable push band (see
-:func:`alex_fixedbase_push_cfg`). The height cap matters: above ~0.20 m the
-approach waypoint (standoff 0.12 m off the face) folds to within ~0.18 m of the
-shoulder, which the arm cannot reach (measured approach-timeout at 0.218 m)."""
-
-
 def sample_variation(
     rng: np.random.Generator, bounds: VariationBounds | None = None
 ) -> DoorPushVariation:
@@ -208,31 +195,6 @@ def sample_variation(
         push_radius_frac=float(rng.uniform(*bounds.push_radius_frac_range)),
         push_height_m=float(rng.uniform(*bounds.push_height_m_range)),
     )
-
-
-def alex_fixedbase_push_cfg() -> DoorPushControllerCfg:
-    """Controller preset for the fixed-base Alex env (Phase 2.5).
-
-    Same FSM, retuned geometry: the fixed-base right arm (measured ~0.58 m
-    reach from the SHOULDER_Z link at world (-0.43, -0.10, 1.39)) cannot reach
-    the earlier task push point (80% width, -0.30 m). Pushing at 35% width and
-    +0.15 m keeps the whole 0..50 deg push arc 0.25-0.51 m from the shoulder,
-    and the shorter standoffs keep the approach waypoints in front of the
-    chest. The push corridor (door-frame y ~ 0.29) clears the handle band
-    (y in [0.63, 0.80]) by a wide margin at any height.
-    """
-    return replace(
-        DoorPushControllerCfg(),
-        push_radius_frac=0.35,
-        push_height_m=0.15,
-        approach_standoff_m=0.12,
-        align_standoff_m=0.06,
-        # The PD-tracked arm reaches waypoints ~2-3x slower than the
-        # Give the short positioning phases more headroom.
-        pre_contact_max_ticks=150,
-        contact_max_ticks=150,
-    )
-
 
 @dataclass
 class _FsmState:
@@ -382,8 +344,8 @@ class DoorPushController:
         ee_panel = rot_z(hinge_angle_rad).T @ ee_door
         on_face = ee_panel[0] <= cfg.surface_x_m(cfg.contact_eps_m)
         within_panel = (
-            -cfg.ee_radius_m <= ee_panel[1] <= cfg.panel_width_m + cfg.ee_radius_m
-            and ee_panel[0] >= -cfg.ee_radius_m
+            0.0 <= ee_panel[1] <= cfg.panel_width_m
+            and ee_panel[0] >= 0.0
         )
         return bool(on_face and within_panel)
 
@@ -429,7 +391,6 @@ class DoorPushController:
 
 
 __all__ = [
-    "ALEX_VARIATION_BOUNDS",
     "PHASE_ORDER",
     "DoorPushCommand",
     "DoorPushController",
@@ -438,6 +399,5 @@ __all__ = [
     "DoorPushPhase",
     "DoorPushVariation",
     "VariationBounds",
-    "alex_fixedbase_push_cfg",
     "sample_variation",
 ]

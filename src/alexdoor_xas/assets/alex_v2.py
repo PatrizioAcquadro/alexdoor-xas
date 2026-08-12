@@ -104,7 +104,7 @@ def load_alex_v2_articulation_cfg(
     """Return the dedicated V2 ``ArticulationCfg`` after ``AppLauncher``.
 
     Keeping the shared Isaac Lab configuration at the asset boundary prevents
-    a caller from substituting the V2 URDF into the legacy V1 actuators.
+    callers from substituting unvalidated asset or actuator definitions.
     """
     if fix_base is not True:
         raise ValueError("DoorManipulation's Alex V2 loader is fixed-base only")

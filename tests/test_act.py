@@ -11,10 +11,10 @@ import pytest
 import torch
 
 from alexdoor_xas.adapters import A2Adapter, rollout_chunks
+from alexdoor_xas.assets.alex_v2_contract import RobotAssetRef
 from alexdoor_xas.dataset import DatasetNormStats, EpisodeRecord, NormStats
 from alexdoor_xas.policies.act.checkpoint import (
     CHECKPOINT_FORMAT,
-    LEGACY_CHECKPOINT_FORMAT,
     load_checkpoint,
     save_checkpoint,
 )
@@ -48,6 +48,7 @@ TINY_MODEL_CFG = ActModelCfg(
 )
 OBS_DIM = 9
 ACTION_DIM = 6
+TEST_ROBOT_ASSET = RobotAssetRef("alex_v2_test", "a" * 64)
 
 
 def _tiny_model(seed: int = 0) -> ACTModel:
@@ -220,6 +221,34 @@ def test_checkpoint_round_trip_preserves_predictions_and_stats(tmp_path) -> None
     assert loaded.stats.train_episode_ids == stats.train_episode_ids
 
 
+def test_policy_checkpoint_requires_exact_alex_v2_asset(tmp_path) -> None:
+    config = {
+        "dataset": {
+            "task": "door_push_alex_v2",
+            "space": "A2_ee_delta",
+            "version": "v2_pose",
+            "view_id": None,
+            "obs_preset": "core",
+        }
+    }
+    path = save_checkpoint(
+        tmp_path / "best.pt",
+        _tiny_model(),
+        config,
+        _tiny_stats(),
+        robot_asset=TEST_ROBOT_ASSET,
+    )
+
+    policy = ActPolicy.from_checkpoint(path, runtime_asset=TEST_ROBOT_ASSET)
+    assert policy.robot_compatibility_label == "v2_native"
+
+    with pytest.raises(ValueError, match="incompatible"):
+        ActPolicy.from_checkpoint(
+            path,
+            runtime_asset=RobotAssetRef("different_alex_v2", "b" * 64),
+        )
+
+
 def test_checkpoint_creation_rejects_config_stats_preset_mismatch(tmp_path) -> None:
     config = {
         "dataset": {
@@ -241,7 +270,7 @@ def test_checkpoint_rejects_unknown_format(tmp_path) -> None:
         load_checkpoint(path)
 
 
-def test_checkpoint_loads_legacy_v1_and_ignores_administrative_fields(tmp_path) -> None:
+def test_checkpoint_rejects_pre_v2_format(tmp_path) -> None:
     config = {
         "dataset": {
             "task": "door_push",
@@ -253,18 +282,12 @@ def test_checkpoint_loads_legacy_v1_and_ignores_administrative_fields(tmp_path) 
     }
     path = save_checkpoint(tmp_path / "v2.pt", _tiny_model(), config, _tiny_stats())
     payload = torch.load(path, weights_only=True)
-    payload["format"] = LEGACY_CHECKPOINT_FORMAT
-    payload["config"] = {**config, "train": {"seed": 3}}
-    payload["norm_stats"]["dataset_fingerprint"] = "legacy-field"
-    payload["provenance"] = {"source_git_commit": "legacy-field"}
-    payload.pop("dataset")
-    legacy_path = tmp_path / "v1.pt"
-    torch.save(payload, legacy_path)
+    payload["format"] = CHECKPOINT_FORMAT.removesuffix(".v2") + ".v1"
+    obsolete_path = tmp_path / "obsolete.pt"
+    torch.save(payload, obsolete_path)
 
-    loaded = load_checkpoint(legacy_path)
-
-    assert loaded.checkpoint_format == LEGACY_CHECKPOINT_FORMAT
-    assert loaded.config == config
+    with pytest.raises(ValueError, match="unsupported checkpoint format"):
+        load_checkpoint(obsolete_path)
 
 
 # --- training loop -----------------------------------------------------------

@@ -244,25 +244,16 @@ def load_alex_v2_manifest(path: str | Path) -> tuple[dict[str, Any], RobotAssetR
 def assert_checkpoint_runtime_compatible(
     checkpoint_asset: RobotAssetRef | None,
     runtime_asset: RobotAssetRef,
-    *,
-    allow_cross_model_evaluation: bool = False,
 ) -> str:
-    """Fail closed on asset mismatch and return the required result label.
+    """Require an exact Alex V2 checkpoint/runtime asset match."""
 
-    Legacy checkpoints have no asset reference and are treated as V1.  They may
-    run against V2 only for an explicitly requested transfer evaluation; those
-    results receive a label that cannot be mistaken for V2-trained performance.
-    """
-    if checkpoint_asset == runtime_asset:
-        return "v2_native"
-    if not allow_cross_model_evaluation:
-        source = checkpoint_asset.asset_id if checkpoint_asset else "legacy_v1_unfingerprinted"
+    if checkpoint_asset != runtime_asset:
+        source = checkpoint_asset.asset_id if checkpoint_asset else "unfingerprinted"
         raise AlexV2ContractError(
             f"checkpoint asset {source!r} is incompatible with runtime asset "
-            f"{runtime_asset.asset_id!r}; pass the explicit cross-model evaluation flag "
-            "only when measuring V1-to-V2 transfer"
+            f"{runtime_asset.asset_id!r}"
         )
-    return "v1_to_v2_transfer" if checkpoint_asset is None else "cross_model_transfer"
+    return "v2_native"
 
 
 __all__ = [

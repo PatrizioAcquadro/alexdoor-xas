@@ -12,7 +12,7 @@ surface, so the layer is unit-testable and reusable by ACT / Diffusion Policy
 
 from .a2 import A2Adapter
 from .a3 import A3Adapter, validate_object_frame
-from .a4 import A4Adapter, A4AdapterCfg, A4ExecutionResult, StageResult
+from .a4 import A4Adapter, A4AdapterCfg, A4ExecutionResult, StageResult, alex_v2_a4_cfg
 from .base import AdapterDecision, AdapterLog, AdapterStatus, AdapterWarning, StepContext
 from .limits import (
     ALEX_V2_ROBOT_TAG,
@@ -57,6 +57,7 @@ __all__ = [
     "StageResult",
     "StepContext",
     "WorkspaceSphere",
+    "alex_v2_a4_cfg",
     "alex_v2_limits",
     "limits_for_robot",
     "validate_object_frame",

@@ -298,7 +298,7 @@ def test_scripted_cli_overrides_take_precedence_over_hydra() -> None:
 @pytest.mark.parametrize(
     "override, message",
     [
-        ("run.robot=proxy", "robot"),
+        ("run.robot=unsupported", "robot"),
         ("run.episodes=-1", "run.episodes"),
         ("run.randomized=-1", "run.randomized"),
         ("run.max_ticks=0", "run.max_ticks"),
