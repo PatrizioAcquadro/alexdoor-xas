@@ -207,7 +207,7 @@ def test_canonical_pose_registry_and_paths_are_exact() -> None:
 def test_outputs_root_has_only_canonical_top_level_entries() -> None:
     entries = {path.name for path in paths.OUTPUTS_DIR.iterdir()}
     assert {"README.md", "door_scene"} <= entries
-    assert entries <= {"README.md", "door_scene", "door_push_alex_v2"}
+    assert entries <= {"README.md", "door_scene", "door_push_alex_v2", "wandb"}
     learned = paths.OUTPUTS_DIR / paths.ALEX_V2_TASK
     if learned.exists():
         assert {path.name for path in learned.iterdir()} <= {"act", "diffusion"}

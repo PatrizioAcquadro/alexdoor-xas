@@ -10,11 +10,11 @@ Current as of 2026-08-12. Code and deterministic tests are the source of truth f
 - A2/A3/A4 adapters and simulator safety controls.
 - State-only ACT and Diffusion training with collision-safe UTC run IDs, immutable resolved configuration, atomic full-state resume checkpoints, compact histories, open-loop summaries, and self-contained best checkpoints.
 - Frozen 36-rollout D0-D4 evaluation with factual force/adapter/termination metrics, protocol-match routing, checkpoint-free sibling evaluation runs, and selective traces/media.
-- Optional W&B tracking and current verification/inspection entry points, with runtime artifacts under `~/.cache/alexdoor-xas/`.
+- Optional vanilla W&B metric tracking, disabled by default and stored under `outputs/wandb/` only when enabled.
 
 The only maintained execution path is Door + Alex V2 to `v2_pose` A1-A4, training, adapter-v1, and evaluation. The five verification gates are `verify_benchmark_scene.py`, `verify_scripted_baseline.py`, `verify_dataset_interface.py`, `verify_adapters.py`, and `verify_policy_rollout.py`.
 
-The active `configs/` surface is exactly `act.yaml`, `diffusion.yaml`, `scripted_baseline.yaml`, `wandb.yaml`, and `alex_v2_door.json`.
+The active `configs/` surface is exactly `act.yaml`, `diffusion.yaml`, `scripted_baseline.yaml`, and `alex_v2_door.json`.
 
 ## Completed scientific results
 
@@ -28,7 +28,7 @@ The canonical experiment pages preserve these conclusions. The former compact ev
 
 ## Output boundary
 
-`outputs/` contains only `README.md`, `door_scene/D0.usda`-`D4.usda`, and learned ACT/Diffusion runs under `door_push_alex_v2/{act,diffusion}/<run_id>/`. Reusable datasets remain in `datasets/`; verifier evidence, calibration probes, scripted staging, W&B state, arbitrary scenes, and inspection figures belong under `~/.cache/alexdoor-xas/`.
+`outputs/` contains only `README.md`, `door_scene/D0.usda`-`D4.usda`, learned ACT/Diffusion runs under `door_push_alex_v2/{act,diffusion}/<run_id>/`, and optional standard W&B state under `wandb/`. Reusable datasets remain in `datasets/`; verifier evidence, calibration probes, scripted staging, arbitrary scenes, and inspection figures belong under `~/.cache/alexdoor-xas/`.
 
 ## Retired workflows
 

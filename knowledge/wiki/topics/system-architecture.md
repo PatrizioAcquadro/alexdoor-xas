@@ -18,13 +18,13 @@ There is one registered simulator environment, `AlexDoor-DoorPush-AlexV2-v0`. Ne
 
 ## Main flows
 
-Scripted generation records pre-action state and the matching requested/applied action, then exports representation-specific siblings from that same episode. Training selects a split or retained view, validates stored normalization, allocates an exclusive learned run, and maintains both a self-contained best inference checkpoint and a consolidated resumable state until successful completion.
+Scripted generation records pre-action state and the matching requested/applied action, then exports representation-specific siblings from that same episode. Training selects a split or retained view, validates stored normalization, allocates an exclusive learned run, and maintains both a self-contained best inference checkpoint and a consolidated resumable state until successful completion. Optional W&B tracking calls the SDK directly from the training and evaluation scripts, remains disabled unless `WANDB_MODE` enables it, and records only compact configuration and aggregate scalar metrics.
 
 Closed-loop evaluation loads the source run's frozen configuration and self-contained `best.pt`, creates a fresh environment for each canonical pose, executes every requested rollout through adapter-v1, and writes factual aggregate results. Exact protocol matches may complete the source training run; changed protocols create checkpoint-free sibling evaluation runs.
 
 ## Storage boundary
 
-`outputs/` is limited to `README.md`, canonical `door_scene/D0.usda`-`D4.usda`, and learned runs under `door_push_alex_v2/{act,diffusion}/`. Reusable episodes remain under `datasets/`. Scripted-run staging, calibration probes, verification evidence, W&B state, arbitrary scenes, and inspection figures live under `~/.cache/alexdoor-xas/`.
+`outputs/` is limited to `README.md`, canonical `door_scene/D0.usda`-`D4.usda`, learned runs under `door_push_alex_v2/{act,diffusion}/`, and optional standard SDK state under `wandb/`. Reusable episodes remain under `datasets/`. Scripted-run staging, calibration probes, verification evidence, arbitrary scenes, and inspection figures live under `~/.cache/alexdoor-xas/`.
 
 ## Runtime boundary
 
@@ -39,6 +39,7 @@ The workstation is authoritative for Isaac asset validation, calibration, datase
 
 ## Version Notes
 
+- 2026-08-12 — Replaced the custom W&B wrapper and configuration with direct, environment-controlled SDK logging in the four learned-policy scripts.
 - 2026-08-12 — Added the canonical scene/output boundary, exclusive learned runs, resumable training state, and frozen-protocol evaluation routing.
 - 2026-08-12 — Removed alternate simulator runtimes and consolidated routine validation into five Alex V2 gates.
 - 2026-08-11 — Removed completed Phase 3 orchestration and reduced the active architecture to benchmark, data, policy, adapter, and evaluation primitives.

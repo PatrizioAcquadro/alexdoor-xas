@@ -159,8 +159,6 @@ def resolved_training_config(
     created_utc: str | None = None,
 ) -> dict[str, Any]:
     config_payload = asdict(config) if is_dataclass(config) else dict(config)
-    if "wandb_overrides" in config_payload:
-        config_payload["wandb"] = config_payload.pop("wandb_overrides")
     return {
         "format": RUN_FORMAT,
         "run_type": "training",

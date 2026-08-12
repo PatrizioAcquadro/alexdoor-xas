@@ -18,6 +18,8 @@ New runs are exclusively allocated under `outputs/door_push_alex_v2/{act,diffusi
 
 ACT history records train L1, KL, total loss, validation L1, batch counts, best epoch/value, and durations. Diffusion history records train MSE, sampled validation L1, learning rate, batch counts, best epoch/value, and durations. Open-loop evaluation reports translation-only aggregate and dx/dy/dz L1, per-episode L1, evaluated steps, and one deterministic worst-episode plot; it does not publish MSE, constant-zero rotation metrics, or per-episode plot sets.
 
+W&B is an optional vanilla SDK integration installed through `.[tracking]`. The four train/evaluate scripts read official `WANDB_*` environment variables and skip the import entirely when `WANDB_MODE` is unset or `disabled`. Enabled training runs log one aggregate dictionary per epoch and one final open-loop dictionary; enabled evaluators log one final overall closed-loop dictionary. Configuration is limited to policy identity plus the relevant dataset/model/train or evaluation summary. The integration does not watch models or publish artifacts, tables, files, or media, and standard local state stays under `outputs/wandb/`.
+
 ## Closed-loop evaluation
 
 Each training run freezes the canonical 36-rollout D0-D4 protocol, thresholds, 200 N force limit, horizon, control settings, and policy execution settings. ACT and Diffusion evaluators create a fresh environment per pose and publish one `closed_loop/metrics.json` with factual rollout rows plus overall, pose, fixed/randomized, and pose-plus-subset aggregates. The single summary plot shows time to success, peak force with its limit, and adapter correction/rejection rates.
@@ -35,6 +37,7 @@ Legacy Phase 3 v1 inference checkpoints remain loadable without rewriting. `scri
 
 ## Version Notes
 
+- 2026-08-12 — Replaced repository-owned W&B configuration, wrappers, artifact gates, and simulated tests with direct optional SDK initialization and aggregate logging.
 - 2026-08-12 — Added exclusive timestamped training runs, full resume state, compact training/open-loop artifacts, frozen multi-pose evaluation, protocol-match routing, factual closed-loop metrics, and selective optional artifacts.
 - 2026-08-12 — Unified ACT and Diffusion rollout verification and moved deterministic training gates into pytest.
 - 2026-08-11 — Introduced compact checkpoint v2 and dataset-independent evaluation while retaining read compatibility with Phase 3 v1 files.

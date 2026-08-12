@@ -25,7 +25,7 @@ CONFIG_NAME = "diffusion"
 # A1 has no adapter-v1 execution path and A4 is symbolic per-phase intent data,
 # so the trainable spaces are the two per-tick EE-delta streams (same as ACT).
 VALID_SPACES = frozenset({A2_EE_DELTA, A3_OBJ_REL_EE_DELTA})
-CONFIG_SECTIONS = frozenset({"dataset", "model", "train", "run", "rollout", "wandb"})
+CONFIG_SECTIONS = frozenset({"dataset", "model", "train", "run", "rollout"})
 
 # Only the settings the checkpointed schedulers are actually rebuilt with are
 # valid; widening these means widening the checkpoint contract too.
@@ -121,7 +121,6 @@ class DiffusionConfig:
     train: DiffusionTrainCfg
     run: DiffusionRunCfg
     rollout: DiffusionRolloutCfg
-    wandb_overrides: dict[str, Any]
 
 def load_diffusion_config(
     hydra_overrides: list[str] | tuple[str, ...] | None = None,
@@ -160,7 +159,6 @@ def load_diffusion_config(
         train=_build_train_cfg(nodes["train"]),
         run=_build_run_cfg(nodes["run"]),
         rollout=_build_rollout_cfg(nodes["rollout"]),
-        wandb_overrides=_build_wandb_overrides(nodes["wandb"]),
     )
 
     return _validate_cross_section(resolved)
@@ -169,8 +167,6 @@ def load_diffusion_config(
 def diffusion_config_from_dict(payload: dict[str, Any]) -> DiffusionConfig:
     """Rebuild a checked config from an immutable resolved-run payload."""
     payload = dict(payload)
-    if "wandb_overrides" in payload:
-        payload["wandb"] = payload.pop("wandb_overrides")
     unknown_sections = sorted(set(payload) - CONFIG_SECTIONS)
     if unknown_sections:
         raise DiffusionConfigError(
@@ -184,7 +180,6 @@ def diffusion_config_from_dict(payload: dict[str, Any]) -> DiffusionConfig:
             train=_build_train_cfg(nodes["train"]),
             run=_build_run_cfg(nodes["run"]),
             rollout=_build_rollout_cfg(nodes["rollout"]),
-            wandb_overrides=_build_wandb_overrides(nodes["wandb"]),
         )
     )
 
@@ -462,11 +457,6 @@ def _build_rollout_cfg(node: dict[str, Any]) -> DiffusionRolloutCfg:
             "rollout.policy_device", node.get("policy_device", defaults.policy_device)
         ),
     )
-
-
-def _build_wandb_overrides(node: dict[str, Any]) -> dict[str, Any]:
-    # Field names are validated downstream by WandbConfig.from_mapping.
-    return {key: value for key, value in node.items() if value is not None}
 
 
 def _reject_unknown(section: str, node: dict[str, Any], known: set[str]) -> None:

@@ -135,3 +135,11 @@ Documented the exact D0-D4 registry, factual `phase2.v2` outcomes, collision-saf
 ## 2026-08-12 — lint : Canonical output documentation
 
 Verified all 23 wiki pages, 31 internal links, complete index coverage, nine phase pages, allowed tree shape, repository-relative references, Markdown whitespace, protected raw boundaries, and removal of active legacy output-path references.
+
+## 2026-08-12 — update : Vanilla W&B integration
+
+Documented direct optional SDK initialization in ACT/Diffusion training and evaluation, official environment-variable control, disabled-by-default behavior, aggregate-only metric logging, removal of repository-owned tracking configuration, and standard local state under `outputs/wandb/`.
+
+## 2026-08-12 — lint : Vanilla W&B integration
+
+Verified all 23 wiki pages, 31 internal links, complete index coverage, nine phase pages, allowed tree shape, repository-relative references, Markdown whitespace, protected raw and historical phase boundaries, and removal of obsolete custom W&B references.

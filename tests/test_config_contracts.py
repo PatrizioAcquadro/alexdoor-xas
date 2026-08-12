@@ -41,9 +41,6 @@ def test_act_default_config_matches_yaml_defaults() -> None:
     assert cfg.rollout.temporal_ensemble is False
     assert cfg.rollout.policy_device == "cuda"
 
-    assert cfg.wandb_overrides == {}
-
-
 def test_act_hydra_overrides_flow_through_all_sections() -> None:
     cfg = load_act_config(
         [
@@ -55,7 +52,6 @@ def test_act_hydra_overrides_flow_through_all_sections() -> None:
             "train.overfit_episodes=2",
             "run.output_root=/tmp/act-pilot",
             "rollout.temporal_ensemble=true",
-            "+wandb.mode=offline",
         ]
     )
 
@@ -67,7 +63,6 @@ def test_act_hydra_overrides_flow_through_all_sections() -> None:
     assert cfg.train.overfit_episodes == 2
     assert cfg.run.output_root == "/tmp/act-pilot"
     assert cfg.rollout.temporal_ensemble is True
-    assert cfg.wandb_overrides == {"mode": "offline"}
 
 
 def test_act_cli_overrides_take_precedence_over_hydra() -> None:
@@ -148,9 +143,6 @@ def test_diffusion_default_config_matches_yaml_defaults() -> None:
     assert cfg.rollout.num_inference_steps == 100
     assert cfg.rollout.policy_device == "cuda"
 
-    assert cfg.wandb_overrides == {}
-
-
 def test_diffusion_hydra_overrides_flow_through_all_sections() -> None:
     cfg = load_diffusion_config(
         [
@@ -167,7 +159,6 @@ def test_diffusion_hydra_overrides_flow_through_all_sections() -> None:
             "rollout.n_action_steps=4",
             "rollout.sampler=ddim",
             "rollout.num_inference_steps=10",
-            "+wandb.mode=offline",
         ]
     )
 
@@ -184,7 +175,6 @@ def test_diffusion_hydra_overrides_flow_through_all_sections() -> None:
     assert cfg.rollout.n_action_steps == 4
     assert cfg.rollout.sampler == "ddim"
     assert cfg.rollout.num_inference_steps == 10
-    assert cfg.wandb_overrides == {"mode": "offline"}
 
 
 def test_diffusion_cli_overrides_take_precedence_over_hydra() -> None:

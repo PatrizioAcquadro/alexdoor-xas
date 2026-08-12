@@ -6,12 +6,14 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sys
 import traceback
 from pathlib import Path
 
 from isaaclab.app import AppLauncher
 
+from alexdoor_xas import paths
 from alexdoor_xas.policies.act.config import act_config_from_dict
 from alexdoor_xas.policies.common.closed_loop import (
     evaluation_preflight,
@@ -100,6 +102,37 @@ from alexdoor_xas.policies.common.closed_loop import (  # noqa: E402
 from alexdoor_xas.policies.scripted import alex_v2_variation_bounds  # noqa: E402
 
 
+def _run() -> int:
+    if os.environ.get("WANDB_MODE", "disabled").strip().lower() == "disabled":
+        return _evaluate()
+
+    os.environ.setdefault("WANDB_PROJECT", "alexdoor-xas")
+    os.environ.setdefault("WANDB_NAME", f"{source_resolved['run_id']}-eval")
+    os.environ.setdefault("WANDB_RUN_GROUP", "act")
+    os.environ.setdefault("WANDB_JOB_TYPE", "eval")
+    try:
+        import wandb
+    except ImportError as error:
+        raise RuntimeError('W&B tracking requires: pip install -e ".[tracking]"') from error
+
+    with wandb.init(
+        dir=str(paths.OUTPUTS_DIR),
+        config={
+            "policy": "act",
+            "source_run_id": source_resolved["run_id"],
+            "dataset": source_resolved["config"]["dataset"],
+            "evaluation": {
+                "rollout_count": protocol["rollout_count"],
+                "success_threshold_deg": protocol["success_threshold_deg"],
+                "force_limit_n": protocol["force_limit_n"],
+                "horizon_ticks": protocol["horizon_ticks"],
+                "policy_execution": protocol["policy_execution"],
+            },
+        },
+    ) as run:
+        return _evaluate(run)
+
+
 def _make_env(pose_id: str):
     control = protocol["control"]
     cfg = DoorPushAlexV2EnvCfg()
@@ -133,7 +166,7 @@ def _fresh_adapter(action_space: str, env):
     raise ValueError(f"no adapter path for action space {action_space!r}")
 
 
-def _run() -> int:
+def _evaluate(run=None) -> int:
     rows: list[dict] = []
     force_samples: dict[str, list[float]] = {}
     trace_payloads: dict[str, dict] = {}
@@ -219,6 +252,28 @@ def _run() -> int:
         selected_trace_keys=set(args.trace_rollout),
     )
     overall = metrics["aggregate"]["overall"]
+    if run is not None:
+        run.log(
+            {
+                "closed_loop/rollout_count": overall["rollout_count"],
+                "closed_loop/success_count": overall["success_count"],
+                "closed_loop/success_rate": overall["success_rate"],
+                "closed_loop/time_to_success_median_s": overall["time_to_success_s"][
+                    "median"
+                ],
+                "closed_loop/time_to_success_p90_s": overall["time_to_success_s"]["p90"],
+                "closed_loop/contact_force_mean_n": overall["contact_force_n"]["mean"],
+                "closed_loop/contact_force_p95_n": overall["contact_force_n"]["p95"],
+                "closed_loop/contact_force_maximum_n": overall["contact_force_n"]["maximum"],
+                "closed_loop/impulse_ns": overall["impulse_ns"],
+                "closed_loop/force_limit_exceedance_count": overall[
+                    "force_limit_exceedance_count"
+                ],
+                "closed_loop/adapter_accepted_rate": overall["adapter"]["accepted_rate"],
+                "closed_loop/adapter_corrected_rate": overall["adapter"]["corrected_rate"],
+                "closed_loop/adapter_rejected_rate": overall["adapter"]["rejected_rate"],
+            }
+        )
     print(
         f"[eval_act] {overall['success_count']}/{overall['rollout_count']} successful; "
         f"published {run_dir / 'closed_loop'}",

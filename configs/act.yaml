@@ -37,5 +37,3 @@ rollout:
   temporal_ensemble: false
   ensemble_m: 0.01
   policy_device: cuda            # learned-policy inference runs on GPU by default
-
-wandb: {}

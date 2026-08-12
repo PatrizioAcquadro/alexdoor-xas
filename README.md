@@ -11,7 +11,7 @@ The maintained path includes:
 - content-grouped splits and train-only normalization;
 - state-only ACT and Diffusion training and closed-loop evaluation;
 - A2/A3/A4 adapters, force checks, and execution safety controls;
-- W&B as optional run tracking.
+- optional vanilla W&B tracking for training and evaluation metrics.
 
 The only operational path is:
 
@@ -31,6 +31,12 @@ PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/check_env.py
 
 Do not use bare system `python3` for Isaac code.
 
+W&B is disabled by default and remains optional. Install it only when tracking is needed:
+
+```bash
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p -m pip install -e ".[tracking]"
+```
+
 ## Operational workflow
 
 Generate matched Alex V2 episodes and export A1-A4 under the active
@@ -48,6 +54,13 @@ Train ACT or Diffusion on A2 or A3; both active configs default to
 PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/train_act.py --space A2_ee_delta
 PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/train_diffusion.py --space A3_obj_rel_ee_delta
 ```
+
+Set the official `WANDB_MODE=offline` or `WANDB_MODE=online` environment variable to enable
+tracking; `WANDB_PROJECT`, `WANDB_ENTITY`, `WANDB_NAME`, `WANDB_RUN_GROUP`,
+`WANDB_JOB_TYPE`, `WANDB_TAGS`, `WANDB_API_KEY`, `WANDB_RUN_ID`, and `WANDB_RESUME`
+are passed through to the SDK. Unset or `WANDB_MODE=disabled` performs no W&B import or
+write. Enabled runs use `outputs/wandb/` and log one aggregate per epoch plus one final
+training or evaluation aggregate; no artifacts or media are uploaded automatically.
 
 Training runs are allocated under `outputs/door_push_alex_v2/{act,diffusion}/<run_id>/`. Resume only an incomplete run with `--resume <run-directory>`. Evaluate a completed self-contained checkpoint with its frozen protocol:
 
@@ -78,14 +91,14 @@ not a verifier, and is never part of routine validation.
 ```text
 src/alexdoor_xas/   assets, environments, actions, adapters, data, policies, evaluation
 scripts/            supported verification, generation, inspection, training, evaluation
-configs/            five active calibration, policy, scripted, and tracking configs
+configs/            four active calibration, policy, and scripted configs
 tests/              deterministic regression and contract tests
 knowledge/          user-owned raw research and the official technical wiki
 datasets/           reusable local datasets (ignored except README)
-outputs/            canonical D0-D4 scenes and learned-policy runs
+outputs/            canonical D0-D4 scenes, learned-policy runs, optional W&B state
 ```
 
-Machine-local assets, datasets, learned checkpoints, videos, logs, and runtime caches stay out of Git. Historical Phase 3 conclusions are preserved in the wiki and detailed removed artifacts remain available through Git history.
+Machine-local assets, datasets, learned checkpoints, videos, logs, W&B state, and runtime caches stay out of Git. Historical Phase 3 conclusions are preserved in the wiki and detailed removed artifacts remain available through Git history.
 
 ## Documentation
 

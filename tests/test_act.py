@@ -28,7 +28,6 @@ from alexdoor_xas.policies.act.policy import (
     stop_on_hinge_angle,
 )
 from alexdoor_xas.policies.act.train import make_seeded_model, train_act
-from alexdoor_xas.tracking import WandbConfig, start_wandb_run
 from conftest import (
     TEST_ROBOT_LIMITS,
     FakeDoorPushEnv,
@@ -313,26 +312,22 @@ def test_train_act_overfits_a_constant_mapping() -> None:
     assert history.best_val_l1 <= last.val_l1 + 1e-12
 
 
-def test_train_act_callback_and_wandb_noop_logging() -> None:
+def test_train_act_callback() -> None:
     model = _tiny_model()
     batch = _constant_mapping_batch()
     cfg = ActTrainCfg(epochs=3, batch_size=8, lr=1e-3, val_every=1, device="cpu")
     events: list[tuple[int, bool]] = []
 
-    with start_wandb_run(WandbConfig(mode="disabled")) as run:
-        assert run.disabled
+    def on_epoch(stats, is_best) -> None:
+        events.append((stats.epoch, is_best))
 
-        def on_epoch(stats, is_best) -> None:
-            run.log({"train/loss": stats.train_loss, "val/l1": stats.val_l1})
-            events.append((stats.epoch, is_best))
-
-        train_act(
-            model,
-            make_train_batches=lambda epoch: [batch],
-            cfg=cfg,
-            make_val_batches=lambda: [batch],
-            on_epoch=on_epoch,
-        )
+    train_act(
+        model,
+        make_train_batches=lambda epoch: [batch],
+        cfg=cfg,
+        make_val_batches=lambda: [batch],
+        on_epoch=on_epoch,
+    )
 
     assert [epoch for epoch, _ in events] == [0, 1, 2]
     assert any(is_best for _, is_best in events)

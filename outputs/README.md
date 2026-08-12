@@ -1,6 +1,6 @@
 # outputs/
 
-`outputs/` contains only this guide, the five canonical door scene layers, and ACT/Diffusion learned-policy runs:
+`outputs/` contains only this guide, the five canonical door scene layers, ACT/Diffusion learned-policy runs, and optional W&B state:
 
 ```text
 outputs/
@@ -11,9 +11,10 @@ outputs/
 │   ├── D2.usda
 │   ├── D3.usda
 │   └── D4.usda
-└── door_push_alex_v2/
-    ├── act/<run_id>/
-    └── diffusion/<run_id>/
+├── door_push_alex_v2/
+│   ├── act/<run_id>/
+│   └── diffusion/<run_id>/
+└── wandb/                     # only when WANDB_MODE enables tracking
 ```
 
 The default scene is `door_scene/D0.usda`. D0 is yaw `0.00` with XY `(0.00, 0.00)`; D1 is yaw `+0.05` with `(+0.02, 0.00)`; D2 is yaw `-0.05` with `(0.00, -0.02)`; D3 is yaw `+0.10` with `(+0.02, +0.02)`; D4 is yaw `-0.10` with `(+0.02, -0.02)`. `door_scene/` must contain exactly these files. Noncanonical scenes require an explicit path under `~/.cache/alexdoor-xas/door_scenes/`.
@@ -49,4 +50,4 @@ Training run IDs use collision-safe UTC timestamps: `<YYYYMMDDTHHMMSSZ>_<a2|a3>_
 
 `closed_loop/` is written into a training run only when the requested protocol exactly matches the protocol frozen in its `resolved_config.json` and no completed closed-loop result exists. Any change to poses, seeds, randomization, thresholds, force limits, horizon, control settings, or policy execution creates a new timestamped sibling evaluation run. An evaluation-only run contains `resolved_config.json`, `report.md`, and `closed_loop/{metrics.json,summary.png}`; it records `run_type: evaluation`, `source_run_id`, and `source_checkpoint`, does not copy the checkpoint, and does not modify the source run.
 
-`traces/` exists only for unsuccessful rollouts, force-limit exceedances, or explicitly selected rollout keys. `media/` exists only when explicitly requested or selected as useful. Empty optional directories are not created. Reusable datasets stay in `datasets/`; calibration probes, verifier artifacts, W&B state, scripted-run staging, arbitrary scenes, and inspection figures stay under `~/.cache/alexdoor-xas/`. Do not add generic `metrics/`, `plots/`, `logs/`, `evaluations/`, or `curated/` directories under `outputs/`.
+`traces/` exists only for unsuccessful rollouts, force-limit exceedances, or explicitly selected rollout keys. `media/` exists only when explicitly requested or selected as useful. Empty optional directories are not created. W&B is an optional direct SDK integration: unset or `WANDB_MODE=disabled` creates nothing, while enabled modes write standard SDK state only under `outputs/wandb/`. The scripts log scalar aggregates only and never automatically publish artifacts or media. Reusable datasets stay in `datasets/`; calibration probes, verifier artifacts, scripted-run staging, arbitrary scenes, and inspection figures stay under `~/.cache/alexdoor-xas/`. Do not add generic `metrics/`, `plots/`, `logs/`, `evaluations/`, or `curated/` directories under `outputs/`.

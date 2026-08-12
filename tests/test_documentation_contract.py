@@ -104,12 +104,11 @@ def test_active_config_and_output_surfaces_are_minimal() -> None:
         "alex_v2_door.json",
         "diffusion.yaml",
         "scripted_baseline.yaml",
-        "wandb.yaml",
     }
     outputs = REPO_ROOT / "outputs"
     entries = {path.name for path in outputs.iterdir()}
     assert {"README.md", "door_scene"} <= entries
-    assert entries <= {"README.md", "door_scene", "door_push_alex_v2"}
+    assert entries <= {"README.md", "door_scene", "door_push_alex_v2", "wandb"}
     assert {path.name for path in (outputs / "door_scene").iterdir()} == {
         "D0.usda",
         "D1.usda",

@@ -4,13 +4,16 @@
 from __future__ import annotations
 
 import argparse
+import os
 import random
 import sys
 import traceback
+from contextlib import nullcontext
 from pathlib import Path
 
 import numpy as np
 
+from alexdoor_xas import paths
 from alexdoor_xas.policies.act import (
     ActConfig,
     ActConfigError,
@@ -91,7 +94,6 @@ def main() -> int:
     from alexdoor_xas.policies.act.policy import ActPolicy
     from alexdoor_xas.policies.act.train import make_seeded_model, train_act
     from alexdoor_xas.policies.common.inspect import open_loop_report
-    from alexdoor_xas.tracking import load_wandb_config, start_wandb_run
 
     if cfg.train.device.startswith("cuda") and not torch.cuda.is_available():
         print("FAIL: train.device requests CUDA but no CUDA device is visible")
@@ -167,26 +169,42 @@ def main() -> int:
         )
 
     try:
-        wandb_cfg = load_wandb_config(
-            overrides={
-                "group": "act",
-                "name": run_id,
-                "job_type": "train",
-                **cfg.wandb_overrides,
-            }
-        )
-        with start_wandb_run(wandb_cfg, config=resolved["config"]) as run:
+        tracking = nullcontext(None)
+        if os.environ.get("WANDB_MODE", "disabled").strip().lower() != "disabled":
+            os.environ.setdefault("WANDB_PROJECT", "alexdoor-xas")
+            os.environ.setdefault("WANDB_NAME", run_id)
+            os.environ.setdefault("WANDB_RUN_GROUP", "act")
+            os.environ.setdefault("WANDB_JOB_TYPE", "train")
+            try:
+                import wandb
+            except ImportError as error:
+                raise RuntimeError(
+                    'W&B tracking requires: pip install -e ".[tracking]"'
+                ) from error
+            tracking = wandb.init(
+                dir=str(paths.OUTPUTS_DIR),
+                config={
+                    "policy": "act",
+                    "run_id": run_id,
+                    "dataset": resolved["config"]["dataset"],
+                    "model": resolved["config"]["model"],
+                    "train": resolved["config"]["train"],
+                },
+            )
+
+        with tracking as run:
 
             def on_epoch(stats, is_best: bool) -> None:
-                run.log(
-                    {
-                        "epoch": stats.epoch,
-                        "train/l1": stats.train_l1,
-                        "train/kl": stats.train_kl,
-                        "train/loss": stats.train_loss,
-                        "val/l1": stats.val_l1,
-                    }
-                )
+                if run is not None:
+                    run.log(
+                        {
+                            "epoch": stats.epoch,
+                            "train/l1": stats.train_l1,
+                            "train/kl": stats.train_kl,
+                            "train/loss": stats.train_loss,
+                            "val/l1": stats.val_l1,
+                        }
+                    )
                 if is_best:
                     save_checkpoint(
                         best_path,
@@ -231,13 +249,14 @@ def main() -> int:
                 json_path=run_dir / "open_loop" / "metrics.json",
                 summary_path=run_dir / "open_loop" / "summary.png",
             )
-            run.log(
-                {
-                    "open_loop/l1_mean": open_loop["aggregate_l1_mean"],
-                    "best/epoch": history.best_epoch,
-                    "best/value": history.best_val_l1,
-                }
-            )
+            if run is not None:
+                run.log(
+                    {
+                        "open_loop/l1_mean": open_loop["aggregate_l1_mean"],
+                        "best/epoch": history.best_epoch,
+                        "best/value": history.best_val_l1,
+                    }
+                )
 
         write_run_report(
             run_dir,

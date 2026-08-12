@@ -46,6 +46,3 @@ rollout:
   sampler: ddpm                  # ddpm | ddim
   num_inference_steps: 100
   policy_device: cuda            # learned-policy inference runs on GPU by default
-
-# Optional per-run W&B overrides; field names validated by WandbConfig.
-wandb: {}
