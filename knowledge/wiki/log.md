@@ -189,3 +189,10 @@ and atomic I/O layer while retaining policy-specific ACT and Diffusion loaders.
 
 Documented that environment readiness requires the Alex V2 and standalone Door
 assets while the optional combined hallway path remains outside the benchmark.
+
+## 2026-08-12 — lint : Source-finding corrections
+
+Verified all 23 wiki pages, internal links, complete index coverage, nine phase
+pages, Markdown whitespace, repository-relative references, and unchanged raw
+and historical-phase boundaries after the adapter, contact, checkpoint, and
+required-asset corrections.
