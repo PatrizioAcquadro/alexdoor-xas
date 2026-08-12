@@ -38,6 +38,8 @@ def validate_object_frame(frame: ObjectFrame | None) -> str:
         return "object frame rotation is non-finite or misshaped"
     if not np.allclose(rot @ rot.T, np.eye(3), atol=_ROT_ORTHONORMAL_TOL):
         return "object frame rotation is not orthonormal"
+    if not np.isclose(np.linalg.det(rot), 1.0, atol=_ROT_ORTHONORMAL_TOL):
+        return "object frame rotation is not proper (determinant must be +1)"
     return ""
 
 

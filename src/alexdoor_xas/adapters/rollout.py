@@ -155,17 +155,14 @@ def read_joint_limits(env) -> dict[str, np.ndarray] | None:
     return {name: _finite_array(f"joint limits {name}", value) for name, value in raw.items()}
 
 
-def read_step_context(
-    env,
-    door_frame: ObjectFrame | None,
-    joint_limits: dict[str, np.ndarray] | None = None,
-    execution_limits: RobotLimitsCfg | None = None,
-) -> StepContext:
-    """Snapshot and validate all physical state used by adapter execution."""
-    _validate_execution_limits(execution_limits)
+def _read_hinge_state(env) -> tuple[float, float]:
     angle, velocity = env.hinge_state()
     angle_array = _finite_array("hinge angle", angle).reshape(-1)
     velocity_array = _finite_array("hinge velocity", velocity).reshape(-1)
+    return float(angle_array[0]), float(velocity_array[0])
+
+
+def _read_ee_pose(env) -> tuple[np.ndarray, np.ndarray]:
     ee_pos, ee_quat = env.ee_pose_w()
     position = _first_vector("end-effector position", ee_pos, 3)
     orientation = _first_vector("end-effector orientation", ee_quat, 4)
@@ -174,6 +171,10 @@ def read_step_context(
         raise InvalidSimulatorStateError(
             "invalid simulator state: end-effector orientation quaternion has invalid norm"
         )
+    return position, orientation
+
+
+def _read_contact_state(env) -> tuple[bool | None, float | None]:
     contact_sensed: bool | None = None
     if hasattr(env, "contact_sensed"):
         raw_contact = _finite_array("contact value", env.contact_sensed()).reshape(-1)[0]
@@ -190,65 +191,90 @@ def read_step_context(
             raise InvalidSimulatorStateError(
                 "invalid simulator state: contact force magnitude is non-finite"
             )
-    joint_state: dict[str, np.ndarray] | None = None
-    joint_names: tuple[str, ...] | None = None
-    if hasattr(env, "robot_joint_state"):
-        raw_joint_state = env.robot_joint_state()
-        if not isinstance(raw_joint_state, dict):
-            raise InvalidSimulatorStateError(
-                "invalid simulator state: robot_joint_state() must return a dict"
-            )
-        required_state = ("joint_pos", "joint_vel", "joint_pos_target")
-        missing_state = [name for name in required_state if name not in raw_joint_state]
-        if missing_state:
-            raise InvalidSimulatorStateError(
-                f"invalid simulator state: joint state is missing {missing_state}"
-            )
-        joint_state = {
-            name: _finite_array(f"joint state {name}", raw_joint_state[name]).reshape(-1)
-            for name in required_state
-        }
-        state_shapes = {value.shape for value in joint_state.values()}
-        if len(state_shapes) != 1:
-            raise InvalidSimulatorStateError(
-                "invalid simulator state: joint positions, velocities, and targets "
-                "must have matching shapes"
-            )
-        if hasattr(env, "robot_joint_names"):
-            joint_names = tuple(str(name) for name in env.robot_joint_names())
-            if len(joint_names) != joint_state["joint_pos"].size:
-                raise InvalidSimulatorStateError(
-                    "invalid simulator state: joint names and state sizes do not match"
-                )
-            if len(set(joint_names)) != len(joint_names):
-                raise InvalidSimulatorStateError(
-                    "invalid simulator state: robot joint names must be unique"
-                )
-    if joint_limits is not None:
-        required_limits = ("joint_pos_limits", "joint_vel_limits")
-        missing_limits = [name for name in required_limits if name not in joint_limits]
-        if missing_limits:
-            raise InvalidSimulatorStateError(
-                f"invalid simulator state: joint limits are missing {missing_limits}"
-            )
-        pos_limits = _finite_array("joint position limits", joint_limits["joint_pos_limits"])
-        vel_limits = _finite_array("joint velocity limits", joint_limits["joint_vel_limits"])
-        if pos_limits.ndim != 2 or pos_limits.shape[1] != 2:
-            raise InvalidSimulatorStateError(
-                "invalid simulator state: joint position limits must have shape (N, 2)"
-            )
-        vel_limits = vel_limits.reshape(-1)
-        if joint_state is not None and (
-            pos_limits.shape[0] != joint_state["joint_pos"].size
-            or vel_limits.size != joint_state["joint_pos"].size
-        ):
-            raise InvalidSimulatorStateError(
-                "invalid simulator state: joint state and limit sizes do not match"
-            )
+    return contact_sensed, contact_force_n
+
+
+def _read_joint_state(env) -> tuple[dict[str, np.ndarray] | None, tuple[str, ...] | None]:
+    if not hasattr(env, "robot_joint_state"):
+        return None, None
+    raw_joint_state = env.robot_joint_state()
+    if not isinstance(raw_joint_state, dict):
+        raise InvalidSimulatorStateError(
+            "invalid simulator state: robot_joint_state() must return a dict"
+        )
+    required_state = ("joint_pos", "joint_vel", "joint_pos_target")
+    missing_state = [name for name in required_state if name not in raw_joint_state]
+    if missing_state:
+        raise InvalidSimulatorStateError(
+            f"invalid simulator state: joint state is missing {missing_state}"
+        )
+    joint_state = {
+        name: _finite_array(f"joint state {name}", raw_joint_state[name]).reshape(-1)
+        for name in required_state
+    }
+    if len({value.shape for value in joint_state.values()}) != 1:
+        raise InvalidSimulatorStateError(
+            "invalid simulator state: joint positions, velocities, and targets "
+            "must have matching shapes"
+        )
+    if not hasattr(env, "robot_joint_names"):
+        return joint_state, None
+    joint_names = tuple(str(name) for name in env.robot_joint_names())
+    if len(joint_names) != joint_state["joint_pos"].size:
+        raise InvalidSimulatorStateError(
+            "invalid simulator state: joint names and state sizes do not match"
+        )
+    if len(set(joint_names)) != len(joint_names):
+        raise InvalidSimulatorStateError(
+            "invalid simulator state: robot joint names must be unique"
+        )
+    return joint_state, joint_names
+
+
+def _validate_joint_state_limits(
+    joint_state: dict[str, np.ndarray] | None,
+    joint_limits: dict[str, np.ndarray] | None,
+) -> None:
+    if joint_limits is None:
+        return
+    required_limits = ("joint_pos_limits", "joint_vel_limits")
+    missing_limits = [name for name in required_limits if name not in joint_limits]
+    if missing_limits:
+        raise InvalidSimulatorStateError(
+            f"invalid simulator state: joint limits are missing {missing_limits}"
+        )
+    pos_limits = _finite_array("joint position limits", joint_limits["joint_pos_limits"])
+    vel_limits = _finite_array("joint velocity limits", joint_limits["joint_vel_limits"])
+    if pos_limits.ndim != 2 or pos_limits.shape[1] != 2:
+        raise InvalidSimulatorStateError(
+            "invalid simulator state: joint position limits must have shape (N, 2)"
+        )
+    if joint_state is not None and (
+        pos_limits.shape[0] != joint_state["joint_pos"].size
+        or vel_limits.reshape(-1).size != joint_state["joint_pos"].size
+    ):
+        raise InvalidSimulatorStateError(
+            "invalid simulator state: joint state and limit sizes do not match"
+        )
+
+
+def read_step_context(
+    env,
+    door_frame: ObjectFrame | None,
+    joint_limits: dict[str, np.ndarray] | None = None,
+    execution_limits: RobotLimitsCfg | None = None,
+) -> StepContext:
+    """Snapshot and validate all physical state used by adapter execution."""
+    _validate_execution_limits(execution_limits)
+    angle, velocity = _read_hinge_state(env)
+    position, orientation = _read_ee_pose(env)
+    contact_sensed, contact_force_n = _read_contact_state(env)
+    joint_state, joint_names = _read_joint_state(env)
+    _validate_joint_state_limits(joint_state, joint_limits)
     return StepContext(
         door_frame=door_frame,
-        hinge_angle_rad=float(angle_array[0]),
-        hinge_velocity_rad_s=float(velocity_array[0]),
+        hinge_angle_rad=angle,
+        hinge_velocity_rad_s=velocity,
         ee_pos_w=position,
         ee_quat_w_xyzw=orientation,
         contact_sensed=contact_sensed,
@@ -352,6 +378,194 @@ class RolloutResult:
         }
 
 
+@dataclass(frozen=True)
+class _RolloutStart:
+    door_frame: ObjectFrame
+    joint_limits: dict[str, np.ndarray] | None
+    execution_limits: RobotLimitsCfg | None
+    ctx: StepContext
+
+
+@dataclass
+class _RolloutState:
+    ctx: StepContext
+    initial_angle_rad: float
+    ticks: int = 0
+    reason: str | None = None
+    notes: str = ""
+    first_success_tick: int | None = None
+    environment_terminated: bool = False
+    environment_truncated: bool = False
+    contact_ever_sensed: bool = False
+    decisions: list[AdapterDecision] = field(default_factory=list)
+    contact_per_tick: list[bool | None] = field(default_factory=list)
+    force_n_per_tick: list[float | None] = field(default_factory=list)
+
+    def to_result(self, log: AdapterLog, success_angle_rad: float | None) -> RolloutResult:
+        return RolloutResult(
+            n_ticks=self.ticks,
+            initial_angle_rad=self.initial_angle_rad,
+            final_angle_rad=self.ctx.hinge_angle_rad,
+            log=log,
+            notes=self.notes,
+            decisions_per_tick=self.decisions,
+            contact_per_tick=self.contact_per_tick,
+            force_n_per_tick=self.force_n_per_tick,
+            termination_reason=self.reason or "tick_budget",
+            first_success_tick=self.first_success_tick,
+            success=(self.first_success_tick is not None)
+            if success_angle_rad is not None
+            else None,
+            environment_terminated=self.environment_terminated,
+            environment_truncated=self.environment_truncated,
+        )
+
+
+@dataclass
+class _RolloutRuntime:
+    env: Any
+    adapter: Any
+    start: _RolloutStart
+    state: _RolloutState
+    max_ticks: int
+    stop_on_reject: bool
+    success_angle_rad: float | None
+    post_success_diagnostic: bool
+    step_hook: Callable[[int], None] | None
+
+    def crossed_success(self) -> bool:
+        return (
+            self.success_angle_rad is not None
+            and self.state.ctx.hinge_angle_rad >= self.success_angle_rad
+        )
+
+    def latch_initial_success(self) -> None:
+        if not self.crossed_success():
+            return
+        self.state.first_success_tick = 0
+        if not self.post_success_diagnostic:
+            self.state.reason = "success"
+
+    def active(self) -> bool:
+        return self.state.reason is None and self.state.ticks < self.max_ticks
+
+    def execute_delta(self, delta: np.ndarray) -> None:
+        state = self.state
+        phase = (
+            "post_success"
+            if state.first_success_tick is not None
+            else ("contact" if state.contact_ever_sensed else "pre_contact")
+        )
+        state.ctx = replace(state.ctx, tick_index=state.ticks, rollout_phase=phase)
+        applied, decision = self.adapter.process(delta, state.ctx)
+        state.decisions.append(decision)
+        if decision.status is AdapterStatus.REJECTED and self.stop_on_reject:
+            state.notes = f"stopped on rejected command: {decision.reason}"
+            state.reason = "rejection_stop"
+            return
+
+        terminated, truncated = step_env(self.env, applied)
+        state.ticks += 1
+        if terminated or truncated:
+            self._stop_on_environment_end(terminated, truncated)
+            return
+        if self.step_hook is not None:
+            self.step_hook(state.ticks)
+        if not self._refresh_context():
+            return
+        self._record_post_step_state()
+
+    def _stop_on_environment_end(self, terminated: bool, truncated: bool) -> None:
+        state = self.state
+        state.environment_terminated = terminated
+        state.environment_truncated = truncated
+        state.reason = "environment_terminated" if terminated else "environment_truncated"
+        state.notes = (
+            f"env reported {'termination' if terminated else 'truncation'} "
+            f"at tick {state.ticks}; rollout state frozen at the last valid read"
+        )
+
+    def _refresh_context(self) -> bool:
+        try:
+            self.state.ctx = read_step_context(
+                self.env,
+                self.start.door_frame,
+                self.start.joint_limits,
+                self.start.execution_limits,
+            )
+        except InvalidSimulatorStateError as exc:
+            self.state.reason = "invalid_simulator_state"
+            self.state.notes = f"{exc} after tick {self.state.ticks}"
+            return False
+        return True
+
+    def _record_post_step_state(self) -> None:
+        state = self.state
+        state.contact_per_tick.append(state.ctx.contact_sensed)
+        state.force_n_per_tick.append(state.ctx.contact_force_n)
+        state.contact_ever_sensed = state.contact_ever_sensed or state.ctx.contact_sensed is True
+        if state.first_success_tick is None and self.crossed_success():
+            state.first_success_tick = state.ticks
+            if not self.post_success_diagnostic:
+                state.reason = "success"
+        if state.ticks >= self.max_ticks and not state.notes:
+            state.notes = f"tick budget exhausted ({self.max_ticks})"
+
+    def finish(self) -> None:
+        if self.state.reason is None:
+            self.state.reason = "tick_budget"
+            self.state.notes = self.state.notes or f"tick budget exhausted ({self.max_ticks})"
+
+    def assert_no_silent_reset(self) -> None:
+        state = self.state
+        if state.environment_terminated or state.environment_truncated:
+            return
+        if not hasattr(self.env, "episode_length_buf"):
+            return
+        env_ticks = int(_numpy(self.env.episode_length_buf).reshape(-1)[0])
+        if env_ticks < state.ticks:
+            raise RuntimeError(
+                f"rollout executed {state.ticks} ticks but the env's episode counter reads "
+                f"{env_ticks}: the env auto-reset mid-rollout without reporting "
+                "termination — recorded state past the reset would be invalid"
+            )
+
+
+def _read_rollout_start(env, adapter) -> _RolloutStart:
+    execution_limits = _adapter_limits(adapter)
+    door_frame = read_door_frame(env)
+    joint_limits = read_joint_limits(env)
+    ctx = read_step_context(env, door_frame, joint_limits, execution_limits)
+    return _RolloutStart(door_frame, joint_limits, execution_limits, ctx)
+
+
+def _invalid_start_result(
+    log: AdapterLog,
+    error: InvalidSimulatorStateError,
+    success_angle_rad: float | None,
+) -> RolloutResult:
+    return RolloutResult(
+        n_ticks=0,
+        initial_angle_rad=float("nan"),
+        final_angle_rad=float("nan"),
+        log=log,
+        notes=str(error),
+        termination_reason="invalid_simulator_state",
+        success=False if success_angle_rad is not None else None,
+    )
+
+
+def _normalize_chunk(chunk: Any) -> np.ndarray:
+    normalized = np.asarray(chunk, dtype=np.float64)
+    if normalized.ndim == 1:
+        normalized = normalized.reshape(1, -1)
+    if normalized.ndim != 2 or normalized.shape[1] != EE_DELTA_DIM:
+        raise ValueError(
+            f"chunk source must emit (H, {EE_DELTA_DIM}) chunks, got {normalized.shape}"
+        )
+    return normalized
+
+
 def rollout_chunks(
     env,
     chunk_source: ChunkSource,
@@ -394,136 +608,42 @@ def rollout_chunks(
     stage-read pose is static for the episode in this build).
     """
     log: AdapterLog = adapter.log
-    execution_limits = _adapter_limits(adapter)
-    decisions: list[AdapterDecision] = []
-    contact_per_tick: list[bool | None] = []
-    force_n_per_tick: list[float | None] = []
-
     try:
-        door_frame = read_door_frame(env)
-        joint_limits = read_joint_limits(env)
-        ctx = read_step_context(env, door_frame, joint_limits, execution_limits)
+        start = _read_rollout_start(env, adapter)
     except InvalidSimulatorStateError as exc:
-        notes = str(exc)
-        return RolloutResult(
-            n_ticks=0,
-            initial_angle_rad=float("nan"),
-            final_angle_rad=float("nan"),
-            log=log,
-            notes=notes,
-            termination_reason="invalid_simulator_state",
-            success=False if success_angle_rad is not None else None,
-        )
-    initial_angle = ctx.hinge_angle_rad
-    ticks = 0
-    notes = ""
-    reason: str | None = None
-    first_success_tick: int | None = None
-    environment_terminated = False
-    environment_truncated = False
-    contact_ever_sensed = ctx.contact_sensed is True
+        return _invalid_start_result(log, exc, success_angle_rad)
 
-    def crossed() -> bool:
-        return success_angle_rad is not None and ctx.hinge_angle_rad >= success_angle_rad
-
-    if crossed():
-        first_success_tick = 0
-        if not post_success_diagnostic:
-            reason = "success"
-
-    while reason is None and ticks < max_ticks:
-        chunk = chunk_source(ctx)
-        if chunk is None:
-            reason = "policy_exhausted"
-            break
-        chunk = np.asarray(chunk, dtype=np.float64)
-        if chunk.ndim == 1:
-            chunk = chunk.reshape(1, -1)
-        if chunk.ndim != 2 or chunk.shape[1] != EE_DELTA_DIM:
-            raise ValueError(
-                f"chunk source must emit (H, {EE_DELTA_DIM}) chunks, got {chunk.shape}"
-            )
-        for delta in chunk:
-            phase = (
-                "post_success"
-                if first_success_tick is not None
-                else ("contact" if contact_ever_sensed else "pre_contact")
-            )
-            ctx = replace(ctx, tick_index=ticks, rollout_phase=phase)
-            applied, decision = adapter.process(delta, ctx)
-            decisions.append(decision)
-            if decision.status is AdapterStatus.REJECTED and stop_on_reject:
-                notes = f"stopped on rejected command: {decision.reason}"
-                reason = "rejection_stop"
-                break
-            terminated, truncated = step_env(env, applied)
-            ticks += 1
-            if terminated or truncated:
-                # The env auto-reset inside step: everything readable now is
-                # post-reset state. Keep the last valid pre-step context as
-                # the final state and stop without any further env reads.
-                environment_terminated = terminated
-                environment_truncated = truncated
-                reason = "environment_terminated" if terminated else "environment_truncated"
-                notes = (
-                    f"env reported {'termination' if terminated else 'truncation'} "
-                    f"at tick {ticks}; rollout state frozen at the last valid read"
-                )
-                break
-            if step_hook is not None:
-                step_hook(ticks)
-            try:
-                ctx = read_step_context(env, door_frame, joint_limits, execution_limits)
-            except InvalidSimulatorStateError as exc:
-                reason = "invalid_simulator_state"
-                notes = f"{exc} after tick {ticks}"
-                break
-            contact_per_tick.append(ctx.contact_sensed)
-            force_n_per_tick.append(ctx.contact_force_n)
-            contact_ever_sensed = contact_ever_sensed or ctx.contact_sensed is True
-            if first_success_tick is None and crossed():
-                first_success_tick = ticks
-                if not post_success_diagnostic:
-                    reason = "success"
-                    break
-            if ticks >= max_ticks:
-                notes = notes or f"tick budget exhausted ({max_ticks})"
-                break
-        # An exhausted chunk loops back for the next chunk unless a stop
-        # reason was latched or the budget ran out (reason set on re-check).
-
-    if reason is None:
-        # Diagnostic post-success execution still records why it *stopped*;
-        # the first-crossing success/tick are latched separately above.
-        reason = "tick_budget"
-        notes = notes or f"tick budget exhausted ({max_ticks})"
-
-    if not (environment_terminated or environment_truncated) and hasattr(
-        env, "episode_length_buf"
-    ):
-        env_ticks = int(_numpy(env.episode_length_buf).reshape(-1)[0])
-        if env_ticks < ticks:
-            raise RuntimeError(
-                f"rollout executed {ticks} ticks but the env's episode counter reads "
-                f"{env_ticks}: the env auto-reset mid-rollout without reporting "
-                "termination — recorded state past the reset would be invalid"
-            )
-
-    return RolloutResult(
-        n_ticks=ticks,
-        initial_angle_rad=initial_angle,
-        final_angle_rad=ctx.hinge_angle_rad,
-        log=log,
-        notes=notes,
-        decisions_per_tick=decisions,
-        contact_per_tick=contact_per_tick,
-        force_n_per_tick=force_n_per_tick,
-        termination_reason=reason,
-        first_success_tick=first_success_tick,
-        success=(first_success_tick is not None) if success_angle_rad is not None else None,
-        environment_terminated=environment_terminated,
-        environment_truncated=environment_truncated,
+    state = _RolloutState(
+        ctx=start.ctx,
+        initial_angle_rad=start.ctx.hinge_angle_rad,
+        contact_ever_sensed=start.ctx.contact_sensed is True,
     )
+    runtime = _RolloutRuntime(
+        env=env,
+        adapter=adapter,
+        start=start,
+        state=state,
+        max_ticks=max_ticks,
+        stop_on_reject=stop_on_reject,
+        success_angle_rad=success_angle_rad,
+        post_success_diagnostic=post_success_diagnostic,
+        step_hook=step_hook,
+    )
+    runtime.latch_initial_success()
+
+    while runtime.active():
+        chunk = chunk_source(state.ctx)
+        if chunk is None:
+            state.reason = "policy_exhausted"
+            break
+        for delta in _normalize_chunk(chunk):
+            runtime.execute_delta(delta)
+            if not runtime.active():
+                break
+
+    runtime.finish()
+    runtime.assert_no_silent_reset()
+    return state.to_result(log, success_angle_rad)
 
 
 def replay_source(actions) -> ChunkSource:

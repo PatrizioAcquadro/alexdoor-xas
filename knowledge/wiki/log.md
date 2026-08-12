@@ -169,3 +169,8 @@ Verified all 23 wiki pages, 31 internal links, complete index coverage, nine
 phase pages, Markdown whitespace, protected raw boundaries, and removal of
 active retired-geometry and superseded robot-model references while retaining
 schema-version and collision-shape identifiers unrelated to that retired path.
+
+## 2026-08-12 — update : Adapter frame and environment-end semantics
+
+Documented proper-rotation validation for A3 and factual terminated/truncated
+handling in A4 with the last valid pre-reset state retained.

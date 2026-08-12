@@ -409,6 +409,8 @@ def test_validate_object_frame_reasons():
     assert validate_object_frame(_identity_frame()) == ""
     bad_origin = ObjectFrame(origin=np.array([np.inf, 0.0, 0.0]), rot=np.eye(3))
     assert "origin" in validate_object_frame(bad_origin)
+    reflection = ObjectFrame(origin=np.zeros(3), rot=np.diag([-1.0, 1.0, 1.0]))
+    assert "determinant" in validate_object_frame(reflection)
 
 
 # -- pins against the scripted controller (adapters must not import policies) ----
@@ -628,6 +630,51 @@ def test_a4_reports_push_stall():
     assert not result.completed
     assert result.failure == "push_stalled"
     assert result.achieved_hinge_delta_rad == pytest.approx(0.0)
+
+
+class _EndingA4Env(FakeDoorPushEnv):
+    """DirectRLEnv-style auto-reset with a factual end flag on the first step."""
+
+    def __init__(self, flag: str):
+        super().__init__()
+        self.flag = flag
+        self.ended = False
+        self.post_reset_hinge_reads = 0
+
+    def hinge_state(self):
+        if self.ended:
+            self.post_reset_hinge_reads += 1
+        return super().hinge_state()
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = super().step(action)
+        FakeDoorPushEnv.reset(self)
+        self.ended = True
+        if self.flag == "terminated":
+            terminated = torch.ones(1, dtype=torch.bool)
+        else:
+            truncated = torch.ones(1, dtype=torch.bool)
+        return obs, reward, terminated, truncated, info
+
+
+@pytest.mark.parametrize("flag", ["terminated", "truncated"])
+def test_a4_environment_end_freezes_pre_reset_state(flag):
+    env = _EndingA4Env(flag)
+    env.reset(seed=0)
+    env.world.angle = 0.2
+
+    result = _a4().execute(env, _chunk(phase="approach", duration=10))
+
+    expected_failure = f"environment_{flag}"
+    assert result.completed is False
+    assert result.failure == expected_failure
+    assert result.environment_terminated is (flag == "terminated")
+    assert result.environment_truncated is (flag == "truncated")
+    assert result.n_ticks == 1
+    assert result.final_angle_rad == pytest.approx(0.2)
+    assert result.stages[0].exit_angle_rad == pytest.approx(0.2)
+    assert env.world.angle == pytest.approx(0.0)
+    assert env.post_reset_hinge_reads == 0
 
 
 @pytest.mark.parametrize(

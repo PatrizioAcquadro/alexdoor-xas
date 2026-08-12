@@ -111,6 +111,28 @@ class _Stage:
     synthesized: bool = False
 
 
+class _ChunkValidationError(ValueError):
+    """Internal fail-fast signal carrying a user-facing rejection reason."""
+
+
+@dataclass
+class _ChunkValidationState:
+    chunk: ObjectCentricChunk
+    checks: dict[str, bool] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
+    warning_records: list[AdapterWarning] = field(default_factory=list)
+    corrections: list[str] = field(default_factory=list)
+
+    def require(self, name: str, condition: bool, reason: str) -> None:
+        self.checks[name] = bool(condition)
+        if not condition:
+            raise _ChunkValidationError(reason)
+
+    def fail(self, name: str, reason: str) -> None:
+        self.checks[name] = False
+        raise _ChunkValidationError(reason)
+
+
 @dataclass
 class StageResult:
     phase: str
@@ -153,7 +175,9 @@ class A4ExecutionResult:
     final_angle_rad: float
     n_ticks: int
     completed: bool
-    failure: str  # "" | "missed_contact" | "push_stalled" | "stage_timeout" | "command_rejected"
+    failure: str
+    environment_terminated: bool = False
+    environment_truncated: bool = False
     chunk_decisions: list[AdapterDecision] = field(default_factory=list)
     stages: list[StageResult] = field(default_factory=list)
     log: AdapterLog = field(default_factory=AdapterLog)
@@ -180,10 +204,63 @@ class A4ExecutionResult:
             "n_ticks": self.n_ticks,
             "completed": self.completed,
             "failure": self.failure,
+            "environment_terminated": self.environment_terminated,
+            "environment_truncated": self.environment_truncated,
             "chunk_decisions": [decision.to_dict() for decision in self.chunk_decisions],
             "stages": [stage.to_dict() for stage in self.stages],
             "log": self.log.to_dict(),
         }
+
+
+@dataclass(frozen=True)
+class _ValidatedSequence:
+    chunks: list[ObjectCentricChunk]
+    decisions: list[AdapterDecision]
+    status: AdapterStatus
+    rejected_reason: str = ""
+
+
+@dataclass
+class _A4ExecutionState:
+    ctx: Any
+    ticks: int = 0
+    stage_results: list[StageResult] = field(default_factory=list)
+    contact_reached: bool = False
+    push_entry_angle: float | None = None
+    push_exit_angle: float | None = None
+    failure: str = ""
+    environment_terminated: bool = False
+    environment_truncated: bool = False
+
+
+@dataclass
+class _StageExecution:
+    env: Any
+    stage: _Stage
+    ctx: Any
+    door_frame: Any
+    joint_limits: dict[str, np.ndarray] | None
+    max_ticks: int
+    total_ticks: int
+    stage_ticks: int = 0
+    stall_ticks: int = 0
+    contact_reached: bool = False
+
+
+@dataclass(frozen=True)
+class _StageObservation:
+    angle: float
+    ee_door: np.ndarray
+    in_contact: bool
+
+
+@dataclass(frozen=True)
+class _StageOutcome:
+    result: StageResult
+    ctx: Any
+    total_ticks: int
+    environment_terminated: bool = False
+    environment_truncated: bool = False
 
 
 class A4Adapter:
@@ -221,149 +298,41 @@ class A4Adapter:
         Returns the (possibly corrected) chunk and the decision. A rejected
         chunk is returned unchanged; callers must not execute it.
         """
-        geo = self.geometry
-        checks: dict[str, bool] = {}
-        warnings: list[str] = []
-        warning_records: list[AdapterWarning] = []
-        corrections: list[str] = []
-
+        state = _ChunkValidationState(chunk)
         try:
-            target = np.asarray(chunk.contact_target_panel, dtype=np.float64)
-        except (TypeError, ValueError):
-            checks["target_shape"] = False
+            target, numeric = self._parse_chunk(state)
+            hinge_delta = self._validate_phase_and_hinge(state, numeric)
+            target = self._validate_contact_target(state, target)
+            hinge_delta = self._fit_hinge_travel(
+                state, hinge_delta, entry_angle_rad
+            )
+            self._validate_reach(
+                state,
+                target,
+                entry_angle_rad,
+                entry_angle_rad + hinge_delta,
+                door_frame,
+            )
+        except _ChunkValidationError as exc:
             return chunk, self._reject_chunk(
                 chunk,
-                checks,
-                f"contact_target_panel must be a numeric shape (3,) vector, got "
-                f"{type(chunk.contact_target_panel).__name__}",
+                state.checks,
+                str(exc),
+                warnings=state.warnings,
+                warning_records=state.warning_records,
             )
-        checks["target_shape"] = target.shape == (3,)
-        if not checks["target_shape"]:
-            return chunk, self._reject_chunk(
-                chunk,
-                checks,
-                f"contact_target_panel must have shape (3,), got shape {target.shape}",
-            )
-
-        try:
-            numeric = np.array(
-                [*target, chunk.motion_hinge_delta_rad, float(chunk.duration_ticks)],
-                dtype=np.float64,
-            )
-        except (TypeError, ValueError):
-            checks["finite"] = False
-            return chunk, self._reject_chunk(chunk, checks, "chunk contains non-numeric values")
-        hinge_delta_requested = float(numeric[3])
-        duration_ticks = float(numeric[4])
-
-        checks["phase_known"] = chunk.phase in A4_PHASE_VOCAB
-        if not checks["phase_known"]:
-            return chunk, self._reject_chunk(
-                chunk, checks, f"unknown A4 phase {chunk.phase!r} (vocabulary: {A4_PHASE_VOCAB})"
-            )
-        checks["finite"] = bool(np.isfinite(numeric).all())
-        if not checks["finite"]:
-            return chunk, self._reject_chunk(chunk, checks, "chunk contains non-finite values")
-        checks["duration_positive"] = duration_ticks > 0
-        if not checks["duration_positive"]:
-            return chunk, self._reject_chunk(
-                chunk, checks, f"duration_ticks must be positive, got {chunk.duration_ticks}"
-            )
-
-        checks["push_not_pull"] = hinge_delta_requested >= 0.0
-        if not checks["push_not_pull"]:
-            return chunk, self._reject_chunk(
-                chunk,
-                checks,
-                f"hinge delta {hinge_delta_requested:.4f} rad is negative: pulling the "
-                "door is physically invalid for this scene (push face only, no grasp)",
-            )
-
-        checks["hinge_delta_phase_valid"] = chunk.phase == "push" or hinge_delta_requested == 0.0
-        if not checks["hinge_delta_phase_valid"]:
-            return chunk, self._reject_chunk(
-                chunk,
-                checks,
-                "non-push phase cannot request hinge motion",
-            )
-
-        checks["target_on_panel"] = geo.on_panel(target)
-        if not checks["target_on_panel"]:
-            nudged = geo.clamp_to_panel(target)
-            offset = float(np.linalg.norm(nudged - target))
-            if offset > self.cfg.target_nudge_tol_m:
-                return chunk, self._reject_chunk(
-                    chunk,
-                    checks,
-                    f"contact target {target.round(3).tolist()} is {offset:.3f} m off the "
-                    f"panel (correction tolerance {self.cfg.target_nudge_tol_m} m)",
-                )
-            target = nudged
-            corrections.append(f"contact target nudged {offset:.3f} m onto the panel")
-
-        checks["target_clear_of_handle"] = not geo.in_handle_band(target)
-        if not checks["target_clear_of_handle"]:
-            return chunk, self._reject_chunk(
-                chunk,
-                checks,
-                f"contact target {target.round(3).tolist()} lies in the handle band "
-                f"y in {list(geo.handle_band_y_m)}, z in {list(geo.handle_band_z_m)}",
-            )
-        if abs(target[0] - geo.surface_x_m(0.0)) > self.cfg.target_x_face_tol_m:
-            warnings.append(
-                f"chunk target x={target[0]:.3f} deviates from the EE-at-face convention "
-                f"x={geo.surface_x_m(0.0):.3f}; planning recomputes x from phase clearances"
-            )
-            warning_records.append(
-                AdapterWarning(
-                    id="a4.target_face_deviation",
-                    message=warnings[-1],
-                    evidence={
-                        "target_x_m": float(target[0]),
-                        "configured_face_x_m": geo.surface_x_m(0.0),
-                        "deviation_m": abs(float(target[0] - geo.surface_x_m(0.0))),
-                        "phase": chunk.phase,
-                    },
-                )
-            )
-
-        hinge_delta = hinge_delta_requested
-        exit_angle = entry_angle_rad + hinge_delta
-        checks["within_hinge_travel"] = exit_angle <= MAX_HINGE_ANGLE_RAD
-        if not checks["within_hinge_travel"]:
-            capped = max(MAX_HINGE_ANGLE_RAD - entry_angle_rad, 0.0)
-            corrections.append(
-                f"hinge delta capped from {hinge_delta:.4f} to {capped:.4f} rad "
-                f"(remaining travel to {MAX_HINGE_ANGLE_RAD:.4f})"
-            )
-            hinge_delta = capped
-            exit_angle = entry_angle_rad + hinge_delta
-
-        checks["reachable"] = True
-        if self.limits.workspace is not None and door_frame is not None:
-            reason = self._reach_reason(target, entry_angle_rad, exit_angle, chunk, door_frame)
-            if reason:
-                checks["reachable"] = False
-                return chunk, self._reject_chunk(
-                    chunk,
-                    checks,
-                    reason,
-                    warnings=warnings,
-                    warning_records=warning_records,
-                )
-
         corrected_chunk = replace(
             chunk,
             contact_target_panel=tuple(float(v) for v in target),
             motion_hinge_delta_rad=float(hinge_delta),
         )
-        if corrections:
+        if state.corrections:
             decision = AdapterDecision(
                 status=AdapterStatus.CORRECTED,
-                reason="; ".join(corrections),
-                checks=checks,
-                warnings=tuple(warnings),
-                warning_records=tuple(warning_records),
+                reason="; ".join(state.corrections),
+                checks=state.checks,
+                warnings=tuple(state.warnings),
+                warning_records=tuple(state.warning_records),
                 requested=numeric,
                 applied=np.array(
                     [
@@ -376,13 +345,154 @@ class A4Adapter:
         else:
             decision = AdapterDecision(
                 status=AdapterStatus.ACCEPTED,
-                checks=checks,
-                warnings=tuple(warnings),
-                warning_records=tuple(warning_records),
+                checks=state.checks,
+                warnings=tuple(state.warnings),
+                warning_records=tuple(state.warning_records),
                 requested=numeric,
                 applied=numeric,
             )
         return corrected_chunk, decision
+
+    def _parse_chunk(
+        self, state: _ChunkValidationState
+    ) -> tuple[np.ndarray, np.ndarray]:
+        chunk = state.chunk
+        try:
+            target = np.asarray(chunk.contact_target_panel, dtype=np.float64)
+        except (TypeError, ValueError):
+            state.fail(
+                "target_shape",
+                "contact_target_panel must be a numeric shape (3,) vector, got "
+                f"{type(chunk.contact_target_panel).__name__}",
+            )
+        state.require(
+            "target_shape",
+            target.shape == (3,),
+            f"contact_target_panel must have shape (3,), got shape {target.shape}",
+        )
+        try:
+            numeric = np.array(
+                [*target, chunk.motion_hinge_delta_rad, float(chunk.duration_ticks)],
+                dtype=np.float64,
+            )
+        except (TypeError, ValueError):
+            state.fail("finite", "chunk contains non-numeric values")
+        return target, numeric
+
+    def _validate_phase_and_hinge(
+        self, state: _ChunkValidationState, numeric: np.ndarray
+    ) -> float:
+        chunk = state.chunk
+        hinge_delta = float(numeric[3])
+        state.require(
+            "phase_known",
+            chunk.phase in A4_PHASE_VOCAB,
+            f"unknown A4 phase {chunk.phase!r} (vocabulary: {A4_PHASE_VOCAB})",
+        )
+        state.require(
+            "finite", bool(np.isfinite(numeric).all()), "chunk contains non-finite values"
+        )
+        state.require(
+            "duration_positive",
+            float(numeric[4]) > 0,
+            f"duration_ticks must be positive, got {chunk.duration_ticks}",
+        )
+        state.require(
+            "push_not_pull",
+            hinge_delta >= 0.0,
+            f"hinge delta {hinge_delta:.4f} rad is negative: pulling the door is physically "
+            "invalid for this scene (push face only, no grasp)",
+        )
+        state.require(
+            "hinge_delta_phase_valid",
+            chunk.phase == "push" or hinge_delta == 0.0,
+            "non-push phase cannot request hinge motion",
+        )
+        return hinge_delta
+
+    def _validate_contact_target(
+        self, state: _ChunkValidationState, target: np.ndarray
+    ) -> np.ndarray:
+        geo = self.geometry
+        state.checks["target_on_panel"] = geo.on_panel(target)
+        if not state.checks["target_on_panel"]:
+            nudged = geo.clamp_to_panel(target)
+            offset = float(np.linalg.norm(nudged - target))
+            if offset > self.cfg.target_nudge_tol_m:
+                raise _ChunkValidationError(
+                    f"contact target {target.round(3).tolist()} is {offset:.3f} m off the "
+                    f"panel (correction tolerance {self.cfg.target_nudge_tol_m} m)"
+                )
+            target = nudged
+            state.corrections.append(f"contact target nudged {offset:.3f} m onto the panel")
+        state.require(
+            "target_clear_of_handle",
+            not geo.in_handle_band(target),
+            f"contact target {target.round(3).tolist()} lies in the handle band "
+            f"y in {list(geo.handle_band_y_m)}, z in {list(geo.handle_band_z_m)}",
+        )
+        self._record_face_warning(state, target)
+        return target
+
+    def _record_face_warning(
+        self, state: _ChunkValidationState, target: np.ndarray
+    ) -> None:
+        face_x = self.geometry.surface_x_m(0.0)
+        deviation = abs(float(target[0] - face_x))
+        if deviation <= self.cfg.target_x_face_tol_m:
+            return
+        message = (
+            f"chunk target x={target[0]:.3f} deviates from the EE-at-face convention "
+            f"x={face_x:.3f}; planning recomputes x from phase clearances"
+        )
+        state.warnings.append(message)
+        state.warning_records.append(
+            AdapterWarning(
+                id="a4.target_face_deviation",
+                message=message,
+                evidence={
+                    "target_x_m": float(target[0]),
+                    "configured_face_x_m": face_x,
+                    "deviation_m": deviation,
+                    "phase": state.chunk.phase,
+                },
+            )
+        )
+
+    def _fit_hinge_travel(
+        self,
+        state: _ChunkValidationState,
+        hinge_delta: float,
+        entry_angle_rad: float,
+    ) -> float:
+        state.checks["within_hinge_travel"] = (
+            entry_angle_rad + hinge_delta <= MAX_HINGE_ANGLE_RAD
+        )
+        if state.checks["within_hinge_travel"]:
+            return hinge_delta
+        capped = max(MAX_HINGE_ANGLE_RAD - entry_angle_rad, 0.0)
+        state.corrections.append(
+            f"hinge delta capped from {hinge_delta:.4f} to {capped:.4f} rad "
+            f"(remaining travel to {MAX_HINGE_ANGLE_RAD:.4f})"
+        )
+        return capped
+
+    def _validate_reach(
+        self,
+        state: _ChunkValidationState,
+        target: np.ndarray,
+        entry_angle: float,
+        exit_angle: float,
+        door_frame,
+    ) -> None:
+        state.checks["reachable"] = True
+        if self.limits.workspace is None or door_frame is None:
+            return
+        reason = self._reach_reason(
+            target, entry_angle, exit_angle, state.chunk, door_frame
+        )
+        if reason:
+            state.fail("reachable", reason)
 
     def _reach_reason(
         self, target_panel, entry_angle: float, exit_angle: float, chunk, door_frame
@@ -536,173 +646,265 @@ class A4Adapter:
         joint_limits = read_joint_limits(env)
         ctx = read_step_context(env, door_frame, joint_limits, self.limits)
         initial_angle = ctx.hinge_angle_rad
+        validated = self._validate_sequence(chunks, initial_angle, door_frame)
+        if validated.rejected_reason:
+            return self._rejected_execution_result(
+                chunks, validated, initial_angle
+            )
 
+        state = _A4ExecutionState(ctx=ctx)
+        reason = "; ".join(
+            decision.reason for decision in validated.decisions if decision.reason
+        )
+        for stage in self.plan(validated.chunks):
+            outcome = self._run_stage(
+                _StageExecution(
+                    env=env,
+                    stage=stage,
+                    ctx=state.ctx,
+                    door_frame=door_frame,
+                    joint_limits=joint_limits,
+                    max_ticks=max_ticks,
+                    total_ticks=state.ticks,
+                )
+            )
+            self._apply_stage_outcome(state, stage, outcome)
+            if not outcome.result.completed:
+                state.failure = self._classify_stage_failure(stage, outcome)
+                failure_reason = f"{stage.phase} stage failed: {outcome.result.reason}"
+                reason = f"{reason}; {failure_reason}" if reason else failure_reason
+                break
+
+        requested_delta = sum(
+            chunk.motion_hinge_delta_rad for chunk in validated.chunks
+        )
+        achieved = self._achieved_push_delta(state)
+        return A4ExecutionResult(
+            status=validated.status,
+            reason=reason,
+            requested_hinge_delta_rad=requested_delta,
+            achieved_hinge_delta_rad=achieved,
+            contact_reached=state.contact_reached,
+            initial_angle_rad=initial_angle,
+            final_angle_rad=state.ctx.hinge_angle_rad,
+            n_ticks=state.ticks,
+            completed=not state.failure,
+            failure=state.failure,
+            environment_terminated=state.environment_terminated,
+            environment_truncated=state.environment_truncated,
+            chunk_decisions=validated.decisions,
+            stages=state.stage_results,
+            log=self.log,
+        )
+
+    def _validate_sequence(
+        self,
+        chunks: list[ObjectCentricChunk],
+        initial_angle: float,
+        door_frame,
+    ) -> _ValidatedSequence:
         validated: list[ObjectCentricChunk] = []
         decisions: list[AdapterDecision] = []
         entry_angle = initial_angle
-        overall_status = AdapterStatus.ACCEPTED
-        for chunk in chunks:
+        status = AdapterStatus.ACCEPTED
+        for index, chunk in enumerate(chunks):
             fixed, decision = self.validate_chunk(chunk, entry_angle, door_frame)
             decisions.append(decision)
             self.log.record(decision)
             if decision.status is AdapterStatus.REJECTED:
-                return A4ExecutionResult(
-                    status=AdapterStatus.REJECTED,
-                    reason=f"chunk {len(decisions) - 1} ({chunk.phase}): {decision.reason}",
-                    requested_hinge_delta_rad=self._requested_hinge_delta(chunks),
-                    achieved_hinge_delta_rad=0.0,
-                    contact_reached=False,
-                    initial_angle_rad=initial_angle,
-                    final_angle_rad=initial_angle,
-                    n_ticks=0,
-                    completed=False,
-                    failure="",
-                    chunk_decisions=decisions,
-                    log=self.log,
-                )
+                reason = f"chunk {index} ({chunk.phase}): {decision.reason}"
+                return _ValidatedSequence(validated, decisions, AdapterStatus.REJECTED, reason)
             if decision.status is AdapterStatus.CORRECTED:
-                overall_status = AdapterStatus.CORRECTED
+                status = AdapterStatus.CORRECTED
             validated.append(fixed)
             entry_angle += fixed.motion_hinge_delta_rad
+        return _ValidatedSequence(validated, decisions, status)
 
-        requested_delta = sum(chunk.motion_hinge_delta_rad for chunk in validated)
-        stages = self.plan(validated)
-
-        stage_results: list[StageResult] = []
-        contact_reached = False
-        push_entry_angle: float | None = None
-        push_exit_angle: float | None = None
-        ticks = 0
-        failure = ""
-        reason = "; ".join(d.reason for d in decisions if d.reason) or ""
-
-        for stage in stages:
-            result, ctx, ticks = self._run_stage(
-                env, stage, ctx, door_frame, joint_limits, ticks, max_ticks
-            )
-            stage_results.append(result)
-            if result.contact_reached:
-                contact_reached = True
-            if stage.phase == "push":
-                if push_entry_angle is None:
-                    push_entry_angle = result.entry_angle_rad
-                push_exit_angle = result.exit_angle_rad
-            if not result.completed:
-                if stage.phase in ("contact", "pre_contact") and "budget" in result.reason:
-                    failure = "missed_contact"
-                elif stage.phase == "push" and "stalled" in result.reason:
-                    failure = "push_stalled"
-                elif "rejected" in result.reason:
-                    failure = "command_rejected"
-                else:
-                    failure = "stage_timeout"
-                reason = (reason + "; " if reason else "") + (
-                    f"{stage.phase} stage failed: {result.reason}"
-                )
-                break
-
-        achieved = 0.0
-        if push_entry_angle is not None and push_exit_angle is not None:
-            achieved = push_exit_angle - push_entry_angle
-
+    def _rejected_execution_result(
+        self,
+        chunks: list[ObjectCentricChunk],
+        validated: _ValidatedSequence,
+        initial_angle: float,
+    ) -> A4ExecutionResult:
         return A4ExecutionResult(
-            status=overall_status,
-            reason=reason,
-            requested_hinge_delta_rad=requested_delta,
-            achieved_hinge_delta_rad=achieved,
-            contact_reached=contact_reached,
+            status=AdapterStatus.REJECTED,
+            reason=validated.rejected_reason,
+            requested_hinge_delta_rad=self._requested_hinge_delta(chunks),
+            achieved_hinge_delta_rad=0.0,
+            contact_reached=False,
             initial_angle_rad=initial_angle,
-            final_angle_rad=ctx.hinge_angle_rad,
-            n_ticks=ticks,
-            completed=not failure,
-            failure=failure,
-            chunk_decisions=decisions,
-            stages=stage_results,
+            final_angle_rad=initial_angle,
+            n_ticks=0,
+            completed=False,
+            failure="",
+            chunk_decisions=validated.decisions,
             log=self.log,
         )
 
-    def _run_stage(self, env, stage: _Stage, ctx, door_frame, joint_limits, ticks, max_ticks):
-        """Closed-loop stage execution; returns (StageResult, last ctx, ticks)."""
-        cfg = self.cfg
-        geo = self.geometry
-        entry_angle = ctx.hinge_angle_rad
+    def _run_stage(self, execution: _StageExecution) -> _StageOutcome:
+        """Run one guarded stage and freeze the last pre-reset context."""
+        stage = execution.stage
+        entry_angle = execution.ctx.hinge_angle_rad
         push_target_angle = entry_angle + stage.hinge_delta_rad
-        stage_ticks = 0
-        stall_ticks = 0
         completed = False
-        contact_reached = False
         why = ""
+        environment_terminated = False
+        environment_truncated = False
 
         while True:
-            angle = ctx.hinge_angle_rad
-            ee_door = door_frame.point_from_world(ctx.ee_pos_w)
-            ee_panel = rot_z(angle).T @ ee_door
-            in_contact = (
-                ctx.contact_sensed
-                if ctx.contact_sensed is not None
-                else geo.geometric_contact(ee_panel)
-            )
-            contact_reached = contact_reached or bool(in_contact)
-
-            done, why = self._stage_done(
-                stage, ee_door, angle, in_contact, push_target_angle, stage_ticks
-            )
+            observation = self._stage_observation(execution)
+            done, why = self._stage_done(execution, observation, push_target_angle)
             if done:
                 completed = True
                 break
-            if stage_ticks >= stage.budget_ticks:
-                why = f"stage tick budget exhausted ({stage.budget_ticks})"
+            why = self._stage_stop_reason(execution, observation.angle)
+            if why:
                 break
-            if ticks >= max_ticks:
-                why = f"rollout tick budget exhausted ({max_ticks})"
-                break
-            if stage.phase == "push":
-                if abs(ctx.hinge_velocity_rad_s) < cfg.push_stall_min_vel_rad_s:
-                    stall_ticks += 1
-                else:
-                    stall_ticks = 0
-                if stall_ticks >= cfg.push_stall_ticks:
-                    why = (
-                        f"push stalled: |hinge velocity| < {cfg.push_stall_min_vel_rad_s} rad/s "
-                        f"for {stall_ticks} ticks at angle {angle:.4f} rad"
-                    )
-                    break
-
-            target_panel = np.array(
-                [geo.surface_x_m(stage.clearance_m), *stage.target_panel_yz], dtype=np.float64
+            delta_door = self._stage_delta(
+                stage, observation.angle, observation.ee_door
             )
-            target_door = rot_z(angle) @ target_panel
-            delta_door = np.zeros(EE_DELTA_DIM)
-            if stage.phase != "hold":
-                error = target_door - ee_door
-                distance = float(np.linalg.norm(error))
-                step = error if distance <= cfg.max_step_m else error * (cfg.max_step_m / distance)
-                delta_door[:3] = step
-
-            applied, decision = self.a3.process(delta_door, ctx)
+            applied, decision = self.a3.process(delta_door, execution.ctx)
             if decision.status is AdapterStatus.REJECTED:
                 why = f"per-tick command rejected: {decision.reason}"
                 break
-            step_env(env, applied)
-            ticks += 1
-            stage_ticks += 1
-            ctx = read_step_context(env, door_frame, joint_limits, self.limits)
+            terminated, truncated = step_env(execution.env, applied)
+            execution.total_ticks += 1
+            execution.stage_ticks += 1
+            if terminated or truncated:
+                environment_terminated = terminated
+                environment_truncated = truncated
+                label = "terminated" if terminated else "truncated"
+                why = f"environment {label} at tick {execution.total_ticks}"
+                break
+            execution.ctx = read_step_context(
+                execution.env,
+                execution.door_frame,
+                execution.joint_limits,
+                self.limits,
+            )
 
         result = StageResult(
             phase=stage.phase,
             completed=completed,
             reason=why,
-            ticks=stage_ticks,
+            ticks=execution.stage_ticks,
             entry_angle_rad=entry_angle,
-            exit_angle_rad=ctx.hinge_angle_rad,
+            exit_angle_rad=execution.ctx.hinge_angle_rad,
             synthesized=stage.synthesized,
-            contact_reached=contact_reached,
+            contact_reached=execution.contact_reached,
         )
-        return result, ctx, ticks
+        return _StageOutcome(
+            result=result,
+            ctx=execution.ctx,
+            total_ticks=execution.total_ticks,
+            environment_terminated=environment_terminated,
+            environment_truncated=environment_truncated,
+        )
+
+    def _stage_observation(
+        self, execution: _StageExecution
+    ) -> _StageObservation:
+        angle = execution.ctx.hinge_angle_rad
+        ee_door = execution.door_frame.point_from_world(execution.ctx.ee_pos_w)
+        ee_panel = rot_z(angle).T @ ee_door
+        sensed = execution.ctx.contact_sensed
+        in_contact = (
+            bool(sensed)
+            if sensed is not None
+            else self.geometry.geometric_contact(ee_panel)
+        )
+        execution.contact_reached = execution.contact_reached or in_contact
+        return _StageObservation(angle, ee_door, in_contact)
+
+    def _stage_stop_reason(self, execution: _StageExecution, angle: float) -> str:
+        stage = execution.stage
+        if execution.stage_ticks >= stage.budget_ticks:
+            return f"stage tick budget exhausted ({stage.budget_ticks})"
+        if execution.total_ticks >= execution.max_ticks:
+            return f"rollout tick budget exhausted ({execution.max_ticks})"
+        if stage.phase != "push":
+            return ""
+        if abs(execution.ctx.hinge_velocity_rad_s) < self.cfg.push_stall_min_vel_rad_s:
+            execution.stall_ticks += 1
+        else:
+            execution.stall_ticks = 0
+        if execution.stall_ticks < self.cfg.push_stall_ticks:
+            return ""
+        return (
+            f"push stalled: |hinge velocity| < {self.cfg.push_stall_min_vel_rad_s} rad/s "
+            f"for {execution.stall_ticks} ticks at angle {angle:.4f} rad"
+        )
+
+    def _stage_delta(
+        self, stage: _Stage, angle: float, ee_door: np.ndarray
+    ) -> np.ndarray:
+        delta_door = np.zeros(EE_DELTA_DIM)
+        if stage.phase == "hold":
+            return delta_door
+        target_panel = np.array(
+            [self.geometry.surface_x_m(stage.clearance_m), *stage.target_panel_yz],
+            dtype=np.float64,
+        )
+        error = rot_z(angle) @ target_panel - ee_door
+        distance = float(np.linalg.norm(error))
+        step = (
+            error
+            if distance <= self.cfg.max_step_m
+            else error * (self.cfg.max_step_m / distance)
+        )
+        delta_door[:3] = step
+        return delta_door
+
+    def _apply_stage_outcome(
+        self,
+        state: _A4ExecutionState,
+        stage: _Stage,
+        outcome: _StageOutcome,
+    ) -> None:
+        result = outcome.result
+        state.stage_results.append(result)
+        state.ctx = outcome.ctx
+        state.ticks = outcome.total_ticks
+        state.contact_reached = state.contact_reached or result.contact_reached
+        state.environment_terminated = outcome.environment_terminated
+        state.environment_truncated = outcome.environment_truncated
+        if stage.phase == "push":
+            if state.push_entry_angle is None:
+                state.push_entry_angle = result.entry_angle_rad
+            state.push_exit_angle = result.exit_angle_rad
+
+    def _classify_stage_failure(
+        self, stage: _Stage, outcome: _StageOutcome
+    ) -> str:
+        if outcome.environment_terminated:
+            return "environment_terminated"
+        if outcome.environment_truncated:
+            return "environment_truncated"
+        reason = outcome.result.reason
+        if stage.phase in ("contact", "pre_contact") and "budget" in reason:
+            return "missed_contact"
+        if stage.phase == "push" and "stalled" in reason:
+            return "push_stalled"
+        if "rejected" in reason:
+            return "command_rejected"
+        return "stage_timeout"
+
+    @staticmethod
+    def _achieved_push_delta(state: _A4ExecutionState) -> float:
+        if state.push_entry_angle is None or state.push_exit_angle is None:
+            return 0.0
+        return state.push_exit_angle - state.push_entry_angle
 
     def _stage_done(
-        self, stage: _Stage, ee_door, angle, in_contact, push_target_angle, stage_ticks
+        self,
+        execution: _StageExecution,
+        observation: _StageObservation,
+        push_target_angle: float,
     ) -> tuple[bool, str]:
+        stage = execution.stage
+        ee_door = observation.ee_door
+        angle = observation.angle
+        in_contact = observation.in_contact
         geo = self.geometry
         cfg = self.cfg
         target_panel = np.array(
@@ -723,7 +925,7 @@ class A4Adapter:
         if stage.phase == "push":
             return angle >= push_target_angle, "requested hinge delta achieved"
         if stage.phase == "hold":
-            return stage_ticks >= stage.hold_ticks, "hold duration elapsed"
+            return execution.stage_ticks >= stage.hold_ticks, "hold duration elapsed"
         raise ValueError(f"unplannable stage phase {stage.phase!r}")
 
 
