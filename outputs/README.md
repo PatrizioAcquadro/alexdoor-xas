@@ -76,4 +76,4 @@ Empty optional directories are not created.
 
 W&B is an optional direct SDK integration: unset or `WANDB_MODE=disabled` creates nothing, while enabled modes write standard SDK state only under `outputs/wandb/`. The scripts log scalar aggregates only and never automatically publish artifacts or media. 
 
-Reusable datasets stay in `datasets/`; calibration probes, verifier artifacts, scripted-run staging, and arbitrary scenes stay under `~/.cache/alexdoor-xas/`.
+Reusable datasets stay in `datasets/`; calibration authoring evidence, verifier artifacts, scripted-run staging, and arbitrary scenes stay under `~/.cache/alexdoor-xas/`.

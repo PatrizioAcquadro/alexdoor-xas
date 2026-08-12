@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 from alexdoor_xas import paths
-from alexdoor_xas.assets.alex_v2_candidate_pd import apply_production_right_arm_pd
 from alexdoor_xas.assets.alex_v2_contract import (
     DOOR_NON_RIGHT_ARM_DAMPING_SCALE,
     DOOR_RIGHT_ARM_ACTUATOR_NAME,
@@ -19,6 +18,7 @@ from alexdoor_xas.assets.alex_v2_contract import (
     validate_alex_v2_manifest,
 )
 from alexdoor_xas.assets.alex_v2_manifest import build_alex_v2_manifest
+from alexdoor_xas.assets.alex_v2_right_arm_pd import apply_production_right_arm_pd
 
 
 @dataclass(frozen=True)

@@ -1,4 +1,4 @@
-"""Pure tests for candidate-only Alex V2 right-arm PD splitting."""
+"""Pure tests for production Alex V2 right-arm PD isolation."""
 
 from __future__ import annotations
 
@@ -7,16 +7,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from alexdoor_xas.assets.alex_v2_candidate_pd import (
-    PRODUCTION_RIGHT_ARM_PD_PROFILE,
-    RIGHT_ARM_PD_JOINTS,
-    RIGHT_ARM_PD_PROFILES,
-    apply_candidate_right_arm_pd,
-    apply_production_right_arm_pd,
-    apply_right_arm_pd_profile_selection,
-    candidate_right_arm_pd_profile_names,
+from alexdoor_xas.assets.alex_v2_contract import (
+    DOOR_RIGHT_ARM_ACTUATOR_NAME,
+    DOOR_RIGHT_ARM_PD_GAINS,
 )
-from alexdoor_xas.assets.alex_v2_contract import DOOR_RIGHT_ARM_ACTUATOR_NAME
+from alexdoor_xas.assets.alex_v2_right_arm_pd import (
+    RIGHT_ARM_PD_JOINTS,
+    apply_production_right_arm_pd,
+)
 
 _ARM_EXPRESSIONS = (
     ".*SHOULDER_Y",
@@ -78,21 +76,6 @@ def _cfg():
     )
 
 
-def test_profile_names_and_gain_contract_are_deterministic() -> None:
-    assert candidate_right_arm_pd_profile_names() == (
-        "stable_4x_v1",
-        "balanced_3_5x_v1",
-        "responsive_k125_v1",
-    )
-    for profile in RIGHT_ARM_PD_PROFILES.values():
-        assert tuple(profile) == RIGHT_ARM_PD_JOINTS
-        assert all(set(gains) == {"stiffness", "damping"} for gains in profile.values())
-        assert all(
-            gains["stiffness"] > 0.0 and gains["damping"] > 0.0
-            for gains in profile.values()
-        )
-
-
 def test_production_splits_exact_right_arm_and_preserves_every_other_actuator() -> None:
     cfg = _cfg()
     legs_before = deepcopy(cfg.actuators["legs"])
@@ -128,7 +111,10 @@ def test_production_splits_exact_right_arm_and_preserves_every_other_actuator() 
     assert retained.armature == arms_before.armature
     assert retained.friction == arms_before.friction
 
-    expected = RIGHT_ARM_PD_PROFILES["stable_4x_v1"]
+    expected = {
+        name: {"stiffness": stiffness, "damping": damping}
+        for name, stiffness, damping in DOOR_RIGHT_ARM_PD_GAINS
+    }
     assert right.stiffness == {
         name: expected[name]["stiffness"] for name in RIGHT_ARM_PD_JOINTS
     }
@@ -142,10 +128,7 @@ def test_production_splits_exact_right_arm_and_preserves_every_other_actuator() 
             right.velocity_limit_sim[name]
             == arms_before.velocity_limit_sim[source_expression]
         )
-        assert (
-            right.effort_limit_sim[name]
-            == arms_before.effort_limit_sim[source_expression]
-        )
+        assert right.effort_limit_sim[name] == arms_before.effort_limit_sim[source_expression]
         assert right.armature[name] == arms_before.armature[source_expression]
         assert right.friction[name] == arms_before.friction[source_expression]
         assert evidence["gains"][name] == {
@@ -157,87 +140,6 @@ def test_production_splits_exact_right_arm_and_preserves_every_other_actuator() 
     assert evidence["right_arm_only"] is True
     assert evidence["position_limits"] == {"source": "URDF", "modified": False}
     assert evidence["scope"] == "production_door_v2"
-
-
-def test_candidate_overrides_only_the_isolated_production_right_arm() -> None:
-    cfg = _cfg()
-    apply_production_right_arm_pd(cfg)
-    non_right_before = {
-        name: deepcopy(actuator)
-        for name, actuator in cfg.actuators.items()
-        if name != DOOR_RIGHT_ARM_ACTUATOR_NAME
-    }
-    production_right = deepcopy(cfg.actuators[DOOR_RIGHT_ARM_ACTUATOR_NAME])
-
-    evidence = apply_candidate_right_arm_pd(
-        cfg, profile_name="balanced_3_5x_v1"
-    )
-
-    for name, actuator in non_right_before.items():
-        assert cfg.actuators[name].__dict__ == actuator.__dict__
-    candidate = cfg.actuators[DOOR_RIGHT_ARM_ACTUATOR_NAME]
-    assert candidate.stiffness == {
-        name: RIGHT_ARM_PD_PROFILES["balanced_3_5x_v1"][name]["stiffness"]
-        for name in RIGHT_ARM_PD_JOINTS
-    }
-    assert candidate.damping == {
-        name: RIGHT_ARM_PD_PROFILES["balanced_3_5x_v1"][name]["damping"]
-        for name in RIGHT_ARM_PD_JOINTS
-    }
-    assert candidate.velocity_limit_sim == production_right.velocity_limit_sim
-    assert candidate.effort_limit_sim == production_right.effort_limit_sim
-    assert candidate.armature == production_right.armature
-    assert evidence["overrides_production_right_arm"] is True
-    assert evidence["production_config_modified"] is False
-    assert evidence["production_manifest_modified"] is False
-
-
-def test_production_v2_profile_selects_ik40_without_candidate_override() -> None:
-    cfg = _cfg()
-    apply_production_right_arm_pd(cfg)
-    actuators_before = deepcopy(cfg.actuators)
-
-    selection = apply_right_arm_pd_profile_selection(
-        cfg, profile_name="production_right_arm_pd_v2"
-    )
-
-    assert PRODUCTION_RIGHT_ARM_PD_PROFILE == "production_right_arm_pd_v2"
-    assert selection == {
-        "requested_profile": "production_right_arm_pd_v2",
-        "effective_profile": "production_right_arm_pd_v2",
-        "uses_production_right_arm_pd": True,
-        "candidate_override": None,
-    }
-    assert cfg.actuators.keys() == actuators_before.keys()
-    for name, actuator in cfg.actuators.items():
-        assert actuator.__dict__ == actuators_before[name].__dict__
-
-
-def test_removed_production_v1_spelling_is_rejected() -> None:
-    cfg = _cfg()
-    apply_production_right_arm_pd(cfg)
-    actuators_before = deepcopy(cfg.actuators)
-
-    with pytest.raises(ValueError, match="unknown right-arm PD candidate"):
-        apply_right_arm_pd_profile_selection(
-            cfg, profile_name="production_right_arm_pd_" + "v1"
-        )
-
-    for name, actuator in cfg.actuators.items():
-        assert actuator.__dict__ == actuators_before[name].__dict__
-
-
-def test_candidate_profile_selection_remains_an_explicit_override() -> None:
-    cfg = _cfg()
-    apply_production_right_arm_pd(cfg)
-
-    selection = apply_right_arm_pd_profile_selection(
-        cfg, profile_name="balanced_3_5x_v1"
-    )
-
-    assert selection["effective_profile"] == "balanced_3_5x_v1"
-    assert selection["uses_production_right_arm_pd"] is False
-    assert selection["candidate_override"]["overrides_production_right_arm"] is True
 
 
 @pytest.mark.parametrize(
@@ -275,17 +177,3 @@ def test_production_rejects_unsafe_or_malformed_source_without_mutating_actuator
 
     assert cfg.actuators.keys() == actuators_before.keys()
     assert DOOR_RIGHT_ARM_ACTUATOR_NAME not in cfg.actuators
-
-
-def test_candidate_rejects_unknown_profile_and_supports_future_reoverride() -> None:
-    cfg = _cfg()
-    with pytest.raises(ValueError, match="unknown right-arm PD candidate"):
-        apply_candidate_right_arm_pd(cfg, profile_name="not-a-profile")
-
-    apply_production_right_arm_pd(cfg)
-    apply_candidate_right_arm_pd(cfg, profile_name="balanced_3_5x_v1")
-    apply_candidate_right_arm_pd(cfg, profile_name="responsive_k125_v1")
-    assert cfg.actuators[DOOR_RIGHT_ARM_ACTUATOR_NAME].damping == {
-        name: RIGHT_ARM_PD_PROFILES["responsive_k125_v1"][name]["damping"]
-        for name in RIGHT_ARM_PD_JOINTS
-    }

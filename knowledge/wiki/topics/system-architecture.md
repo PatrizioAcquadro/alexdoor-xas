@@ -24,7 +24,7 @@ Closed-loop evaluation loads the source run's frozen configuration and self-cont
 
 ## Storage boundary
 
-`outputs/` is limited to `README.md`, canonical `door_scene/D0.usda`-`D4.usda`, learned runs under `door_push_alex_v2/{act,diffusion}/`, and optional standard SDK state under `wandb/`. Reusable episodes remain under `datasets/`. Scripted-run staging, calibration probes, verification evidence, and arbitrary scenes live under `~/.cache/alexdoor-xas/`.
+`outputs/` is limited to `README.md`, canonical `door_scene/D0.usda`-`D4.usda`, learned runs under `door_push_alex_v2/{act,diffusion}/`, and optional standard SDK state under `wandb/`. Reusable episodes remain under `datasets/`. Scripted-run staging, calibration authoring evidence, verification evidence, and arbitrary scenes live under `~/.cache/alexdoor-xas/`.
 
 ## Runtime boundary
 
