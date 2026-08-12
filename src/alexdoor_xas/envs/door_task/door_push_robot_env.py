@@ -26,9 +26,8 @@ from isaaclab.sensors import ContactSensor
 from alexdoor_xas.assets.door_task import ensure_door_task_usd
 from alexdoor_xas.kinematics import StartPoseError, check_settle_postcondition
 
-from .door_env import resolve_hinge_joint_id
-from .door_push_env import read_doorframe_from_stage
-from .door_push_env_cfg import OBSERVATION_TERMS
+from .door_contract import DOOR_PUSH_OBSERVATION_TERMS
+from .door_runtime import read_doorframe_from_stage, resolve_hinge_joint_id
 from .joint_limits import clamp_joint_targets
 
 if TYPE_CHECKING:
@@ -210,7 +209,8 @@ class DoorPushRobotEnv(DirectRLEnv):
         obs = torch.cat((hinge_pos, hinge_vel, ee_pos - self.scene.env_origins, ee_quat), dim=-1)
         if not torch.isfinite(obs).all():
             raise RuntimeError(
-                f"door push observations {OBSERVATION_TERMS} contain non-finite values: "
+                "door push observations "
+                f"{DOOR_PUSH_OBSERVATION_TERMS} contain non-finite values: "
                 f"{obs.detach().cpu()}"
             )
         return {"policy": obs}

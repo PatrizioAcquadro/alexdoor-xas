@@ -12,6 +12,7 @@ from isaaclab.envs import DirectRLEnv
 from alexdoor_xas.assets.door_task import ensure_door_task_usd
 
 from .door_env_cfg import OBSERVATION_TERMS
+from .door_runtime import resolve_hinge_joint_id
 
 if TYPE_CHECKING:
     from .door_env_cfg import DoorTaskEnvCfg
@@ -100,24 +101,5 @@ class DoorTaskEnv(DirectRLEnv):
 
     def _resolve_hinge_joint_id(self) -> int:
         return resolve_hinge_joint_id(list(self._door.joint_names), self.cfg.hinge_joint_name)
-
-
-def resolve_hinge_joint_id(joint_names: list[str], hinge_joint_name: str) -> int:
-    """Return the index of the single hinge joint in ``joint_names``."""
-    target = hinge_joint_name.lower()
-    matches = [
-        idx
-        for idx, name in enumerate(joint_names)
-        if name.lower() == target or name.rsplit("/", 1)[-1].lower() == target
-    ]
-    if len(matches) == 1:
-        return matches[0]
-    if not matches and len(joint_names) == 1:
-        return 0
-    raise RuntimeError(
-        f"could not identify one hinge joint named {hinge_joint_name!r}; "
-        f"available joints: {joint_names}"
-    )
-
 
 __all__ = ["DoorTaskEnv", "resolve_hinge_joint_id"]

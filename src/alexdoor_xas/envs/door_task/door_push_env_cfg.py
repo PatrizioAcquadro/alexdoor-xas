@@ -9,29 +9,15 @@ from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sim import SimulationCfg
 from isaaclab.utils.configclass import configclass
 
-from .door_env_cfg import (
+from .door_contract import (
+    DOOR_PUSH_ACTION_TERMS as ACTION_TERMS,
+)
+from .door_contract import (
+    DOOR_PUSH_OBSERVATION_TERMS as OBSERVATION_TERMS,
+)
+from .door_contract import (
     DOOR_TASK_ARTICULATION_PRIM_PATH,
     DOOR_TASK_SCENE_SOURCE_PRIM_PATH,
-)
-
-OBSERVATION_TERMS = (
-    "door_angle_rad",
-    "door_angular_velocity_rad_s",
-    "ee_pos_x_m",
-    "ee_pos_y_m",
-    "ee_pos_z_m",
-    "ee_quat_w",
-    "ee_quat_x",
-    "ee_quat_y",
-    "ee_quat_z",
-)
-ACTION_TERMS = (
-    "d_pos_x_m",
-    "d_pos_y_m",
-    "d_pos_z_m",
-    "d_rot_x_rad",
-    "d_rot_y_rad",
-    "d_rot_z_rad",
 )
 
 PROXY_EE_PRIM_PATH = "/World/envs/env_.*/ProxyEE"

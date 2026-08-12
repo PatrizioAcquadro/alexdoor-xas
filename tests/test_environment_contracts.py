@@ -7,6 +7,14 @@ import importlib.util
 import pytest
 
 from alexdoor_xas.envs import door_task
+from alexdoor_xas.envs.door_task.door_contract import (
+    DOOR_PUSH_ACTION_TERMS,
+    DOOR_PUSH_OBSERVATION_TERMS,
+    DOOR_TASK_ARTICULATION_PRIM_PATH,
+    DOOR_TASK_SCENE_PRIM_PATH,
+    DOOR_TASK_SCENE_SOURCE_PRIM_PATH,
+)
+from alexdoor_xas.envs.door_task.door_runtime import resolve_hinge_joint_id
 
 SUPPORTED_ENVIRONMENTS = (
     (
@@ -25,6 +33,31 @@ SUPPORTED_ENVIRONMENTS = (
         "alexdoor_xas.envs.door_task.door_push_alex_v2_env_cfg:DoorPushAlexV2EnvCfg",
     ),
 )
+
+
+def test_neutral_door_contract_is_complete() -> None:
+    assert len(DOOR_PUSH_ACTION_TERMS) == 6
+    assert len(DOOR_PUSH_OBSERVATION_TERMS) == 9
+    assert DOOR_TASK_SCENE_SOURCE_PRIM_PATH == "/World/envs/env_0/DoorTaskScene"
+    assert DOOR_TASK_SCENE_PRIM_PATH == "/World/envs/env_.*/DoorTaskScene"
+    assert DOOR_TASK_ARTICULATION_PRIM_PATH.endswith("/DoorTaskScene/DoorTaskDoor")
+
+
+@pytest.mark.parametrize(
+    ("joint_names", "expected"),
+    [
+        (["Hinge"], 0),
+        (["shoulder", "Door/Hinge"], 1),
+        (["the_only_joint"], 0),
+    ],
+)
+def test_resolve_hinge_joint_id(joint_names: list[str], expected: int) -> None:
+    assert resolve_hinge_joint_id(joint_names, "Hinge") == expected
+
+
+def test_resolve_hinge_joint_id_fails_closed() -> None:
+    with pytest.raises(RuntimeError, match="could not identify one hinge joint"):
+        resolve_hinge_joint_id(["Hinge", "Door/Hinge"], "Hinge")
 
 
 def test_supported_environment_entry_points_are_explicit() -> None:

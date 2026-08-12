@@ -9,12 +9,14 @@ from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sim import SimulationCfg
 from isaaclab.utils.configclass import configclass
 
+from .door_contract import (
+    DOOR_TASK_ARTICULATION_PRIM_PATH,
+    DOOR_TASK_SCENE_PRIM_PATH,
+    DOOR_TASK_SCENE_SOURCE_PRIM_PATH,
+)
+
 OBSERVATION_TERMS = ("door_angle_rad", "door_angular_velocity_rad_s")
 ACTION_TERMS = ("noop_debug_action",)
-
-DOOR_TASK_SCENE_SOURCE_PRIM_PATH = "/World/envs/env_0/DoorTaskScene"
-DOOR_TASK_ARTICULATION_PRIM_PATH = "/World/envs/env_.*/DoorTaskScene/DoorTaskDoor"
-DOOR_TASK_SCENE_PRIM_PATH = "/World/envs/env_.*/DoorTaskScene"
 
 
 @configclass

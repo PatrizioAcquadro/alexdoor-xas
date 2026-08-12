@@ -12,11 +12,12 @@ from isaaclab.sensors import ContactSensorCfg
 from isaaclab.sim import SimulationCfg
 from isaaclab.utils.configclass import configclass
 
-from .door_env_cfg import (
+from .door_contract import (
+    DOOR_PUSH_ACTION_TERMS,
+    DOOR_PUSH_OBSERVATION_TERMS,
     DOOR_TASK_ARTICULATION_PRIM_PATH,
     DOOR_TASK_SCENE_SOURCE_PRIM_PATH,
 )
-from .door_push_env_cfg import ACTION_TERMS, OBSERVATION_TERMS
 
 DOOR_PANEL_BODY_PRIM_PATH = f"{DOOR_TASK_ARTICULATION_PRIM_PATH}/Door"
 """Rigid body containing the door panel's only collider.
@@ -43,8 +44,8 @@ class DoorPushRobotEnvCfg(DirectRLEnvCfg):
 
     decimation = 2
     episode_length_s = 10.0
-    action_space = len(ACTION_TERMS)
-    observation_space = len(OBSERVATION_TERMS)
+    action_space = len(DOOR_PUSH_ACTION_TERMS)
+    observation_space = len(DOOR_PUSH_OBSERVATION_TERMS)
     state_space = 0
 
     sim: SimulationCfg = SimulationCfg(device="cpu", dt=1 / 120, render_interval=decimation)

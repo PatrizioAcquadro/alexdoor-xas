@@ -26,40 +26,15 @@ from isaaclab.envs import DirectRLEnv
 
 from alexdoor_xas.assets.door_task import ensure_door_task_usd
 
-from .door_env import resolve_hinge_joint_id
 from .door_push_env_cfg import OBSERVATION_TERMS
+from .door_runtime import (
+    DOORFRAME_PRIM_TEMPLATE,
+    read_doorframe_from_stage,
+    resolve_hinge_joint_id,
+)
 
 if TYPE_CHECKING:
     from .door_push_env_cfg import DoorPushEnvCfg
-
-DOORFRAME_PRIM_TEMPLATE = "/World/envs/env_{index}/DoorTaskScene/DoorTaskDoor/Doorframe"
-
-
-def read_doorframe_from_stage(env_id: int) -> tuple[tuple[float, ...], tuple[float, ...]]:
-    """World pose of one env's ``Doorframe`` prim, read from the USD stage.
-
-    Returns ``(pos, quat_xyzw)``. Used instead of live articulation pose reads,
-    which return zeros in this Isaac Lab build's direct-env context (see module
-    docstring). Valid only after ``AppLauncher``.
-    """
-    import omni.usd  # noqa: PLC0415 - Kit runtime import, valid after AppLauncher.
-    from pxr import Usd, UsdGeom  # noqa: PLC0415
-
-    stage = omni.usd.get_context().get_stage()
-    cache = UsdGeom.XformCache(Usd.TimeCode.Default())
-    prim_path = DOORFRAME_PRIM_TEMPLATE.format(index=env_id)
-    prim = stage.GetPrimAtPath(prim_path)
-    if not prim.IsValid():
-        raise RuntimeError(f"door frame prim not found on stage: {prim_path}")
-    transform = cache.GetLocalToWorldTransform(prim)
-    translation = transform.ExtractTranslation()
-    quat = transform.RemoveScaleShear().ExtractRotationQuat()
-    imaginary = quat.GetImaginary()
-    return (
-        (translation[0], translation[1], translation[2]),
-        (imaginary[0], imaginary[1], imaginary[2], quat.GetReal()),
-    )
-
 
 class DoorPushEnv(DirectRLEnv):
     """Single-door push task driven by an externally scripted (or learned) policy."""
