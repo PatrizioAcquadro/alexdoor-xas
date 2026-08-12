@@ -80,7 +80,7 @@ def test_production_splits_exact_right_arm_and_preserves_every_other_actuator() 
     torso_before = deepcopy(cfg.actuators["torso_head"])
     arms_before = deepcopy(cfg.actuators["arms"])
 
-    evidence = apply_production_right_arm_pd(cfg)
+    apply_production_right_arm_pd(cfg)
 
     assert cfg.actuators["legs"].__dict__ == legs_before.__dict__
     assert cfg.actuators["torso_head"].__dict__ == torso_before.__dict__
@@ -120,15 +120,6 @@ def test_production_splits_exact_right_arm_and_preserves_every_other_actuator() 
         assert right.effort_limit_sim[name] == arms_before.effort_limit_sim[source_expression]
         assert right.armature[name] == arms_before.armature[source_expression]
         assert right.friction[name] == arms_before.friction[source_expression]
-        assert evidence["gains"][name] == {
-            **expected[name],
-            "velocity_limit_sim": arms_before.velocity_limit_sim[source_expression],
-            "effort_limit_sim": arms_before.effort_limit_sim[source_expression],
-            "armature": arms_before.armature[source_expression],
-        }
-    assert evidence["right_arm_only"] is True
-    assert evidence["position_limits"] == {"source": "URDF", "modified": False}
-    assert evidence["scope"] == "production_door_v2"
 
 
 @pytest.mark.parametrize(

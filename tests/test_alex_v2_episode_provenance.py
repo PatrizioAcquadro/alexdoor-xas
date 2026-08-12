@@ -10,16 +10,15 @@ import pytest
 from alexdoor_xas import paths
 from alexdoor_xas.assets.alex_v2_contract import (
     AlexV2ContractError,
-    derive_fixed_base_door_manifest,
-    validate_alex_v2_manifest,
+    RobotAssetRef,
+    build_alex_v2_runtime_manifest,
 )
-from alexdoor_xas.assets.alex_v2_manifest import build_alex_v2_manifest
 from alexdoor_xas.data_engine import DataEngineCfg, plan_episodes, run_episode
 from conftest import FakeDoorPushEnv, make_test_engine_cfg
 
 
-def _shared_manifest() -> dict[str, Any]:
-    return build_alex_v2_manifest()
+def _runtime_asset() -> tuple[dict[str, Any], RobotAssetRef]:
+    return build_alex_v2_runtime_manifest()
 
 
 class _AssetEnv(FakeDoorPushEnv):
@@ -62,8 +61,7 @@ def test_env_without_asset_accessor_preserves_episode_shape() -> None:
 
 
 def test_v2_episode_records_validated_identity_and_deep_copied_manifest() -> None:
-    manifest = derive_fixed_base_door_manifest(_shared_manifest())
-    ref = validate_alex_v2_manifest(manifest)
+    manifest, ref = _runtime_asset()
     payload = {**ref.to_dict(), "manifest": manifest}
     original = deepcopy(payload)
     env = _AssetEnv(payload)
@@ -88,8 +86,7 @@ def test_v2_episode_records_validated_identity_and_deep_copied_manifest() -> Non
     ("non_mapping", "missing_key", "non_mapping_manifest", "mismatched_reference"),
 )
 def test_malformed_v2_provenance_fails_before_reset(case: str) -> None:
-    manifest = derive_fixed_base_door_manifest(_shared_manifest())
-    ref = validate_alex_v2_manifest(manifest)
+    manifest, ref = _runtime_asset()
     payload: Any = {**ref.to_dict(), "manifest": manifest}
     if case == "non_mapping":
         payload = []
@@ -108,8 +105,7 @@ def test_malformed_v2_provenance_fails_before_reset(case: str) -> None:
 
 
 def test_forged_v2_manifest_fails_before_reset() -> None:
-    manifest = derive_fixed_base_door_manifest(_shared_manifest())
-    ref = validate_alex_v2_manifest(manifest)
+    manifest, ref = _runtime_asset()
     manifest["runtime_variant"]["non_right_arm_damping_scale"] = 1.0
     env = _AssetEnv({**ref.to_dict(), "manifest": manifest})
 

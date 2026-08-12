@@ -7,6 +7,7 @@ import hashlib
 import importlib
 import importlib.util
 import json
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,18 +16,14 @@ import pytest
 from alexdoor_xas import paths
 from alexdoor_xas.assets import alex_v2 as alex_v2_loader
 from alexdoor_xas.assets.alex_v2_contract import (
-    DOOR_ACTUATOR_CONFIG_VERSION,
     DOOR_NON_RIGHT_ARM_DAMPING_SCALE,
     DOOR_RIGHT_ARM_ACTUATOR_NAME,
     DOOR_RIGHT_ARM_PD_GAINS,
-    DOOR_RIGHT_ARM_PD_VERSION,
     EXPECTED_RUNTIME_JOINTS,
-    EXPECTED_URDF_SHA256,
     AlexV2ContractError,
     RobotAssetRef,
     assert_checkpoint_runtime_compatible,
-    derive_fixed_base_door_manifest,
-    door_right_arm_pd_contract,
+    build_alex_v2_runtime_manifest,
     validate_alex_v2_manifest,
 )
 from alexdoor_xas.assets.alex_v2_manifest import (
@@ -71,7 +68,7 @@ def test_manifest_freezes_all_29_runtime_joint_names_and_order() -> None:
     assert len(EXPECTED_RUNTIME_JOINTS) == 29
     assert manifest["movable_joint_count"] == 29
     assert set(manifest["movable_joints"]) == set(EXPECTED_RUNTIME_JOINTS)
-    assert ref.sha256 == EXPECTED_URDF_SHA256
+    assert ref.sha256 == EXPECTED_ALEX_V2_URDF_SHA256
 
     manifest["movable_joints"][5:7] = reversed(manifest["movable_joints"][5:7])
     with pytest.raises(AlexV2ContractError, match="pinned URDF-derived manifest"):
@@ -107,26 +104,23 @@ def test_manifest_rejects_nested_disagreement_and_rehashed_extra_inputs() -> Non
 
 def test_fixed_base_runtime_has_a_distinct_verified_identity() -> None:
     shared = _manifest()
+    runtime, runtime_ref = build_alex_v2_runtime_manifest()
     shared_ref = validate_alex_v2_manifest(shared)
-    runtime = derive_fixed_base_door_manifest(shared)
-    runtime_ref = validate_alex_v2_manifest(runtime)
     assert runtime_ref != shared_ref
     assert runtime["runtime_variant"]["fix_base"] is True
     assert runtime["runtime_variant"]["robot_tag"] == paths.ALEX_V2_ROBOT_TAG
-    expected_pd = door_right_arm_pd_contract()
+    expected_pd = runtime["runtime_variant"]["right_arm_pd"]
     assert runtime["runtime_variant"]["non_right_arm_damping_scale"] == 2.5
     assert runtime["fingerprint_inputs"]["non_right_arm_damping_scale"] == 2.5
     assert runtime["runtime_variant"]["right_arm_pd"] == expected_pd
     assert runtime["fingerprint_inputs"]["right_arm_pd"] == expected_pd
-    assert expected_pd["version"] == DOOR_RIGHT_ARM_PD_VERSION
+    assert expected_pd["version"] == "door-alex-v2-right-arm-ik40-pd-v2"
     assert expected_pd["actuator_name"] == DOOR_RIGHT_ARM_ACTUATOR_NAME
     assert [
         (item["joint_name"], item["stiffness"], item["damping"])
         for item in expected_pd["ordered_gains"]
     ] == list(DOOR_RIGHT_ARM_PD_GAINS)
     assert DOOR_NON_RIGHT_ARM_DAMPING_SCALE == 2.5
-    assert DOOR_ACTUATOR_CONFIG_VERSION == "door-alex-v2-fixedbase-right-arm-pd-v2"
-    assert DOOR_RIGHT_ARM_PD_VERSION == "door-alex-v2-right-arm-ik40-pd-v2"
     assert DOOR_RIGHT_ARM_PD_GAINS == (
         ("RIGHT_SHOULDER_Y", 600.0, 15.0),
         ("RIGHT_SHOULDER_X", 600.0, 15.0),
@@ -138,20 +132,20 @@ def test_fixed_base_runtime_has_a_distinct_verified_identity() -> None:
     assert runtime_ref.manifest_fingerprint == (
         "b8d5672bd5f1f653640d8822c27b31409697efed53c01d57907f3a161acecc96"
     )
-    assert runtime["actuator_config_version"] == DOOR_ACTUATOR_CONFIG_VERSION
+    assert runtime["actuator_config_version"] == "door-alex-v2-fixedbase-right-arm-pd-v2"
     assert "actuator_config_version" not in shared
 
-    forged = derive_fixed_base_door_manifest(shared)
+    forged = deepcopy(runtime)
     forged["runtime_variant"]["base_asset"]["manifest_fingerprint"] = "d" * 64
     with pytest.raises(AlexV2ContractError, match="canonical static-asset variant"):
         validate_alex_v2_manifest(forged)
 
-    forged_scale = derive_fixed_base_door_manifest(shared)
+    forged_scale = deepcopy(runtime)
     forged_scale["runtime_variant"]["non_right_arm_damping_scale"] = 1.0
     with pytest.raises(AlexV2ContractError, match="canonical static-asset variant"):
         validate_alex_v2_manifest(forged_scale)
 
-    forged_gain = derive_fixed_base_door_manifest(shared)
+    forged_gain = deepcopy(runtime)
     forged_gain["runtime_variant"]["right_arm_pd"]["ordered_gains"][3]["damping"] = 39.0
     with pytest.raises(AlexV2ContractError, match="canonical static-asset variant"):
         validate_alex_v2_manifest(forged_gain)

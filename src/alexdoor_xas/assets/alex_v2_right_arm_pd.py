@@ -93,17 +93,15 @@ def _copy_optional_source_field(source: Any, *, field: str) -> Any:
     return _finite_number(source, field=field, positive=False)
 
 
-def _validated_ordered_gains(
-    ordered_gains: tuple[tuple[str, float, float], ...],
-) -> dict[str, dict[str, float]]:
-    if tuple(item[0] for item in ordered_gains) != RIGHT_ARM_PD_JOINTS:
+def _validated_ordered_gains() -> dict[str, dict[str, float]]:
+    if tuple(item[0] for item in DOOR_RIGHT_ARM_PD_GAINS) != RIGHT_ARM_PD_JOINTS:
         raise ValueError("right-arm production gains must use the exact six-joint order")
     return {
         joint_name: {
             "stiffness": _finite_number(stiffness, field=f"{joint_name} stiffness", positive=True),
             "damping": _finite_number(damping, field=f"{joint_name} damping", positive=True),
         }
-        for joint_name, stiffness, damping in ordered_gains
+        for joint_name, stiffness, damping in DOOR_RIGHT_ARM_PD_GAINS
     }
 
 
@@ -120,14 +118,10 @@ def _validated_actuators(cfg: Any) -> dict[str, Any]:
     return actuators
 
 
-def apply_production_right_arm_pd(
-    cfg: Any,
-    *,
-    ordered_gains: tuple[tuple[str, float, float], ...] = DOOR_RIGHT_ARM_PD_GAINS,
-) -> dict[str, Any]:
+def apply_production_right_arm_pd(cfg: Any) -> None:
     """Split the six production right-arm joints from the shared arms actuator."""
 
-    gains_profile = _validated_ordered_gains(ordered_gains)
+    gains_profile = _validated_ordered_gains()
     actuators = _validated_actuators(cfg)
     if "arms" not in actuators:
         raise TypeError("production config must contain the shared 'arms' actuator")
@@ -181,30 +175,6 @@ def apply_production_right_arm_pd(
 
     actuators["arms"] = retained
     actuators[DOOR_RIGHT_ARM_ACTUATOR_NAME] = right_arm
-
-    gains = {
-        name: {
-            **gains_profile[name],
-            "velocity_limit_sim": velocity[name],
-            "effort_limit_sim": effort[name],
-            "armature": armature[name],
-        }
-        for name in RIGHT_ARM_PD_JOINTS
-    }
-    return {
-        "scope": "production_door_v2",
-        "source_actuator": "arms",
-        "right_arm_actuator": DOOR_RIGHT_ARM_ACTUATOR_NAME,
-        "joint_order": list(RIGHT_ARM_PD_JOINTS),
-        "gains": gains,
-        "retained_arm_joints": list(_RETAINED_ARM_JOINTS),
-        "right_arm_only": True,
-        "position_limits": {"source": "URDF", "modified": False},
-        "self_collision": {
-            "urdf_import": True,
-            "articulation": True,
-        },
-    }
 
 
 __all__ = ["RIGHT_ARM_PD_JOINTS", "apply_production_right_arm_pd"]

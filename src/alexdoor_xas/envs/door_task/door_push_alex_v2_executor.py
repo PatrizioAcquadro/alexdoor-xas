@@ -65,7 +65,7 @@ class DoorPushAlexV2Executor(DoorPushRobotEnv):
         )
         self._door_contact_actor_ids: dict[int, int] = {}
         self._contact_actor_paths_seen: set[str] = set()
-        robot_cfg = load_alex_v2_articulation_cfg(fix_base=True)
+        robot_cfg = load_alex_v2_articulation_cfg()
         inject_alex_v2_runtime_cfg(cfg, robot_cfg, calibration)
         super().__init__(cfg, render_mode, **kwargs)
         from .door_push_alex_v2_env_cfg import ALEX_V2_SHOULDER_BODY_NAME  # noqa: PLC0415

@@ -10,18 +10,11 @@ from pathlib import Path
 from typing import Any
 
 from alexdoor_xas import paths
-from alexdoor_xas.assets.alex_v2_manifest import (
-    ALEX_V2_STANDARD_PROFILE,
-    EXPECTED_ALEX_V2_URDF_SHA256,
-    AlexV2ManifestError,
-    build_alex_v2_manifest,
-)
+from alexdoor_xas.assets.alex_v2_manifest import AlexV2ManifestError, build_alex_v2_manifest
 
-PROFILE = ALEX_V2_STANDARD_PROFILE
-EXPECTED_URDF_SHA256 = EXPECTED_ALEX_V2_URDF_SHA256
-DOOR_ACTUATOR_CONFIG_VERSION = "door-alex-v2-fixedbase-right-arm-pd-v2"
+_DOOR_ACTUATOR_CONFIG_VERSION = "door-alex-v2-fixedbase-right-arm-pd-v2"
 DOOR_NON_RIGHT_ARM_DAMPING_SCALE = 2.5
-DOOR_RIGHT_ARM_PD_VERSION = "door-alex-v2-right-arm-ik40-pd-v2"
+_DOOR_RIGHT_ARM_PD_VERSION = "door-alex-v2-right-arm-ik40-pd-v2"
 DOOR_RIGHT_ARM_ACTUATOR_NAME = "right_arm_project_pd"
 DOOR_RIGHT_ARM_PD_GAINS = (
     ("RIGHT_SHOULDER_Y", 600.0, 15.0),
@@ -31,7 +24,7 @@ DOOR_RIGHT_ARM_PD_GAINS = (
     ("RIGHT_WRIST_Z", 150.0, 4.0),
     ("RIGHT_WRIST_X", 150.0, 4.0),
 )
-DOOR_RUNTIME_MANIFEST_KIND = "alexdoor.alex_v2.fixedbase.v2"
+_DOOR_RUNTIME_MANIFEST_KIND = "alexdoor.alex_v2.fixedbase.v2"
 
 # Frozen from a clean headless import of the standard static URDF. Isaac's
 # order is not URDF document order; runtime consumers compare every name and
@@ -107,10 +100,20 @@ class RobotAssetRef:
         )
 
 
-def canonical_manifest_sha256(manifest: Mapping[str, Any]) -> str:
-    """Hash a manifest or fingerprint input using deterministic canonical JSON."""
-    payload = json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+def _canonical_sha256(value: Mapping[str, Any]) -> str:
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def build_alex_v2_runtime_manifest(
+    urdf_path: str | Path | None = None,
+) -> tuple[dict[str, Any], RobotAssetRef]:
+    """Build the fixed-base runtime identity from one URDF parse."""
+    static_manifest = _canonical_static_manifest(urdf_path)
+    runtime_manifest = _derive_fixed_base_door_manifest(
+        static_manifest, _static_asset_ref(static_manifest)
+    )
+    return runtime_manifest, _runtime_asset_ref(runtime_manifest)
 
 
 def validate_alex_v2_manifest(manifest: Mapping[str, Any]) -> RobotAssetRef:
@@ -130,21 +133,7 @@ def validate_alex_v2_manifest(manifest: Mapping[str, Any]) -> RobotAssetRef:
         raise AlexV2ContractError(
             "Door runtime manifest differs from the exact canonical static-asset variant"
         )
-    return RobotAssetRef(
-        asset_id=str(expected_runtime["asset_id"]),
-        sha256=str(expected_runtime["robot_asset_sha256"]),
-        manifest_fingerprint=str(expected_runtime["fingerprint"]),
-    )
-
-
-def derive_fixed_base_door_manifest(static_manifest: Mapping[str, Any]) -> dict[str, Any]:
-    """Derive a distinct fixed-base Door runtime identity from the static asset."""
-    static_ref = validate_alex_v2_manifest(static_manifest)
-    if "runtime_variant" in static_manifest:
-        raise AlexV2ContractError("expected a static asset manifest, got a runtime manifest")
-    derived = _derive_fixed_base_door_manifest(static_manifest, static_ref)
-    validate_alex_v2_manifest(derived)
-    return derived
+    return _runtime_asset_ref(expected_runtime)
 
 
 def _derive_fixed_base_door_manifest(
@@ -152,7 +141,7 @@ def _derive_fixed_base_door_manifest(
 ) -> dict[str, Any]:
     derived = json.loads(json.dumps(dict(static_manifest), sort_keys=True))
     runtime_inputs = _door_fingerprint_inputs(static_ref)
-    runtime_fingerprint = canonical_manifest_sha256(runtime_inputs)
+    runtime_fingerprint = _canonical_sha256(runtime_inputs)
     runtime_asset_id = f"{paths.ALEX_V2_ROBOT_TAG}:{runtime_fingerprint}"
     derived.update(
         {
@@ -162,15 +151,15 @@ def _derive_fixed_base_door_manifest(
             "fingerprint": runtime_fingerprint,
             "fingerprint_inputs": runtime_inputs,
             "runtime_variant": _door_runtime_variant(static_ref),
-            "actuator_config_version": DOOR_ACTUATOR_CONFIG_VERSION,
+            "actuator_config_version": _DOOR_ACTUATOR_CONFIG_VERSION,
         }
     )
     return derived
 
 
-def _canonical_static_manifest() -> dict[str, Any]:
+def _canonical_static_manifest(urdf_path: str | Path | None = None) -> dict[str, Any]:
     try:
-        return build_alex_v2_manifest()
+        return build_alex_v2_manifest(urdf_path)
     except AlexV2ManifestError as error:
         raise AlexV2ContractError(str(error)) from error
 
@@ -183,36 +172,43 @@ def _static_asset_ref(manifest: Mapping[str, Any]) -> RobotAssetRef:
     )
 
 
+def _runtime_asset_ref(manifest: Mapping[str, Any]) -> RobotAssetRef:
+    return RobotAssetRef(
+        asset_id=str(manifest["asset_id"]),
+        sha256=str(manifest["robot_asset_sha256"]),
+        manifest_fingerprint=str(manifest["fingerprint"]),
+    )
+
+
 def _door_runtime_variant(base_ref: RobotAssetRef) -> dict[str, Any]:
     return {
-        "kind": DOOR_RUNTIME_MANIFEST_KIND,
+        "kind": _DOOR_RUNTIME_MANIFEST_KIND,
         "fix_base": True,
         "robot_tag": paths.ALEX_V2_ROBOT_TAG,
-        "actuator_config_version": DOOR_ACTUATOR_CONFIG_VERSION,
+        "actuator_config_version": _DOOR_ACTUATOR_CONFIG_VERSION,
         "non_right_arm_damping_scale": DOOR_NON_RIGHT_ARM_DAMPING_SCALE,
-        "right_arm_pd": door_right_arm_pd_contract(),
+        "right_arm_pd": _door_right_arm_pd_contract(),
         "base_asset": base_ref.to_dict(),
     }
 
 
 def _door_fingerprint_inputs(base_ref: RobotAssetRef) -> dict[str, Any]:
     return {
-        "kind": DOOR_RUNTIME_MANIFEST_KIND,
+        "kind": _DOOR_RUNTIME_MANIFEST_KIND,
         "base_asset": base_ref.to_dict(),
         "robot_tag": paths.ALEX_V2_ROBOT_TAG,
         "fix_base": True,
         "merge_fixed_joints": True,
-        "actuator_config_version": DOOR_ACTUATOR_CONFIG_VERSION,
+        "actuator_config_version": _DOOR_ACTUATOR_CONFIG_VERSION,
         "non_right_arm_damping_scale": DOOR_NON_RIGHT_ARM_DAMPING_SCALE,
-        "right_arm_pd": door_right_arm_pd_contract(),
+        "right_arm_pd": _door_right_arm_pd_contract(),
         "ordered_runtime_joints": list(EXPECTED_RUNTIME_JOINTS),
     }
 
 
-def door_right_arm_pd_contract() -> dict[str, Any]:
-    """Return the exact ordered right-arm gains embedded in runtime identity."""
+def _door_right_arm_pd_contract() -> dict[str, Any]:
     return {
-        "version": DOOR_RIGHT_ARM_PD_VERSION,
+        "version": _DOOR_RIGHT_ARM_PD_VERSION,
         "actuator_name": DOOR_RIGHT_ARM_ACTUATOR_NAME,
         "ordered_gains": [
             {
@@ -223,20 +219,6 @@ def door_right_arm_pd_contract() -> dict[str, Any]:
             for joint_name, stiffness, damping in DOOR_RIGHT_ARM_PD_GAINS
         ],
     }
-
-
-def load_alex_v2_manifest(path: str | Path) -> tuple[dict[str, Any], RobotAssetRef]:
-    """Read and validate an Alex V2 manifest."""
-    manifest_path = Path(path)
-    try:
-        value = json.loads(manifest_path.read_text())
-    except (OSError, json.JSONDecodeError) as error:
-        raise AlexV2ContractError(
-            f"cannot read Alex V2 manifest {manifest_path}: {error}"
-        ) from error
-    if not isinstance(value, dict):
-        raise AlexV2ContractError(f"Alex V2 manifest {manifest_path} must be a JSON object")
-    return value, validate_alex_v2_manifest(value)
 
 
 def assert_checkpoint_runtime_compatible(
@@ -255,20 +237,13 @@ def assert_checkpoint_runtime_compatible(
 
 
 __all__ = [
-    "DOOR_ACTUATOR_CONFIG_VERSION",
     "DOOR_NON_RIGHT_ARM_DAMPING_SCALE",
     "DOOR_RIGHT_ARM_ACTUATOR_NAME",
     "DOOR_RIGHT_ARM_PD_GAINS",
-    "DOOR_RIGHT_ARM_PD_VERSION",
     "EXPECTED_RUNTIME_JOINTS",
-    "EXPECTED_URDF_SHA256",
-    "PROFILE",
     "AlexV2ContractError",
     "RobotAssetRef",
     "assert_checkpoint_runtime_compatible",
-    "canonical_manifest_sha256",
-    "derive_fixed_base_door_manifest",
-    "door_right_arm_pd_contract",
-    "load_alex_v2_manifest",
+    "build_alex_v2_runtime_manifest",
     "validate_alex_v2_manifest",
 ]
