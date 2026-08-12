@@ -140,15 +140,13 @@ def test_alex_v2_preset_keeps_alignment_outside_contact_and_slows_final_approach
 
 def test_chunk_log_covers_all_phases_with_positive_durations() -> None:
     controller, _, _, _ = _run_episode(ObjectFrame(origin=np.zeros(3), rot=np.eye(3)))
-    log = controller.finalize()
-    chunk_phases = [chunk.phase for chunk in log.chunks]
+    chunks = controller.finalize()
+    chunk_phases = [chunk.phase for chunk in chunks]
     assert chunk_phases == [str(phase) for phase in PHASE_ORDER]
-    assert all(chunk.duration_ticks > 0 for chunk in log.chunks)
-    push_chunk = log.chunks[chunk_phases.index(str(DoorPushPhase.PUSH))]
+    assert all(chunk.duration_ticks > 0 for chunk in chunks)
+    push_chunk = chunks[chunk_phases.index(str(DoorPushPhase.PUSH))]
     assert push_chunk.motion_hinge_delta_rad > 0.0
-    assert all(
-        chunk.motion_hinge_delta_rad == 0.0 for chunk in log.chunks if chunk is not push_chunk
-    )
+    assert all(chunk.motion_hinge_delta_rad == 0.0 for chunk in chunks if chunk is not push_chunk)
 
 
 def test_phase_timeout_freezes_controller() -> None:

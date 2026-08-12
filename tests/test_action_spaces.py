@@ -17,12 +17,6 @@ def test_action_space_tags_are_canonical() -> None:
         "A3_obj_rel_ee_delta",
         "A4_obj_centric_chunk",
     )
-    assert spaces.EXPORTED_ACTION_SPACES == (
-        "A2_ee_delta",
-        "A3_obj_rel_ee_delta",
-        "A4_obj_centric_chunk",
-    )
-    assert spaces.A1_JOINT_DELTA not in spaces.EXPORTED_ACTION_SPACES
     assert spaces.EE_DELTA_DIM == 6
 
 

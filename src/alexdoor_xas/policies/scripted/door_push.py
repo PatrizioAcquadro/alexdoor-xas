@@ -21,7 +21,7 @@ from dataclasses import dataclass, replace
 import numpy as np
 
 from alexdoor_xas.action.frames import ObjectFrame, rot_z
-from alexdoor_xas.action.spaces import EE_DELTA_DIM, ChunkLog, ObjectCentricChunk
+from alexdoor_xas.action.spaces import EE_DELTA_DIM, ObjectCentricChunk
 
 
 class DoorPushPhase(enum.StrEnum):
@@ -212,7 +212,7 @@ class DoorPushController:
     def __init__(self, cfg: DoorPushControllerCfg | None = None):
         self.cfg = cfg or DoorPushControllerCfg()
         self._state = _FsmState()
-        self._chunk_log = ChunkLog()
+        self._chunks: list[ObjectCentricChunk] = []
         self._open_chunk_start_tick = 0
         self._total_ticks = 0
 
@@ -220,13 +220,9 @@ class DoorPushController:
     def phase(self) -> DoorPushPhase:
         return self._state.phase
 
-    @property
-    def chunk_log(self) -> ChunkLog:
-        return self._chunk_log
-
     def reset(self) -> None:
         self._state = _FsmState()
-        self._chunk_log = ChunkLog()
+        self._chunks = []
         self._open_chunk_start_tick = 0
         self._total_ticks = 0
 
@@ -276,10 +272,10 @@ class DoorPushController:
                 step = error
         return self._command(step, target_door, contact_geometric)
 
-    def finalize(self) -> ChunkLog:
-        """Close the open A4 chunk (episode end) and return the chunk log."""
+    def finalize(self) -> list[ObjectCentricChunk]:
+        """Close and return the episode's A4 chunks."""
         self._close_open_chunk()
-        return self._chunk_log
+        return self._chunks
 
     # -- FSM internals ---------------------------------------------------------
 
@@ -362,7 +358,7 @@ class DoorPushController:
         motion = 0.0
         if state.phase is DoorPushPhase.PUSH:
             motion = cfg.target_open_angle_rad - state.angle_at_phase_entry
-        self._chunk_log.chunks.append(
+        self._chunks.append(
             ObjectCentricChunk(
                 phase=str(state.phase),
                 contact_target_panel=(

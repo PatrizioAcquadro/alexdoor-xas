@@ -483,7 +483,7 @@ def _finalize_episode(
         and runtime.termination_reason != "step_error"
     ):
         runtime.final_angle, _ = _hinge_state(env)
-    chunk_log = setup.controller.finalize()
+    chunks = setup.controller.finalize()
     timed_out = bool(runtime.last_command is not None and runtime.last_command.timed_out)
     controller_done = bool(runtime.last_command is not None and runtime.last_command.done)
     setup.buffer.extras.update(
@@ -493,7 +493,7 @@ def _finalize_episode(
             else np.zeros((0, 6)),
             "door_frame_pos_w": setup.door_frame.origin.copy(),
             "door_frame_quat_w_xyzw": _door_frame_quat(env),
-            "a4_chunks": chunk_log.to_list(),
+            "a4_chunks": [chunk.to_dict() for chunk in chunks],
             "variation": item.variation.to_dict() if item.variation is not None else None,
             "start_pose_settle": setup.settle_report,
             "controller_cfg": asdict(setup.controller_cfg),

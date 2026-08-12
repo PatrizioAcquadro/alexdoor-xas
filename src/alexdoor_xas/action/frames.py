@@ -1,14 +1,7 @@
-"""Door/object frame math for A2 <-> A3 conversion (pure numpy, no Isaac imports).
+"""Frame math for A2/A3 conversion.
 
-Frames follow the scene convention (Z-up, meters). Quaternions are ``(x, y, z, w)``
-— the layout this Isaac Lab release uses for all articulation/rigid-body data.
-
-The *door frame* is the hinge-anchored frame of the door fixture: its origin is
-the ``Doorframe`` body origin (the hinge axis passes through it, see
-``assets/door_task.py``) and its axes are the ``Doorframe`` body axes (+Z is the
-hinge axis). The *panel frame* is the door frame rotated about +Z by the current
-hinge angle — it moves with the door panel, so points expressed in it (e.g. a
-push target on the panel) stay valid while the door opens.
+Frames are Z-up in meters and quaternions use ``(x, y, z, w)``. The static door
+frame is hinge-anchored with +Z along the hinge; the panel frame rotates with it.
 """
 
 from __future__ import annotations
@@ -77,10 +70,9 @@ def panel_frame(door_frame: ObjectFrame, hinge_angle_rad: float) -> ObjectFrame:
 
 
 def world_delta_to_frame(delta_world: np.ndarray, frame: ObjectFrame) -> np.ndarray:
-    """Re-express a 6-dim EE delta ``(dpos, drot)`` from world into ``frame``.
+    """Rotate a 6D ``(dpos, drot)`` delta from world into ``frame`` (A2 -> A3).
 
-    Both the translational and the (axis-angle) rotational parts are free
-    vectors, so each rotates by ``rot.T``. This is the A2 -> A3 conversion.
+    Translation and axis-angle rotation are both free vectors.
     """
     delta = _as_ee_delta(delta_world)
     out = np.empty(EE_DELTA_DIM, dtype=np.float64)
