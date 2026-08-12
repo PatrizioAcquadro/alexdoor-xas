@@ -274,11 +274,13 @@ def test_run_baseline_same_run_id_is_idempotent(tmp_path) -> None:
             n_fixed=1,
             n_randomized=1,
             base_seed=0,
+            dataset_version="v2_pose",
         )
 
     first = run_once()
     second = run_once()
     assert first.run_dir == second.run_dir
+    assert {path.name for path in second.exports.values()} == {"v2_pose"}
 
     episode_files = sorted((second.run_dir / "episodes").iterdir())
     # 2 episodes x (hdf5 + meta.json sidecar): a rerun replaces, never accumulates.

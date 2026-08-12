@@ -44,7 +44,7 @@ ALEX_V2_RUNTIME_CACHE_ROOT: Path = Path(
 
 # Canonical Alex V2 runtime, dataset, and output identifiers.
 ALEX_V2_TASK = "door_push_alex_v2"
-ALEX_V2_DATASET_VERSION = "v0"
+ALEX_V2_DATASET_VERSION = "v2_pose"
 ALEX_V2_ROBOT_TAG = "alex_v2_fullbody_fixedbase_standard_forearm_v0"
 ALEX_V2_DATASETS_DIR: Path = DATASETS_DIR / ALEX_V2_TASK
 ALEX_V2_OUTPUTS_DIR: Path = OUTPUTS_DIR / ALEX_V2_TASK

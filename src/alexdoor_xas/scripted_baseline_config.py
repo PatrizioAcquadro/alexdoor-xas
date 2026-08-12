@@ -20,13 +20,11 @@ from alexdoor_xas.policies.scripted import DoorPushControllerCfg
 
 CONFIG_DIR: Path = paths.REPO_ROOT / "configs"
 CONFIG_NAME = "scripted_baseline"
-VALID_ROBOTS = frozenset({"proxy", "alex_v2"})
 CONTROLLER_FIELD_TYPES = {
     field.name: field.type for field in fields(DoorPushControllerCfg)
 }
 RUN_FIELD_NAMES = frozenset(
     {
-        "robot",
         "episodes",
         "randomized",
         "seed",
@@ -53,7 +51,6 @@ class ScriptedBaselineConfigError(ValueError):
 class ScriptedBaselineRunCfg:
     """Run-level settings for ``scripts/run_scripted_baseline.py``."""
 
-    robot: str = "proxy"
     episodes: int = 5
     randomized: int = 0
     seed: int = 0
@@ -85,8 +82,7 @@ def load_scripted_baseline_config(
     """Compose and validate the scripted baseline config.
 
     ``hydra_overrides`` are the unconsumed ``key=value`` command-line tokens.
-    ``cli_overrides`` are legacy argparse values; non-``None`` values win over
-    Hydra, preserving the old CLI's precedence.
+    ``cli_overrides`` are argparse values; non-``None`` values win over Hydra.
     """
 
     overrides = list(hydra_overrides or ())
@@ -156,12 +152,6 @@ def _build_run_cfg(node: dict[str, Any]) -> ScriptedBaselineRunCfg:
             "unknown run config field(s): " + ", ".join(unknown)
         )
 
-    robot = str(node.get("robot", "proxy"))
-    if robot not in VALID_ROBOTS:
-        raise ScriptedBaselineConfigError(
-            f"run.robot must be one of {sorted(VALID_ROBOTS)}, got {robot!r}"
-        )
-
     episodes = _coerce_int("run.episodes", node.get("episodes", 5))
     randomized = _coerce_int("run.randomized", node.get("randomized", 0))
     if episodes < 0:
@@ -191,7 +181,6 @@ def _build_run_cfg(node: dict[str, Any]) -> ScriptedBaselineRunCfg:
             raise ScriptedBaselineConfigError(f"{name} must be finite")
 
     return ScriptedBaselineRunCfg(
-        robot=robot,
         episodes=episodes,
         randomized=randomized,
         seed=_coerce_int("run.seed", node.get("seed", 0)),

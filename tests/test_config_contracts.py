@@ -283,10 +283,10 @@ def test_diffusion_non_key_value_hydra_tokens_are_rejected() -> None:
 # --- test_hydra_config ---
 
 
-def test_scripted_default_config_matches_legacy_script_defaults() -> None:
+def test_scripted_default_config_is_alex_v2_only() -> None:
     cfg = load_scripted_baseline_config()
 
-    assert cfg.run.robot == "proxy"
+    assert not hasattr(cfg.run, "robot")
     assert cfg.run.episodes == 5
     assert cfg.run.randomized == 0
     assert cfg.run.success_angle_deg == pytest.approx(45.0)
@@ -298,7 +298,6 @@ def test_scripted_default_config_matches_legacy_script_defaults() -> None:
 def test_scripted_hydra_overrides_update_run_and_controller_settings() -> None:
     cfg = load_scripted_baseline_config(
         [
-            "run.robot=alex_v2",
             "run.episodes=7",
             "run.randomized=2",
             "run.seed=11",
@@ -310,7 +309,6 @@ def test_scripted_hydra_overrides_update_run_and_controller_settings() -> None:
         ]
     )
 
-    assert cfg.run.robot == "alex_v2"
     assert cfg.run.episodes == 7
     assert cfg.run.randomized == 2
     assert cfg.run.seed == 11
@@ -323,13 +321,12 @@ def test_scripted_hydra_overrides_update_run_and_controller_settings() -> None:
     }
 
 
-def test_scripted_legacy_cli_overrides_take_precedence_over_hydra() -> None:
+def test_scripted_cli_overrides_take_precedence_over_hydra() -> None:
     cfg = load_scripted_baseline_config(
-        ["run.robot=proxy", "run.episodes=2", "run.video=false"],
-        cli_overrides={"robot": "alex_v2", "episodes": 9, "video": True},
+        ["run.episodes=2", "run.video=false"],
+        cli_overrides={"episodes": 9, "video": True},
     )
 
-    assert cfg.run.robot == "alex_v2"
     assert cfg.run.episodes == 9
     assert cfg.run.video is True
 
@@ -337,7 +334,7 @@ def test_scripted_legacy_cli_overrides_take_precedence_over_hydra() -> None:
 @pytest.mark.parametrize(
     "override, message",
     [
-        ("run.robot=bad", "run.robot"),
+        ("run.robot=proxy", "robot"),
         ("run.episodes=-1", "run.episodes"),
         ("run.randomized=-1", "run.randomized"),
         ("run.max_ticks=0", "run.max_ticks"),

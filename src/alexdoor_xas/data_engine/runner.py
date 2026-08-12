@@ -65,6 +65,7 @@ def run_baseline(
     variation_bounds: VariationBounds | None = None,
     video: bool = False,
     export: bool = True,
+    dataset_version: str = "v0",
     episode_plan: list[EpisodePlanItem] | None = None,
     preserve_candidate_failures: bool = False,
 ) -> RunArtifacts:
@@ -120,6 +121,7 @@ def run_baseline(
         base_seed,
         active_plan,
         preserve_candidate_failures,
+        dataset_version,
     )
     env_tick_limit = getattr(env, "max_episode_length", None)
     if env_tick_limit is not None and engine_cfg.max_ticks > int(env_tick_limit):
@@ -177,7 +179,9 @@ def run_baseline(
     if preserve_candidate_failures and export:
         raise RuntimeError("candidate-pool failure preservation requires export=false")
 
-    exports = export_datasets(episodes, datasets_root) if export else {}
+    exports = (
+        export_datasets(episodes, datasets_root, version=dataset_version) if export else {}
+    )
     plots = {
         "door_angle_vs_time": door_angle_plot(episodes, run_dir / "plots" / "door_angle.png"),
         "final_door_angle": final_angle_plot(episodes, run_dir / "plots" / "final_angle.png"),
@@ -321,6 +325,7 @@ def _write_run_config(
     base_seed: int,
     episode_plan: list[EpisodePlanItem],
     preserve_candidate_failures: bool,
+    dataset_version: str,
 ) -> None:
     import dataclasses
 
@@ -344,6 +349,7 @@ def _write_run_config(
                     for item in episode_plan
                 ],
                 "preserve_candidate_failures": preserve_candidate_failures,
+                "dataset_version": dataset_version,
             },
             indent=2,
         )

@@ -1,5 +1,4 @@
 run:
-  robot: proxy
   episodes: 5
   randomized: 0
   seed: 0

@@ -1,21 +1,21 @@
 #!/usr/bin/env python
-"""Scripted door-push data engine CLI for the proxy and calibrated Alex V2.
+"""Scripted door-push data engine CLI for the calibrated Alex V2 benchmark.
 
 Rolls out the deterministic scripted controller in the door-push env, records
-episodes to the schema, exports A2/A3/A4 datasets under ``datasets/``, and
+episodes to the schema, exports A1/A2/A3/A4 datasets under ``datasets/``, and
 writes metrics/plots/videos/report under ``outputs/<experiment>/<run_id>/``.
-``--robot alex_v2`` runs the calibrated fixed-base V2 humanoid instead of the
-proxy sphere. V2 datasets use the frozen ``door_push_alex_v2`` task identity.
+Every run uses the calibrated fixed-base Alex V2 humanoid and the frozen
+``door_push_alex_v2`` task identity.
 
 Run through the official Isaac Lab launcher::
 
     PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p \
-        scripts/run_scripted_baseline.py --viz none --device cpu \
-        --episodes 5 --randomized 3 [--robot alex_v2]
+        scripts/run_scripted_baseline.py --viz none --device cuda:0 \
+        --episodes 5 --randomized 3
 
 Add ``--video --enable_cameras`` to also record per-episode rollout videos.
 Run settings can also be supplied as Hydra-style overrides, for example
-``run.robot=alex_v2 run.episodes=5 run.randomized=3``.
+``run.episodes=5 run.randomized=3``.
 """
 
 from __future__ import annotations
@@ -37,13 +37,7 @@ from alexdoor_xas.scripted_baseline_config import (
     load_scripted_baseline_config,
 )
 
-parser = argparse.ArgumentParser(description="AlexDoor-XAS scripted door-push data engine")
-parser.add_argument(
-    "--robot",
-    choices=("proxy", "alex_v2"),
-    default=None,
-    help="Executor: the proxy sphere (default) or calibrated fixed-base Alex V2.",
-)
+parser = argparse.ArgumentParser(description="AlexDoor-XAS Alex V2 scripted data engine")
 parser.add_argument(
     "--randomized-seed-plan",
     type=Path,
@@ -123,7 +117,6 @@ try:
     run_config = load_scripted_baseline_config(
         hydra_overrides,
         cli_overrides={
-            "robot": args.robot,
             "episodes": args.episodes,
             "randomized": args.randomized,
             "seed": args.seed,
@@ -161,35 +154,26 @@ from alexdoor_xas.data_engine import (  # noqa: E402
 )
 from alexdoor_xas.envs.door_task.alex_v2_runtime import ALEX_V2_LIMITATIONS  # noqa: E402
 from alexdoor_xas.envs.door_task.door_push_alex_v2_env_cfg import (  # noqa: E402
-    ALEX_V2_ROBOT_TAG,
     DoorPushAlexV2EnvCfg,
 )
-from alexdoor_xas.envs.door_task.door_push_env_cfg import DoorPushEnvCfg  # noqa: E402
 from alexdoor_xas.policies.scripted import (  # noqa: E402
-    DoorPushControllerCfg,
     alex_v2_push_cfg,
     alex_v2_variation_bounds,
 )
 
-DEFAULT_EXPERIMENTS = {
-    "proxy": "scripted_door_push",
-    "alex_v2": "alex_v2_door_push",
-}
+DEFAULT_EXPERIMENT = "alex_v2_door_push"
 
 
 def _make_env():
     render_mode = "rgb_array" if run_config.run.video else None
-    if run_config.run.robot == "alex_v2":
-        cfg = DoorPushAlexV2EnvCfg()
-        env_id = door_task.DOOR_PUSH_ALEX_V2_ENV_ID
-    else:
-        cfg = DoorPushEnvCfg()
-        env_id = door_task.DOOR_PUSH_ENV_ID
+    cfg = DoorPushAlexV2EnvCfg()
     cfg.seed = run_config.run.seed
     cfg.sim.device = args.device
     cfg.door_yaw_rad = math.radians(run_config.run.door_yaw_deg)
     cfg.door_offset_xy = (run_config.run.door_offset_x, run_config.run.door_offset_y)
-    return gym.make(env_id, cfg=cfg, render_mode=render_mode).unwrapped
+    return gym.make(
+        door_task.DOOR_PUSH_ALEX_V2_ENV_ID, cfg=cfg, render_mode=render_mode
+    ).unwrapped
 
 
 def main() -> int:
@@ -200,41 +184,26 @@ def main() -> int:
         run_id = run_config.run.run_id or (
             f"{datetime.now(UTC).date().isoformat()}_seed{run_config.run.seed}"
         )
-        experiment = run_config.run.experiment or DEFAULT_EXPERIMENTS[run_config.run.robot]
+        experiment = run_config.run.experiment or DEFAULT_EXPERIMENT
         door_pose_kwargs = {
             "door_pose_id": run_config.run.door_pose_id,
             "door_yaw_rad": math.radians(run_config.run.door_yaw_deg),
             "door_offset_xy": (run_config.run.door_offset_x, run_config.run.door_offset_y),
             "scene": str(env.cfg.door_task_scene.spawn.usd_path),
         }
-        if run_config.run.robot == "alex_v2":
-            calibration = env.alex_v2_calibration()
-            engine_cfg = DataEngineCfg(
-                task=paths.ALEX_V2_TASK,
-                robot=ALEX_V2_ROBOT_TAG,
-                limitations=ALEX_V2_LIMITATIONS,
-                success_angle_rad=math.radians(run_config.run.success_angle_deg),
-                max_ticks=run_config.run.max_ticks,
-                **door_pose_kwargs,
-            )
-            controller_cfg = apply_controller_overrides(
-                alex_v2_push_cfg(calibration), run_config.controller_overrides
-            )
-            variation_bounds = alex_v2_variation_bounds(calibration)
-        else:
-            engine_cfg = DataEngineCfg(
-                success_angle_rad=math.radians(run_config.run.success_angle_deg),
-                max_ticks=run_config.run.max_ticks,
-                **door_pose_kwargs,
-            )
-            controller_cfg = (
-                apply_controller_overrides(
-                    DoorPushControllerCfg(), run_config.controller_overrides
-                )
-                if run_config.controller_overrides
-                else None
-            )
-            variation_bounds = None
+        calibration = env.alex_v2_calibration()
+        engine_cfg = DataEngineCfg(
+            task=paths.ALEX_V2_TASK,
+            robot=paths.ALEX_V2_ROBOT_TAG,
+            limitations=ALEX_V2_LIMITATIONS,
+            success_angle_rad=math.radians(run_config.run.success_angle_deg),
+            max_ticks=run_config.run.max_ticks,
+            **door_pose_kwargs,
+        )
+        controller_cfg = apply_controller_overrides(
+            alex_v2_push_cfg(calibration), run_config.controller_overrides
+        )
+        variation_bounds = alex_v2_variation_bounds(calibration)
         explicit_plan = None
         if args.randomized_seed_plan is not None:
             import json
@@ -257,6 +226,7 @@ def main() -> int:
             variation_bounds=variation_bounds,
             video=run_config.run.video,
             export=run_config.run.export,
+            dataset_version=paths.ALEX_V2_DATASET_VERSION,
             episode_plan=explicit_plan,
             preserve_candidate_failures=args.candidate_pool,
         )
