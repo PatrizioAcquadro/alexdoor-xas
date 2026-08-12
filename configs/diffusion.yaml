@@ -1,6 +1,6 @@
 # Diffusion Policy baseline (Phase 3.3). Defaults mirror
 # policies/diffusion/config.py; override via Hydra key=value tokens, e.g.
-#   scripts/train_diffusion.py dataset.space=A3_obj_rel_ee_delta train.epochs=500
+#   scripts/train_policy.py --policy diffusion dataset.space=A3_obj_rel_ee_delta train.epochs=500
 
 dataset:
   task: door_push_alex_v2

@@ -54,15 +54,16 @@ PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p \
 Train ACT on A2 or Diffusion on A3:
 
 ```bash
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/train_act.py --space A2_ee_delta
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/train_diffusion.py --space A3_obj_rel_ee_delta
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/train_policy.py --policy act --space A2_ee_delta
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/train_policy.py --policy diffusion --space A3_obj_rel_ee_delta
 ```
 
-Evaluate a completed self-contained checkpoint:
+Evaluate a completed self-contained checkpoint; the evaluator detects the policy family from
+the source run's `resolved_config.json`:
 
 ```bash
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/eval_act.py --checkpoint outputs/door_push_alex_v2/act/<run_id>/checkpoints/best.pt --device cuda:0
-PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/eval_diffusion.py --checkpoint outputs/door_push_alex_v2/diffusion/<run_id>/checkpoints/best.pt --device cuda:0
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/eval_policy.py --checkpoint outputs/door_push_alex_v2/act/<run_id>/checkpoints/best.pt --device cuda:0
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/eval_policy.py --checkpoint outputs/door_push_alex_v2/diffusion/<run_id>/checkpoints/best.pt --device cuda:0
 ```
 
 ## Repository layout

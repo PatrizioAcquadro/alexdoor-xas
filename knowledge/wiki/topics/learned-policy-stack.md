@@ -14,15 +14,17 @@ AlexDoor-XAS maintains state-only ACT and Diffusion policies for A2 and A3. Both
 
 New runs are exclusively allocated under `outputs/door_push_alex_v2/{act,diffusion}/<run_id>/` with full UTC IDs such as `20260812T153045Z_a3_v3n500_seed0`; same-second collisions append `_r2`, `_r3`, and so on. `resolved_config.json` is immutable and freezes the policy configuration plus the complete evaluation protocol. Reuse requires explicit `--resume <run-directory>` and a resumable `last.pt`; completed runs are never overwritten.
 
+`scripts/train_policy.py --policy {act,diffusion}` is the only training entry point. The policy selector remains mandatory during resume and must match the frozen run. `scripts/eval_policy.py --checkpoint ...` is the only learned-policy evaluator and detects ACT or Diffusion from the source `resolved_config.json`.
+
 `best.pt` is the best validated self-contained inference checkpoint. `last.pt` is written atomically before epoch 0 and after each completed epoch with model, optimizer, scheduler or explicit null, next epoch, global step, complete history, Python/NumPy/Torch CPU/CUDA RNG states, and Diffusion EMA when used. Successful completion removes `last.pt` only after all required artifacts and the report are complete. Interrupted runs retain `last.pt`, preserve any `best.pt`, and create `error.log`.
 
 ACT history records train L1, KL, total loss, validation L1, batch counts, best epoch/value, and durations. Diffusion history records train MSE, sampled validation L1, learning rate, batch counts, best epoch/value, and durations. Open-loop evaluation reports translation-only aggregate and dx/dy/dz L1, per-episode L1, evaluated steps, and one deterministic worst-episode plot; it does not publish MSE, constant-zero rotation metrics, or per-episode plot sets.
 
-W&B is an optional vanilla SDK integration installed through `.[tracking]`. The four train/evaluate scripts read official `WANDB_*` environment variables and skip the import entirely when `WANDB_MODE` is unset or `disabled`. Enabled training runs log one aggregate dictionary per epoch and one final open-loop dictionary; enabled evaluators log one final overall closed-loop dictionary. Configuration is limited to policy identity plus the relevant dataset/model/train or evaluation summary. The integration does not watch models or publish artifacts, tables, files, or media, and standard local state stays under `outputs/wandb/`.
+W&B is an optional vanilla SDK integration installed through `.[tracking]`. The unified train/evaluate scripts read official `WANDB_*` environment variables and skip the import entirely when `WANDB_MODE` is unset or `disabled`. Enabled training runs log one aggregate dictionary per epoch and one final open-loop dictionary; enabled evaluators log one final overall closed-loop dictionary. Configuration is limited to policy identity plus the relevant dataset/model/train or evaluation summary. The integration does not watch models or publish artifacts, tables, files, or media, and standard local state stays under `outputs/wandb/`.
 
 ## Closed-loop evaluation
 
-Each training run freezes the canonical 36-rollout D0-D4 protocol, thresholds, 200 N force limit, horizon, control settings, and policy execution settings. ACT and Diffusion evaluators create a fresh environment per pose and publish one `closed_loop/metrics.json` with factual rollout rows plus overall, pose, fixed/randomized, and pose-plus-subset aggregates. The single summary plot shows time to success, peak force with its limit, and adapter correction/rejection rates.
+Each training run freezes the canonical 36-rollout D0-D4 protocol, thresholds, 200 N force limit, horizon, control settings, and policy execution settings. The evaluator creates a fresh environment per pose and publishes one `closed_loop/metrics.json` with factual rollout rows plus overall, pose, fixed/randomized, and pose-plus-subset aggregates. The single summary plot shows time to success, peak force with its limit, and adapter correction/rejection rates.
 
 An exact protocol match may publish the first closed-loop result into the source training run. Any change to poses, seeds, randomization, thresholds, force limits, horizon, control settings, or policy execution creates a timestamped sibling evaluation run with `run_type: evaluation`, `source_run_id`, and `source_checkpoint`; the checkpoint is not copied and the source run is not modified. `traces/` is retained only for unsuccessful rollouts, force-limit exceedances, or explicitly selected keys, and `media/` only when explicitly requested.
 
@@ -37,6 +39,7 @@ ACT and Diffusion accept only self-contained checkpoint v2 files whose robot-ass
 
 ## Version Notes
 
+- 2026-08-12 — Consolidated policy execution into `train_policy.py` and `eval_policy.py`; evaluation now detects the policy family from the frozen source run.
 - 2026-08-12 — Removed pre-v2 checkpoint loading and cross-model transfer; runtime evaluation now requires an exact Alex V2 robot-asset identity match.
 - 2026-08-12 — Replaced repository-owned W&B configuration, wrappers, artifact gates, and simulated tests with direct optional SDK initialization and aggregate logging.
 - 2026-08-12 — Added exclusive timestamped training runs, full resume state, compact training/open-loop artifacts, frozen multi-pose evaluation, protocol-match routing, factual closed-loop metrics, and selective optional artifacts.

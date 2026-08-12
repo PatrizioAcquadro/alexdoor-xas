@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Evaluate one Diffusion best checkpoint under its frozen closed-loop protocol."""
+"""Evaluate an ACT or Diffusion best checkpoint under a closed-loop protocol."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from pathlib import Path
 from isaaclab.app import AppLauncher
 
 from alexdoor_xas import paths
+from alexdoor_xas.policies.act.config import act_config_from_dict
 from alexdoor_xas.policies.common.closed_loop import (
     evaluation_preflight,
     validate_evaluation_protocol,
@@ -21,8 +22,10 @@ from alexdoor_xas.policies.common.closed_loop import (
 from alexdoor_xas.policies.common.runs import load_resolved_config
 from alexdoor_xas.policies.diffusion.config import diffusion_config_from_dict
 
-parser = argparse.ArgumentParser(description="AlexDoor-XAS Diffusion closed-loop evaluation")
-parser.add_argument("--checkpoint", required=True, help="Training run checkpoints/best.pt.")
+POLICIES = ("act", "diffusion")
+
+parser = argparse.ArgumentParser(description="AlexDoor-XAS policy closed-loop evaluation")
+parser.add_argument("--checkpoint", help="Training run checkpoints/best.pt.")
 parser.add_argument(
     "--protocol",
     help="Complete evaluation protocol JSON; omit to use the source run's frozen protocol.",
@@ -45,26 +48,36 @@ if unknown:
         "evaluation does not accept config overrides; use a complete --protocol JSON: "
         + " ".join(unknown)
     )
+if args.checkpoint is None:
+    parser.error("the following argument is required: --checkpoint")
 
 checkpoint_path = Path(args.checkpoint).expanduser().resolve()
 if not checkpoint_path.is_file():
     parser.error(f"checkpoint not found: {checkpoint_path}")
 source_run = checkpoint_path.parent.parent
 source_resolved = load_resolved_config(source_run)
-if source_resolved.get("run_type") != "training" or source_resolved.get("policy") != "diffusion":
-    parser.error("--checkpoint must be best.pt from a Diffusion training run")
-dp_cfg = diffusion_config_from_dict(source_resolved["config"])
+policy_name = source_resolved.get("policy")
+if source_resolved.get("run_type") != "training" or policy_name not in POLICIES:
+    parser.error("--checkpoint must be best.pt from an ACT or Diffusion training run")
+try:
+    policy_cfg = (
+        act_config_from_dict(source_resolved["config"])
+        if policy_name == "act"
+        else diffusion_config_from_dict(source_resolved["config"])
+    )
+except (KeyError, ValueError) as error:
+    parser.error(str(error))
 protocol = (
     json.loads(Path(args.protocol).expanduser().read_text())
     if args.protocol
     else source_resolved["evaluation_protocol"]
 )
 try:
-    validate_evaluation_protocol(protocol, "diffusion")
+    validate_evaluation_protocol(protocol, policy_name)
     evaluation_preflight(
         source_checkpoint=checkpoint_path,
         requested_protocol=protocol,
-        policy="diffusion",
+        policy=policy_name,
     )
 except (FileExistsError, ValueError) as error:
     parser.error(str(error))
@@ -90,6 +103,7 @@ from alexdoor_xas.envs.door_task.door_push_alex_v2_env_cfg import (  # noqa: E40
     ALEX_V2_ROBOT_TAG,
     DoorPushAlexV2EnvCfg,
 )
+from alexdoor_xas.policies.act.policy import ActPolicy, act_chunk_source  # noqa: E402
 from alexdoor_xas.policies.common.closed_loop import (  # noqa: E402
     closed_loop_trace_payload,
     factual_rollout_row,
@@ -111,7 +125,7 @@ def _run() -> int:
 
     os.environ.setdefault("WANDB_PROJECT", "alexdoor-xas")
     os.environ.setdefault("WANDB_NAME", f"{source_resolved['run_id']}-eval")
-    os.environ.setdefault("WANDB_RUN_GROUP", "diffusion")
+    os.environ.setdefault("WANDB_RUN_GROUP", policy_name)
     os.environ.setdefault("WANDB_JOB_TYPE", "eval")
     try:
         import wandb
@@ -121,7 +135,7 @@ def _run() -> int:
     with wandb.init(
         dir=str(paths.OUTPUTS_DIR),
         config={
-            "policy": "diffusion",
+            "policy": policy_name,
             "source_run_id": source_resolved["run_id"],
             "dataset": source_resolved["config"]["dataset"],
             "evaluation": {
@@ -169,6 +183,42 @@ def _fresh_adapter(action_space: str, env):
     raise ValueError(f"no adapter path for action space {action_space!r}")
 
 
+def _load_policy(runtime_asset: RobotAssetRef, execution: dict):
+    if policy_name == "act":
+        policy = ActPolicy.from_checkpoint(
+            checkpoint_path,
+            device=policy_cfg.rollout.policy_device,
+            runtime_asset=runtime_asset,
+        )
+    else:
+        policy = DiffusionPolicy.from_checkpoint(
+            checkpoint_path,
+            device=policy_cfg.rollout.policy_device,
+            sampler=str(execution["sampler"]),
+            num_inference_steps=int(execution["num_inference_steps"]),
+            runtime_asset=runtime_asset,
+        )
+    if policy.action_space != policy_cfg.dataset.space:
+        raise RuntimeError("checkpoint action space differs from resolved config")
+    return policy
+
+
+def _chunk_source(policy, env, execution: dict, seed: int):
+    if policy_name == "act":
+        return act_chunk_source(
+            policy,
+            env,
+            temporal_ensemble=bool(execution["temporal_ensemble"]),
+            ensemble_m=float(execution["ensemble_m"]),
+        )
+    policy.seed(seed)
+    return diffusion_chunk_source(
+        policy,
+        env,
+        n_action_steps=int(execution["n_action_steps"]),
+    )
+
+
 def _evaluate(run=None) -> int:
     rows: list[dict] = []
     force_samples: dict[str, list[float]] = {}
@@ -184,15 +234,7 @@ def _evaluate(run=None) -> int:
         try:
             if policy is None:
                 runtime_asset = RobotAssetRef.from_dict(env.robot_asset_provenance())
-                policy = DiffusionPolicy.from_checkpoint(
-                    checkpoint_path,
-                    device=dp_cfg.rollout.policy_device,
-                    sampler=str(execution["sampler"]),
-                    num_inference_steps=int(execution["num_inference_steps"]),
-                    runtime_asset=runtime_asset,
-                )
-                if policy.action_space != dp_cfg.dataset.space:
-                    raise RuntimeError("checkpoint action space differs from resolved config")
+                policy = _load_policy(runtime_asset, execution)
             variations = {
                 item.seed: item.variation
                 for item in plan_randomized_seeds(
@@ -207,15 +249,9 @@ def _evaluate(run=None) -> int:
                 variation = variations.get(seed) if item["status"] == "randomized" else None
                 if variation is not None:
                     apply_start_offset(env, read_door_frame(env), variation)
-                policy.seed(seed)
-                source = diffusion_chunk_source(
-                    policy,
-                    env,
-                    n_action_steps=int(execution["n_action_steps"]),
-                )
                 result = rollout_chunks(
                     env,
-                    source,
+                    _chunk_source(policy, env, execution, seed),
                     _fresh_adapter(policy.action_space, env),
                     max_ticks=int(protocol["horizon_ticks"]),
                     stop_on_reject=bool(protocol["control"]["stop_on_reject"]),
@@ -234,7 +270,7 @@ def _evaluate(run=None) -> int:
                 force_samples[key] = forces
                 trace_payloads[key] = closed_loop_trace_payload(result)
                 print(
-                    f"[eval_diffusion] {key}: success={row['success']} "
+                    f"[eval_policy:{policy_name}] {key}: success={row['success']} "
                     f"reason={row['termination_reason']} steps={row['evaluated_steps']}",
                     flush=True,
                 )
@@ -244,7 +280,7 @@ def _evaluate(run=None) -> int:
     run_dir, resolved, source_publish = prepare_evaluation_run(
         source_checkpoint=checkpoint_path,
         requested_protocol=protocol,
-        policy="diffusion",
+        policy=policy_name,
         output_root=None,
     )
     metrics = publish_closed_loop(
@@ -280,7 +316,8 @@ def _evaluate(run=None) -> int:
             }
         )
     print(
-        f"[eval_diffusion] {overall['success_count']}/{overall['rollout_count']} successful; "
+        f"[eval_policy:{policy_name}] "
+        f"{overall['success_count']}/{overall['rollout_count']} successful; "
         f"published {run_dir / 'closed_loop'}",
         flush=True,
     )
