@@ -15,6 +15,12 @@ physical episode. A2 keeps world-frame end-effector deltas, A3 expresses the
 equivalent command in the static door frame, A4 stores object-centric guarded
 chunks, and Alex episodes can derive A1 joint deltas.
 
+The active operational version is `v2_pose` under `door_push_alex_v2`.
+`scripts/verify_dataset_interface.py` requires all A1-A4 products for this
+dataset and includes the paired A2/A3 gate: D0 commands are identical, yawed
+door poses are numerically distinct, and every pair satisfies the exact
+door-frame rotation within tolerance.
+
 ## Model-facing access
 
 `EpisodeDataset` and `A4ChunkDataset` are the supported readers.
@@ -43,6 +49,9 @@ N100, N250, and N500 split files remain usable with fixed validation and test
 memberships; the workflow that originally generated them is historical.
 
 ## Version Notes
+
+- 2026-08-12 — Made `door_push_alex_v2/v2_pose` the verifier default and folded
+  the A2/A3 posed-door distinction check into the dataset interface gate.
 
 - 2026-08-11 — Dataset loading moved from publication/fingerprint orchestration
   to direct split membership and numerical validation.

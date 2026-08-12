@@ -37,12 +37,15 @@ around the hinge instead of redefining the task geometry independently.
 - `src/alexdoor_xas/data_engine/export.py`
 - `src/alexdoor_xas/assets/door_task.py`
 - `tests/test_action_spaces.py`
-- `scripts/verify_a2_a3_distinct.py`
+- `scripts/verify_dataset_interface.py`
 
 See [[topics/action-representations-and-adapters|Action Representations and Adapters]]
 and [[topics/episode-and-dataset-contracts|Episode and Dataset Contracts]].
 
 ## Version Notes
+
+- 2026-08-12 — The A2/A3 distinguishability evidence moved into the canonical
+  dataset interface gate.
 
 - 2026-07-03 — Matched representation export and hinge-relative frame semantics
   were established.

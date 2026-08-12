@@ -15,6 +15,10 @@ The maintained path includes:
 - A2/A3/A4 adapters, force checks, and execution safety controls;
 - W&B as optional run tracking.
 
+The only operational path is:
+
+`Door + Alex V2 -> v2_pose A1-A4 -> training -> adapter-v1 -> evaluation`
+
 The completed Gilbreth pilot, cluster sweep, smoke-matrix aggregation, and
 unified-evaluation orchestration are no longer executable product workflows.
 Their scientific conclusions remain in the wiki and curated reports; Git owns
@@ -34,6 +38,41 @@ PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/check_env.py
 ```
 
 Do not use bare system `python3` for Isaac code.
+
+## Operational workflow
+
+Generate matched Alex V2 episodes and export A1-A4 under the active
+`v2_pose` dataset version:
+
+```bash
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p \
+  scripts/run_scripted_baseline.py --viz none --device cuda:0
+```
+
+Train ACT or Diffusion on A2 or A3; both active configs default to
+`door_push_alex_v2/v2_pose` and GPU training:
+
+```bash
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/train_act.py --space A2_ee_delta
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/train_diffusion.py --space A3_obj_rel_ee_delta
+```
+
+The supported verification surface contains exactly five gates:
+
+```bash
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_benchmark_scene.py --viz none --device cuda:0
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_scripted_baseline.py --viz none --device cuda:0
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_dataset_interface.py
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_adapters.py --viz none --device cuda:0
+PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p scripts/verify_policy_rollout.py --policy act --viz none --device cuda:0 --checkpoint-a2 <a2.pt> --checkpoint-a3 <a3.pt>
+```
+
+Use `--policy diffusion` for Diffusion checkpoints; only that selection accepts
+`--sampler`, `--inference-steps`, and `--n-action-steps`. Rollout artifacts are
+written under `outputs/verify_policy_rollout/<policy>/gate/`.
+
+`scripts/author_alex_v2_door_calibration.py` is a mutating maintenance command,
+not a verifier, and is never part of routine validation.
 
 ## Repository layout
 

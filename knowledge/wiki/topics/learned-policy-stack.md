@@ -40,6 +40,19 @@ commit, configuration hashes, dataset/view fingerprints, and provenance blocks
 are ignored; files are not rewritten or migrated. Closed-loop evaluation uses
 checkpoint-owned metadata and does not consult the former training dataset.
 
+`scripts/verify_policy_rollout.py` is the shared closed-loop gate. Its required
+`--policy {act,diffusion}` selection chooses the loader, chunk source, and
+seeding strategy from one internal registry. A2 is required, A3 is optional;
+fixed and randomized executions share the same Alex V2 environment, adapter
+path, tick budget, success threshold, and artifact schema. Model inference and
+simulation use the same `--device`. Diffusion alone accepts sampler, inference
+step, and executed-chunk-prefix options. Artifacts live under
+`outputs/verify_policy_rollout/<policy>/gate/`.
+
+Deterministic overfit, normalization, sampler, checkpoint round-trip, and
+open-loop numerical checks live in `tests/test_act.py` and
+`tests/test_diffusion.py`, not standalone verifier scripts.
+
 ## Limits
 
 - Only A2 and A3 have learned policies.
@@ -48,6 +61,9 @@ checkpoint-owned metadata and does not consult the former training dataset.
 - The saturated Phase 3 result does not establish equivalence or a winner.
 
 ## Version Notes
+
+- 2026-08-12 — Unified ACT and Diffusion rollout verification and moved
+  deterministic training gates into pytest.
 
 - 2026-08-11 — Introduced compact checkpoint v2 and dataset-independent
   evaluation while retaining read compatibility with Phase 3 v1 files.

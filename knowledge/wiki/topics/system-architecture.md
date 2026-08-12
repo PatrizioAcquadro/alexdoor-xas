@@ -5,6 +5,10 @@ control boundary:
 
 `observation -> policy -> action representation -> adapter -> environment`
 
+The end-to-end operational path is:
+
+`Door + Alex V2 -> v2_pose A1-A4 -> training -> adapter-v1 -> evaluation`
+
 ## Components
 
 - `src/alexdoor_xas/assets/` and `envs/door_task/` construct the calibrated
@@ -19,6 +23,11 @@ control boundary:
 - `action/` and `adapters/` validate, transform, correct, reject, and execute
   requested actions.
 - `eval/` supplies metrics, force checks, plots, video, and report utilities.
+
+There is one registered simulator environment,
+`AlexDoor-DoorPush-AlexV2-v0`. Neutral door contract/runtime helpers own the
+observation/action terms, hinge resolution, and door-frame stage reads used by
+the Alex executor; no alternate task or surrogate-robot runtime is maintained.
 
 ## Main flows
 
@@ -49,6 +58,9 @@ sweep, smoke-matrix, or unified-matrix orchestration.
 - No repository command controls a physical Alex robot.
 
 ## Version Notes
+
+- 2026-08-12 — Removed alternate simulator runtimes and consolidated routine
+  validation into five Alex V2 gates.
 
 - 2026-08-11 — Removed completed Phase 3 orchestration and reduced the active
   architecture to benchmark, data, policy, adapter, and evaluation primitives.

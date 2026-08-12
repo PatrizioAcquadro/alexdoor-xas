@@ -115,3 +115,15 @@ semantics.
 Verified internal links, index coverage, phase-page count, repository-relative
 references, Markdown whitespace, and protected boundaries after the GPU contact
 sensor correction.
+
+## 2026-08-12 — update : Alex V2-only runtime and verification path
+
+Documented the single Door + Alex V2 operational path, active `v2_pose` A1-A4
+dataset, retired alternate simulator runtimes, five routine verifiers, unified
+policy rollout gate, and separate mutating calibration-authoring command.
+
+## 2026-08-12 — lint : Alex V2-only documentation
+
+Verified all 23 wiki pages, 31 internal links, complete index coverage, nine
+phase pages, repository-relative references, Markdown whitespace, and protected
+raw boundaries after the runtime and verifier consolidation.

@@ -11,9 +11,17 @@ The external URDF defaults to `~/Desktop/Alex/urdf/alex_v2.urdf`.
 `configs/alex_v2_door.json` is the single active calibration. It contains only
 the task name, base pose, six initial joints, operational tool frame, reach
 shell, controller parameters, and randomization limits. The production loader
-validates structure and numerical safety. The live verifier separately checks
-the current asset, collision-derived tool frame, reset behavior, Jacobians,
-contact behavior, and scripted performance before writing the calibration.
+validates structure and numerical safety.
+
+`scripts/verify_benchmark_scene.py` is the non-mutating scene gate. It validates
+the Alex asset and runtime manifest, generated door USD dependencies, hinge,
+mass and inertia, exact 29-joint Alex runtime order, reset state, and zero-action
+frame/door stability on the requested device. The combined hallway remains an
+availability check in `scripts/check_env.py`; it is not benchmark physics.
+
+`scripts/author_alex_v2_door_calibration.py` is a separate mutating maintenance
+command with internal asset, tool-frame, reset, Jacobian, contact, and scripted
+checks. It is not one of the routine verifiers.
 
 ## Control and sensing
 
@@ -34,6 +42,9 @@ The benchmark is simulation-only. It has no physical robot command path,
 hardware calibration workflow, or hardware safety layer.
 
 ## Version Notes
+
+- 2026-08-12 — Consolidated asset and isolated-door checks into the production
+  Alex V2 benchmark scene gate and separated calibration authoring by name.
 
 - 2026-08-11 — Replaced the unsupported GPU shape-level contact filter with
   exact door-actor selection over raw GPU contact buffers.

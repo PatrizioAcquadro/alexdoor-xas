@@ -1,19 +1,25 @@
 # Project Status
 
-Current as of 2026-08-11. Code and deterministic tests are the source of truth
+Current as of 2026-08-12. Code and deterministic tests are the source of truth
 for executable behavior; Git preserves removed Phase 3 workflow history.
 
 ## Maintained capabilities
 
 - Calibrated fixed-base Alex V2 door benchmark with one minimal active
-  calibration and a live authoring verifier.
-- Deterministic scripted baseline and matched A1-A4 episode export.
+  calibration and a separate mutating calibration-authoring command.
+- Deterministic scripted baseline and matched `v2_pose` A1-A4 episode export.
 - A2/A3 model datasets, content-grouped splits, retained dataset views, and
   directly recomputed train-only normalization.
 - A2/A3/A4 adapters and simulator safety controls.
 - State-only ACT and Diffusion training, compact checkpoint v2, legacy Phase 3
   v1 checkpoint loading, and dataset-independent closed-loop evaluation.
 - Optional W&B tracking and current verification/inspection entry points.
+
+The only maintained execution path is Door + Alex V2 to `v2_pose` A1-A4,
+training, adapter-v1, and evaluation. The five verification gates are
+`verify_benchmark_scene.py`, `verify_scripted_baseline.py`,
+`verify_dataset_interface.py`, `verify_adapters.py`, and
+`verify_policy_rollout.py`.
 
 The active `configs/` surface is exactly `act.yaml`, `diffusion.yaml`,
 `scripted_baseline.yaml`, `wandb.yaml`, and `alex_v2_door.json`.
@@ -46,6 +52,10 @@ and return packaging, scale-dataset construction, multi-pose merge, smoke
 matrix aggregation, and unified-evaluation orchestration are no longer part of
 the executable repository. Existing local datasets and checkpoints remain
 usable; they are not migrated or rewritten.
+
+The former generic door-task and surrogate-robot simulator runtimes are also
+retired. Test-only fake environments remain as deterministic software doubles;
+they are not supported runtime paths.
 
 ## Boundaries
 
