@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-GRIPPER_LINK = "RIGHT_GRIPPER_Z_LINK"
-SUPPORTED_SHAPES = frozenset({"box", "capsule", "cylinder", "sphere"})
+_GRIPPER_LINK = "RIGHT_GRIPPER_Z_LINK"
+_SUPPORTED_SHAPES = frozenset({"box", "capsule", "cylinder", "sphere"})
 
 
 class ToolFrameError(ValueError):
@@ -23,9 +21,6 @@ class ToolFrame:
     translation_m: tuple[float, float, float]
     orientation_xyzw: tuple[float, float, float, float]
     contact_normal_link: tuple[float, float, float]
-    support_shape: str
-    support_distance_m: float
-    collision_union_sha256: str
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -33,9 +28,6 @@ class ToolFrame:
             "translation_m": list(self.translation_m),
             "orientation_xyzw": list(self.orientation_xyzw),
             "contact_normal_link": list(self.contact_normal_link),
-            "support_shape": self.support_shape,
-            "support_distance_m": self.support_distance_m,
-            "collision_union_sha256": self.collision_union_sha256,
         }
 
 
@@ -47,11 +39,10 @@ def derive_right_gripper_tool_frame(
 
     collisions = _right_gripper_collisions(manifest)
     normal = _normalize(_vec3(door_contact_normal_link, "door contact normal"))
-    fingerprint = _sha256(collisions)
     candidates: list[tuple[float, str, tuple[float, float, float]]] = []
     for record in collisions:
         shape = str(record.get("shape", ""))
-        if shape not in SUPPORTED_SHAPES:
+        if shape not in _SUPPORTED_SHAPES:
             raise ToolFrameError(
                 f"unsupported right-gripper collision shape {shape!r}; "
                 "refusing an approximate tool frame"
@@ -73,36 +64,25 @@ def derive_right_gripper_tool_frame(
         candidates.append((_dot(normal, point), name, point))
     if not candidates:
         raise ToolFrameError("manifest has no right-gripper collision primitives")
-    distance, name, point = sorted(candidates, key=lambda item: (-item[0], item[1]))[0]
+    _, _, point = sorted(candidates, key=lambda item: (-item[0], item[1]))[0]
     orientation = _frame_quaternion(normal)
     return ToolFrame(
-        parent_link=GRIPPER_LINK,
+        parent_link=_GRIPPER_LINK,
         translation_m=point,
         orientation_xyzw=orientation,
         contact_normal_link=normal,
-        support_shape=name,
-        support_distance_m=distance,
-        collision_union_sha256=fingerprint,
     )
 
 
 def _right_gripper_collisions(manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
-    support = manifest.get("contact_support_geometry")
-    if isinstance(support, Mapping):
-        sides = support.get("sides")
-        right = sides.get("right") if isinstance(sides, Mapping) else None
-        values = right.get("collisions") if isinstance(right, Mapping) else None
-    else:
-        values = None
-    if values is None:
-        profile = manifest.get("collision_profile")
-        links = profile.get("links") if isinstance(profile, Mapping) else None
-        values = links.get(GRIPPER_LINK) if isinstance(links, Mapping) else None
+    profile = manifest.get("collision_profile")
+    links = profile.get("links") if isinstance(profile, Mapping) else None
+    values = links.get(_GRIPPER_LINK) if isinstance(links, Mapping) else None
     if not isinstance(values, list):
         raise ToolFrameError("manifest is missing right-gripper collision records")
     records = [_mapping(value, "right-gripper collision") for value in values]
     for record in records:
-        if record.get("link") != GRIPPER_LINK:
+        if record.get("link") != _GRIPPER_LINK:
             raise ToolFrameError("collision record is not attached to the right gripper")
     return sorted((dict(record) for record in records), key=lambda item: str(item["name"]))
 
@@ -243,9 +223,4 @@ def _mat_t_vec(matrix, vector):
     return tuple(sum(matrix[row][col] * vector[row] for row in range(3)) for col in range(3))
 
 
-def _sha256(value: Any) -> str:
-    payload = json.dumps(value, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-__all__ = ["GRIPPER_LINK", "ToolFrame", "ToolFrameError", "derive_right_gripper_tool_frame"]
+__all__ = ["ToolFrame", "ToolFrameError", "derive_right_gripper_tool_frame"]

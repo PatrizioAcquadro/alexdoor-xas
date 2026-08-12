@@ -27,7 +27,6 @@ WIKI_DIR: Path = KNOWLEDGE_DIR / "wiki"
 RUNTIME_CACHE_ROOT: Path = Path(
     os.environ.get("ALEXDOOR_CACHE_ROOT", str(Path.home() / ".cache" / "alexdoor-xas"))
 ).expanduser()
-DIAGNOSTIC_SCENES_DIR: Path = RUNTIME_CACHE_ROOT / "door_scenes"
 CALIBRATION_CACHE_DIR: Path = RUNTIME_CACHE_ROOT / "calibration"
 VERIFICATION_CACHE_DIR: Path = RUNTIME_CACHE_ROOT / "verification"
 SCRIPTED_RUNS_CACHE_DIR: Path = RUNTIME_CACHE_ROOT / "scripted_runs"

@@ -11,27 +11,23 @@ from alexdoor_xas import paths
 
 
 @dataclass(frozen=True)
-class DoorPose:
-    """One frozen canonical door pose."""
-
+class _DoorPose:
     pose_id: str
     yaw_rad: float
     xy_offset_m: tuple[float, float]
 
 
 _CANONICAL_DOOR_POSES = {
-    "D0": DoorPose("D0", 0.00, (0.00, 0.00)),
-    "D1": DoorPose("D1", +0.05, (+0.02, 0.00)),
-    "D2": DoorPose("D2", -0.05, (0.00, -0.02)),
-    "D3": DoorPose("D3", +0.10, (+0.02, +0.02)),
-    "D4": DoorPose("D4", -0.10, (+0.02, -0.02)),
+    "D0": _DoorPose("D0", 0.00, (0.00, 0.00)),
+    "D1": _DoorPose("D1", +0.05, (+0.02, 0.00)),
+    "D2": _DoorPose("D2", -0.05, (0.00, -0.02)),
+    "D3": _DoorPose("D3", +0.10, (+0.02, +0.02)),
+    "D4": _DoorPose("D4", -0.10, (+0.02, -0.02)),
 }
-CANONICAL_DOOR_POSES: Mapping[str, DoorPose] = MappingProxyType(_CANONICAL_DOOR_POSES)
+CANONICAL_DOOR_POSES: Mapping[str, _DoorPose] = MappingProxyType(_CANONICAL_DOOR_POSES)
 DEFAULT_DOOR_POSE_ID = "D0"
-DOOR_TASK_USD: Path = paths.DOOR_SCENE_DIR / "D0.usda"
 
-# Door.usd uses OmniPBR.mdl, an Isaac built-in material. Pure PXR does not get
-# Kit's MDL search paths, so this one material asset is allowed unresolved.
+# Pure PXR cannot resolve Isaac's built-in OmniPBR material.
 _ALLOWED_UNRESOLVED_ASSETS = {"OmniPBR.mdl"}
 _FORBIDDEN_REFERENCES = (
     "file:/c:",
@@ -43,7 +39,7 @@ _FORBIDDEN_REFERENCES = (
 )
 
 
-def canonical_door_pose(pose_id: str = DEFAULT_DOOR_POSE_ID) -> DoorPose:
+def canonical_door_pose(pose_id: str = DEFAULT_DOOR_POSE_ID) -> _DoorPose:
     """Return a frozen pose by ID."""
     try:
         return CANONICAL_DOOR_POSES[pose_id]
@@ -54,65 +50,11 @@ def canonical_door_pose(pose_id: str = DEFAULT_DOOR_POSE_ID) -> DoorPose:
         ) from exc
 
 
-def canonical_door_scene_path(pose_id: str = DEFAULT_DOOR_POSE_ID) -> Path:
-    """Return the canonical scene-layer path for ``pose_id``."""
-    canonical_door_pose(pose_id)
-    return paths.DOOR_SCENE_DIR / f"{pose_id}.usda"
-
-
-def door_task_usd(pose_id: str = DEFAULT_DOOR_POSE_ID) -> Path:
-    """Return a canonical scene layer, creating it if needed."""
-    return ensure_door_task_usd(pose_id)
-
-
 def ensure_door_task_usd(pose_id: str = DEFAULT_DOOR_POSE_ID) -> Path:
     """Create or refresh one canonical D0-D4 scene layer."""
     pose = canonical_door_pose(pose_id)
-    return _ensure_door_task_usd(canonical_door_scene_path(pose_id), pose.yaw_rad, pose.xy_offset_m)
-
-
-def ensure_canonical_door_scenes() -> tuple[Path, ...]:
-    """Generate all and only the five canonical scene layers, then audit them."""
-    generated = tuple(ensure_door_task_usd(pose_id) for pose_id in CANONICAL_DOOR_POSES)
-    audit_canonical_door_scene_directory()
-    return generated
-
-
-def audit_canonical_door_scene_directory() -> None:
-    """Fail unless ``outputs/door_scene`` contains exactly D0.usda-D4.usda."""
-    expected = {f"{pose_id}.usda" for pose_id in CANONICAL_DOOR_POSES}
-    if not paths.DOOR_SCENE_DIR.is_dir():
-        raise FileNotFoundError(
-            f"canonical door-scene directory is missing: {paths.DOOR_SCENE_DIR}"
-        )
-    actual = {entry.name for entry in paths.DOOR_SCENE_DIR.iterdir()}
-    if actual != expected:
-        raise ValueError(
-            "canonical door-scene directory must contain exactly "
-            f"{sorted(expected)}; found {sorted(actual)}"
-        )
-    for pose_id in CANONICAL_DOOR_POSES:
-        validate_door_task_usd(canonical_door_scene_path(pose_id))
-
-
-def ensure_diagnostic_door_task_usd(
-    path: str | Path,
-    *,
-    door_yaw_rad: float,
-    door_xy_offset_m: tuple[float, float],
-) -> Path:
-    """Generate a numeric diagnostic pose at an explicit cache-only path."""
-    usd_path = Path(path).expanduser()
-    cache_root = paths.RUNTIME_CACHE_ROOT.resolve()
-    try:
-        usd_path.resolve().relative_to(cache_root)
-    except ValueError as exc:
-        raise ValueError(
-            f"diagnostic scenes must be written under the runtime cache {cache_root}: {usd_path}"
-        ) from exc
-    if usd_path.suffix != ".usda":
-        raise ValueError(f"diagnostic scene path must end in .usda: {usd_path}")
-    return _ensure_door_task_usd(usd_path, float(door_yaw_rad), tuple(door_xy_offset_m))
+    path = paths.DOOR_SCENE_DIR / f"{pose_id}.usda"
+    return _ensure_door_task_usd(path, pose.yaw_rad, pose.xy_offset_m)
 
 
 def _ensure_door_task_usd(
@@ -226,14 +168,7 @@ def _author_door_task_usd(
     UsdPhysics.ArticulationRootAPI.Apply(door_root)
 
     if door_yaw_rad != 0.0 or door_xy_offset_m != (0.0, 0.0):
-        # Door-task pose: rotate the whole assembly about the Doorframe's
-        # (hinge) world position, then translate in world XY. The referenced
-        # door root already carries an inherited xform op, so the pose is
-        # baked into one matrix op (existing local transform composed with the
-        # world-space pivot pose; Gf uses row-vector composition, left applied
-        # first). Authored before the FixDoorframe anchor below, whose fresh
-        # XformCache composes the posed transform — the world anchor follows.
-        # The default pose authors nothing so its USD stays byte-identical.
+        # Rotate around the hinge, then translate in world XY. D0 stays byte-stable.
         unposed_frame = stage.GetPrimAtPath("/World/DoorTaskDoor/Doorframe")
         pivot = Gf.Vec3d(
             UsdGeom.XformCache().GetLocalToWorldTransform(unposed_frame).ExtractTranslation()
@@ -259,11 +194,7 @@ def _author_door_task_usd(
     fixed_joint = UsdPhysics.FixedJoint.Define(stage, "/World/DoorTaskDoor/FixDoorframe")
     fixed_joint.CreateJointEnabledAttr(True)
     fixed_joint.CreateBody1Rel().SetTargets([frame.GetPath()])
-    # Anchor the world side of the joint at the door frame's composed world pose.
-    # With unauthored (identity) joint frames the anchor sits at the world
-    # origin, and when this USD is referenced under an env namespace (Isaac Lab
-    # DirectRLEnv) the joint snaps the whole articulation there — visuals stay
-    # put while the physics door ends up at the origin, intersecting the floor.
+    # An explicit world anchor prevents namespaced scenes from snapping to the origin.
     frame_xf = UsdGeom.XformCache().GetLocalToWorldTransform(frame)
     frame_rot = frame_xf.RemoveScaleShear().ExtractRotationQuat()
     fixed_joint.CreateLocalPos0Attr(Gf.Vec3f(frame_xf.ExtractTranslation()))
@@ -335,9 +266,7 @@ def _validate_world_joint_anchor(fixed_joint, frame, usd_path: Path) -> None:
             "door frame fixed joint world anchor must match the frame's world pose "
             f"({expected_pos}), got {local_pos0}: {usd_path}"
         )
-    # The rotation half of the anchor must match too: an identity rot0 under a
-    # yawed door pose would pass the position check yet twist the doorframe at
-    # solve time.
+    # Matching only position would twist a yawed door at solve time.
     expected_rot = Gf.Quatf(frame_xf.RemoveScaleShear().ExtractRotationQuat())
     delta = Gf.Quatf(local_rot0) * expected_rot.GetInverse()
     if abs(abs(delta.GetReal()) - 1.0) > 1e-5:
@@ -401,14 +330,7 @@ def _layer_text(layer) -> str:
 __all__ = [
     "CANONICAL_DOOR_POSES",
     "DEFAULT_DOOR_POSE_ID",
-    "DOOR_TASK_USD",
-    "DoorPose",
-    "audit_canonical_door_scene_directory",
     "canonical_door_pose",
-    "canonical_door_scene_path",
-    "door_task_usd",
-    "ensure_canonical_door_scenes",
-    "ensure_diagnostic_door_task_usd",
     "ensure_door_task_usd",
     "validate_door_task_usd",
 ]

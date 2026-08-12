@@ -12,7 +12,6 @@ from alexdoor_xas.assets.alex_v2_contract import (
     DOOR_RIGHT_ARM_PD_GAINS,
 )
 from alexdoor_xas.assets.alex_v2_right_arm_pd import (
-    RIGHT_ARM_PD_JOINTS,
     apply_production_right_arm_pd,
 )
 
@@ -25,6 +24,7 @@ _ARM_EXPRESSIONS = (
     ".*WRIST_X",
     ".*GRIPPER_Z",
 )
+_RIGHT_ARM_PD_JOINTS = tuple(item[0] for item in DOOR_RIGHT_ARM_PD_GAINS)
 
 
 def _arms_actuator():
@@ -90,8 +90,8 @@ def test_production_splits_exact_right_arm_and_preserves_every_other_actuator() 
 
     retained = cfg.actuators["arms"]
     right = cfg.actuators[DOOR_RIGHT_ARM_ACTUATOR_NAME]
-    assert tuple(right.joint_names_expr) == RIGHT_ARM_PD_JOINTS
-    assert set(retained.joint_names_expr).isdisjoint(RIGHT_ARM_PD_JOINTS)
+    assert tuple(right.joint_names_expr) == _RIGHT_ARM_PD_JOINTS
+    assert set(retained.joint_names_expr).isdisjoint(_RIGHT_ARM_PD_JOINTS)
     assert set(retained.joint_names_expr) == {
         "LEFT_SHOULDER_Y",
         "LEFT_SHOULDER_X",
@@ -113,9 +113,13 @@ def test_production_splits_exact_right_arm_and_preserves_every_other_actuator() 
         name: {"stiffness": stiffness, "damping": damping}
         for name, stiffness, damping in DOOR_RIGHT_ARM_PD_GAINS
     }
-    assert right.stiffness == {name: expected[name]["stiffness"] for name in RIGHT_ARM_PD_JOINTS}
-    assert right.damping == {name: expected[name]["damping"] for name in RIGHT_ARM_PD_JOINTS}
-    for name, source_expression in zip(RIGHT_ARM_PD_JOINTS, _ARM_EXPRESSIONS[:-1], strict=True):
+    assert right.stiffness == {
+        name: expected[name]["stiffness"] for name in _RIGHT_ARM_PD_JOINTS
+    }
+    assert right.damping == {name: expected[name]["damping"] for name in _RIGHT_ARM_PD_JOINTS}
+    for name, source_expression in zip(
+        _RIGHT_ARM_PD_JOINTS, _ARM_EXPRESSIONS[:-1], strict=True
+    ):
         assert right.velocity_limit_sim[name] == arms_before.velocity_limit_sim[source_expression]
         assert right.effort_limit_sim[name] == arms_before.effort_limit_sim[source_expression]
         assert right.armature[name] == arms_before.armature[source_expression]

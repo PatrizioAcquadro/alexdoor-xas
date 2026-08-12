@@ -20,7 +20,7 @@ randomization limits.
 
 ## Canonical scenes
 
-`src/alexdoor_xas/assets/door_task.py` owns one immutable pose registry and `outputs/door_scene/` contains exactly its five generated layers: D0 yaw `0.00`, XY `(0.00, 0.00)`; D1 yaw `+0.05`, XY `(+0.02, 0.00)`; D2 yaw `-0.05`, XY `(0.00, -0.02)`; D3 yaw `+0.10`, XY `(+0.02, +0.02)`; D4 yaw `-0.10`, XY `(+0.02, -0.02)`. D0 is the default. Routine environment and data APIs select by pose ID. Noncanonical numeric transforms require an explicit path under `~/.cache/alexdoor-xas/door_scenes/` and cannot create a D label.
+`src/alexdoor_xas/assets/door_task.py` owns one immutable pose registry and `outputs/door_scene/` contains exactly its five generated layers: D0 yaw `0.00`, XY `(0.00, 0.00)`; D1 yaw `+0.05`, XY `(+0.02, 0.00)`; D2 yaw `-0.05`, XY `(0.00, -0.02)`; D3 yaw `+0.10`, XY `(+0.02, +0.02)`; D4 yaw `-0.10`, XY `(+0.02, -0.02)`. D0 is the default. Runtime and data APIs accept only these pose IDs.
 
 ## Control and sensing
 
@@ -34,6 +34,7 @@ The benchmark is simulation-only. It has no physical robot command path, hardwar
 
 ## Version Notes
 
+- 2026-08-12 — Removed unused asset evidence fields and noncanonical scene-generation APIs while preserving runtime identity, D0-D4 validation, and physical scene checks.
 - 2026-08-12 — Limited environment readiness to benchmark-required assets while retaining the optional combined hallway path for manual composition.
 - 2026-08-12 — Moved generic Alex V2 configuration to the autonomous external extension while retaining every Door-specific runtime contract in this consumer.
 - 2026-08-12 — Replaced transform-derived scene names with the exact D0-D4 registry and moved noncanonical generation to the runtime cache.

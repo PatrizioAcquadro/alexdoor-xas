@@ -4,7 +4,7 @@ Current as of 2026-08-12. Code and deterministic tests are the source of truth f
 
 ## Maintained capabilities
 
-- Calibrated fixed-base Alex V2 benchmark with exact canonical D0-D4 scene layers and cache-only noncanonical generation.
+- Calibrated fixed-base Alex V2 benchmark with exact canonical D0-D4 scene layers.
 - Deterministic scripted baseline and matched `phase2.v2`/`v2_pose` A1-A4 episode export with factual termination fields and legacy v0/v1 reads.
 - A2/A3 model datasets, content-grouped splits, retained views, and directly recomputed train-only normalization.
 - A2/A3/A4 adapters and simulator safety controls.

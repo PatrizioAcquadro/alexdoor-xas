@@ -12,7 +12,7 @@ from alexdoor_xas.assets.alex_v2_contract import (
     DOOR_RIGHT_ARM_PD_GAINS,
 )
 
-RIGHT_ARM_PD_JOINTS = (
+_RIGHT_ARM_PD_JOINTS = (
     "RIGHT_SHOULDER_Y",
     "RIGHT_SHOULDER_X",
     "RIGHT_SHOULDER_Z",
@@ -71,7 +71,7 @@ def _copy_source_values(
     source: Mapping[str, Any], *, field: str, positive: bool
 ) -> dict[str, float]:
     copied: dict[str, float] = {}
-    for joint_name in RIGHT_ARM_PD_JOINTS:
+    for joint_name in _RIGHT_ARM_PD_JOINTS:
         expression = _SOURCE_EXPRESSION_BY_RIGHT_JOINT[joint_name]
         if expression not in source:
             raise ValueError(f"arms actuator {field} is missing source expression {expression!r}")
@@ -94,7 +94,7 @@ def _copy_optional_source_field(source: Any, *, field: str) -> Any:
 
 
 def _validated_ordered_gains() -> dict[str, dict[str, float]]:
-    if tuple(item[0] for item in DOOR_RIGHT_ARM_PD_GAINS) != RIGHT_ARM_PD_JOINTS:
+    if tuple(item[0] for item in DOOR_RIGHT_ARM_PD_GAINS) != _RIGHT_ARM_PD_JOINTS:
         raise ValueError("right-arm production gains must use the exact six-joint order")
     return {
         joint_name: {
@@ -154,9 +154,11 @@ def apply_production_right_arm_pd(cfg: Any) -> None:
     retained = deepcopy(source)
     retained.joint_names_expr = list(_RETAINED_ARM_JOINTS)
     right_arm = deepcopy(source)
-    right_arm.joint_names_expr = list(RIGHT_ARM_PD_JOINTS)
-    right_arm.stiffness = {name: gains_profile[name]["stiffness"] for name in RIGHT_ARM_PD_JOINTS}
-    right_arm.damping = {name: gains_profile[name]["damping"] for name in RIGHT_ARM_PD_JOINTS}
+    right_arm.joint_names_expr = list(_RIGHT_ARM_PD_JOINTS)
+    right_arm.stiffness = {
+        name: gains_profile[name]["stiffness"] for name in _RIGHT_ARM_PD_JOINTS
+    }
+    right_arm.damping = {name: gains_profile[name]["damping"] for name in _RIGHT_ARM_PD_JOINTS}
     right_arm.velocity_limit_sim = velocity
     right_arm.effort_limit_sim = effort
     right_arm.armature = armature
@@ -177,4 +179,4 @@ def apply_production_right_arm_pd(cfg: Any) -> None:
     actuators[DOOR_RIGHT_ARM_ACTUATOR_NAME] = right_arm
 
 
-__all__ = ["RIGHT_ARM_PD_JOINTS", "apply_production_right_arm_pd"]
+__all__ = ["apply_production_right_arm_pd"]

@@ -196,3 +196,14 @@ Verified all 23 wiki pages, internal links, complete index coverage, nine phase
 pages, Markdown whitespace, repository-relative references, and unchanged raw
 and historical-phase boundaries after the adapter, contact, checkpoint, and
 required-asset corrections.
+
+## 2026-08-12 — update : Asset package simplification
+
+Documented the reduced Alex V2 asset and tool-frame surfaces and D0-D4-only
+scene generation while retaining runtime identity and physical validation.
+
+## 2026-08-12 — lint : Asset package simplification
+
+Verified all 23 wiki pages, 31 internal links, complete index coverage, nine
+phase pages, Markdown whitespace, protected raw boundaries, and removal of
+current references to the retired diagnostic scene APIs.
