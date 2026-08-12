@@ -198,7 +198,7 @@ def test_a2_warns_near_min_reach_but_accepts():
     ee = center + np.array([0.22, 0.0, 0.0])
     applied, decision = adapter.process(np.zeros(6), _ctx(ee_pos_w=ee))
     assert decision.status is AdapterStatus.ACCEPTED
-    assert any("min reach" in warning for warning in decision.warnings)
+    assert any("min reach" in warning.message for warning in decision.warning_records)
 
 
 def test_a2_flags_joint_limit_excess_as_warning():
@@ -224,8 +224,8 @@ def test_a2_flags_joint_limit_excess_as_warning():
         ),
     )
     assert decision.status is AdapterStatus.ACCEPTED
-    assert any("position limit" in warning for warning in decision.warnings)
-    assert any("velocity exceeds" in warning for warning in decision.warnings)
+    assert any("position limit" in warning.message for warning in decision.warning_records)
+    assert any("velocity exceeds" in warning.message for warning in decision.warning_records)
     records = {warning.id: warning for warning in decision.warning_records}
     assert set(records) == {"a2.joint_position_limit", "a2.joint_velocity_limit"}
     velocity = records["a2.joint_velocity_limit"].evidence
@@ -339,7 +339,6 @@ def test_alex_v2_limits_use_calibrated_shell_and_caller_center() -> None:
         workspace_center_w=center,
     )
 
-    assert limits.robot == ALEX_V2_ROBOT_TAG
     assert limits.workspace.center_w == center
     assert limits.workspace.min_reach_m == pytest.approx(0.31)
     assert limits.workspace.max_reach_m == pytest.approx(0.77)
@@ -500,7 +499,7 @@ def test_a4_caps_hinge_delta_to_remaining_travel():
 def test_a4_rejects_unreachable_target():
     # Workspace centered 2 m from the door: every probe point is out of reach.
     workspace = WorkspaceSphere(center_w=(2.0, 2.0, 2.0), min_reach_m=0.1, max_reach_m=0.5)
-    limits = RobotLimitsCfg(robot="test", workspace=workspace)
+    limits = RobotLimitsCfg(workspace=workspace)
     adapter = _a4(limits=limits)
     _, decision = adapter.validate_chunk(
         _chunk(hinge_delta=0.5), entry_angle_rad=0.0, door_frame=_identity_frame()

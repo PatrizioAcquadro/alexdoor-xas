@@ -16,7 +16,11 @@ import torch
 pytest.importorskip("diffusers")
 
 from alexdoor_xas.adapters.a2 import A2Adapter  # noqa: E402
-from alexdoor_xas.adapters.rollout import rollout_chunks  # noqa: E402
+from alexdoor_xas.adapters.rollout import (  # noqa: E402
+    read_door_frame,
+    read_step_context,
+    rollout_chunks,
+)
 from alexdoor_xas.assets.alex_v2_contract import RobotAssetRef  # noqa: E402
 from alexdoor_xas.dataset import DatasetNormStats, EpisodeRecord, NormStats  # noqa: E402
 from alexdoor_xas.policies.common.inspect import open_loop_report  # noqa: E402
@@ -757,7 +761,7 @@ def test_diffusion_chunk_source_receding_horizon_drives_a2_rollout() -> None:
     source = diffusion_chunk_source(policy, env, n_action_steps=4)
     adapter = A2Adapter(TEST_ROBOT_LIMITS)
 
-    chunk = source(None)
+    chunk = source(read_step_context(env, read_door_frame(env)))
     assert chunk.shape == (4, ACTION_DIM)
 
     result = rollout_chunks(env, source, adapter, max_ticks=20)

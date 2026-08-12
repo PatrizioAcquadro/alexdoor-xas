@@ -1,11 +1,4 @@
-"""Rollout-facing Diffusion Policy wrapper: normalization + chunk-source factory.
-
-Bridges the trained :class:`DiffusionTransformer` to the adapter-v1 rollout
-driver (``adapters/rollout.rollout_chunks``) without importing it — the
-adapters never import policies and vice versa; scripts compose the two. The
-env is duck-typed through the frozen Phase 2 accessor surface via the shared
-``policies.common.obs`` readers. No Isaac imports.
-"""
+"""Rollout-facing Diffusion Policy normalization and chunk-source factory."""
 
 from __future__ import annotations
 
@@ -20,7 +13,12 @@ from alexdoor_xas.assets.alex_v2_contract import (
     assert_checkpoint_runtime_compatible,
 )
 from alexdoor_xas.dataset import DatasetNormStats
-from alexdoor_xas.policies.common.obs import OBS_CLIP, ROLLOUT_OBS_PRESETS, build_env_obs
+from alexdoor_xas.policies.common.obs import (
+    OBS_CLIP,
+    ROLLOUT_OBS_PRESETS,
+    build_rollout_obs,
+    read_door_pose_obs,
+)
 from alexdoor_xas.policies.diffusion.checkpoint import load_checkpoint
 from alexdoor_xas.policies.diffusion.data import MinMaxNormalizer
 from alexdoor_xas.policies.diffusion.model import DiffusionTransformer
@@ -156,10 +154,10 @@ def diffusion_chunk_source(
     steps = policy.chunk_size if n_action_steps is None else int(n_action_steps)
     if not 1 <= steps <= policy.chunk_size:
         raise ValueError(f"n_action_steps must be in [1, {policy.chunk_size}], got {steps}")
+    door_pose = read_door_pose_obs(env) if preset == "core_door_pose" else None
 
     def source(ctx):
-        del ctx
-        return policy.predict(build_env_obs(env, preset))[:steps]
+        return policy.predict(build_rollout_obs(ctx, preset, door_pose))[:steps]
 
     return source
 

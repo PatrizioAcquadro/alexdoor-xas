@@ -182,7 +182,7 @@ def _state_validation_adapter(field: str) -> A2Adapter:
         min_reach_m=(float("-inf") if field == "workspace_min_reach" else 0.01),
         max_reach_m=(float("inf") if field == "workspace_max_reach" else 2.0),
     )
-    limits = RobotLimitsCfg(robot="test", workspace=workspace)
+    limits = RobotLimitsCfg(workspace=workspace)
     return A2Adapter(limits)
 
 
@@ -237,38 +237,6 @@ def test_success_at_reset_state_executes_zero_ticks() -> None:
     assert result.termination_reason == "success"
 
 
-def test_cross_then_rebound_keeps_success_and_crossing_tick() -> None:
-    angles = [0.0, 0.1, 0.2, 0.35, 0.28, 0.2, 0.1]
-    env = ScriptedAngleEnv(angles)
-    env.reset(seed=0)
-    result = rollout_chunks(
-        env,
-        _push_source(4),
-        A2Adapter(TEST_ROBOT_LIMITS),
-        max_ticks=6,
-        success_angle_rad=SUCCESS_RAD,
-        post_success_diagnostic=True,
-    )
-    assert result.success is True
-    assert result.first_success_tick == 3  # angles[3] = 0.35 is the first crossing
-    assert result.final_angle_rad < SUCCESS_RAD  # rebounded, but success is latched
-    assert result.termination_reason == "tick_budget"  # diagnostic ran to budget
-
-    # Without the diagnostic flag the rollout stops at the crossing tick.
-    env = ScriptedAngleEnv(angles)
-    env.reset(seed=0)
-    stopped = rollout_chunks(
-        env,
-        _push_source(4),
-        A2Adapter(TEST_ROBOT_LIMITS),
-        max_ticks=6,
-        success_angle_rad=SUCCESS_RAD,
-    )
-    assert stopped.n_ticks == 3
-    assert stopped.termination_reason == "success"
-    assert stopped.final_angle_rad == pytest.approx(0.35)
-
-
 def test_policy_exhaustion_and_tick_budget_reasons() -> None:
     env = FakeDoorPushEnv()
     env.reset(seed=0)
@@ -280,36 +248,6 @@ def test_policy_exhaustion_and_tick_budget_reasons() -> None:
     budget = _run(FakeDoorPushEnv(), 4, max_ticks=6)
     assert budget.termination_reason == "tick_budget"
     assert budget.n_ticks == 6
-
-
-def test_step_hook_observes_each_completed_tick() -> None:
-    observed_ticks: list[int] = []
-    result = _run(
-        FakeDoorPushEnv(),
-        4,
-        max_ticks=6,
-        step_hook=observed_ticks.append,
-    )
-
-    assert result.n_ticks == 6
-    assert observed_ticks == [1, 2, 3, 4, 5, 6]
-
-
-def test_step_hook_does_not_capture_auto_reset_tick() -> None:
-    observed_ticks: list[int] = []
-    env = TruncatingEnv(truncate_at=2)
-    env.reset(seed=0)
-    result = rollout_chunks(
-        env,
-        _push_source(3),
-        A2Adapter(TEST_ROBOT_LIMITS),
-        step_hook=observed_ticks.append,
-    )
-
-    assert result.n_ticks == 2
-    assert result.environment_truncated is True
-    assert result.environment_terminated is False
-    assert observed_ticks == [1]
 
 
 def test_env_truncation_freezes_pre_reset_state() -> None:
@@ -473,3 +411,61 @@ def test_success_angle_none_preserves_legacy_semantics() -> None:
     assert result.first_success_tick is None
     assert len(result.contact_per_tick) == result.n_ticks == 15
     assert math.isfinite(result.final_angle_rad)
+
+
+def test_reused_adapter_keeps_rollout_logs_independent() -> None:
+    env = FakeDoorPushEnv()
+    adapter = A2Adapter(TEST_ROBOT_LIMITS)
+    env.reset(seed=0)
+    first = rollout_chunks(env, _push_source(1), adapter, max_ticks=2)
+    env.reset(seed=1)
+    second = rollout_chunks(env, _push_source(1), adapter, max_ticks=3)
+
+    assert len(first.log.decisions) == 2
+    assert len(second.log.decisions) == 3
+    assert len(adapter.log.decisions) == 5
+    assert first.log is not adapter.log
+
+
+@pytest.mark.parametrize("max_ticks", [0, -1, 1.5, True])
+def test_rollout_rejects_invalid_tick_budget(max_ticks) -> None:
+    env = FakeDoorPushEnv()
+    env.reset(seed=0)
+    with pytest.raises(ValueError, match="positive integer"):
+        rollout_chunks(env, _push_source(1), A2Adapter(TEST_ROBOT_LIMITS), max_ticks=max_ticks)
+
+
+@pytest.mark.parametrize("threshold", [float("nan"), float("inf"), float("-inf")])
+def test_rollout_rejects_non_finite_success_threshold(threshold: float) -> None:
+    env = FakeDoorPushEnv()
+    env.reset(seed=0)
+    with pytest.raises(ValueError, match="must be finite"):
+        rollout_chunks(
+            env,
+            _push_source(1),
+            A2Adapter(TEST_ROBOT_LIMITS),
+            success_angle_rad=threshold,
+        )
+
+
+def test_rollout_rejects_malformed_step_result() -> None:
+    class MalformedStepEnv(FakeDoorPushEnv):
+        def step(self, action):
+            return super().step(action)[:4]
+
+    env = MalformedStepEnv()
+    env.reset(seed=0)
+    with pytest.raises(RuntimeError, match="Gymnasium 5-tuple"):
+        rollout_chunks(env, _push_source(1), A2Adapter(TEST_ROBOT_LIMITS), max_ticks=1)
+
+
+def test_rollout_rejects_non_binary_termination_flag() -> None:
+    class InvalidFlagEnv(FakeDoorPushEnv):
+        def step(self, action):
+            obs, reward, _, truncated, info = super().step(action)
+            return obs, reward, torch.tensor([2]), truncated, info
+
+    env = InvalidFlagEnv()
+    env.reset(seed=0)
+    with pytest.raises(RuntimeError, match="bool, 0, or 1"):
+        rollout_chunks(env, _push_source(1), A2Adapter(TEST_ROBOT_LIMITS), max_ticks=1)

@@ -34,7 +34,6 @@ class A2Adapter:
     def process(self, delta_world, ctx: StepContext) -> tuple[np.ndarray, AdapterDecision]:
         """Return the applied delta and its logged decision; rejection applies zero motion."""
         checks: dict[str, bool] = {}
-        warnings: list[str] = []
         warning_records: list[AdapterWarning] = []
         requested = np.asarray(delta_world, dtype=np.float64).reshape(-1)
 
@@ -84,10 +83,9 @@ class A2Adapter:
                     f"predicted EE position {predicted.round(3).tolist()} is "
                     f"{self.limits.workspace.distance(predicted):.3f} m from the shoulder, "
                     f"beyond max reach {self.limits.workspace.max_reach_m:.3f} m",
-                    warnings=warnings,
                 )
             if self.limits.workspace.within_min_reach(predicted):
-                warnings.append(
+                message = (
                     f"predicted EE position is within min reach "
                     f"{self.limits.workspace.min_reach_m:.2f} m of the shoulder "
                     "(near-singular region; IK may stall)"
@@ -95,7 +93,7 @@ class A2Adapter:
                 warning_records.append(
                     AdapterWarning(
                         id="a2.workspace_min_reach",
-                        message=warnings[-1],
+                        message=message,
                         evidence={
                             "distance_from_shoulder_m": self.limits.workspace.distance(predicted),
                             "configured_min_reach_m": self.limits.workspace.min_reach_m,
@@ -106,7 +104,6 @@ class A2Adapter:
                 )
 
         joint_warnings = self._joint_limit_flags(ctx)
-        warnings.extend(warning.message for warning in joint_warnings)
         warning_records.extend(joint_warnings)
 
         if corrections:
@@ -114,7 +111,6 @@ class A2Adapter:
                 status=AdapterStatus.CORRECTED,
                 reason="; ".join(corrections),
                 checks=checks,
-                warnings=tuple(warnings),
                 warning_records=tuple(warning_records),
                 requested=requested,
                 applied=applied,
@@ -123,7 +119,6 @@ class A2Adapter:
             decision = AdapterDecision(
                 status=AdapterStatus.ACCEPTED,
                 checks=checks,
-                warnings=tuple(warnings),
                 warning_records=tuple(warning_records),
                 requested=requested,
                 applied=applied,
@@ -245,7 +240,6 @@ class A2Adapter:
         requested: np.ndarray,
         checks: dict[str, bool],
         reason: str,
-        warnings: list[str] | None = None,
     ) -> tuple[np.ndarray, AdapterDecision]:
         applied = np.zeros(EE_DELTA_DIM)
         decision = self.log.record(
@@ -253,7 +247,6 @@ class A2Adapter:
                 status=AdapterStatus.REJECTED,
                 reason=reason,
                 checks=checks,
-                warnings=tuple(warnings or ()),
                 requested=requested,
                 applied=applied,
             )

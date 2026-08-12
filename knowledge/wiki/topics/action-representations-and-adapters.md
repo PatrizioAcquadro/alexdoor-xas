@@ -21,8 +21,8 @@ is the hinge axis. A4 contact targets move with the panel.
 
 `src/alexdoor_xas/adapters/base.py` defines `AdapterDecision` and the accepted,
 corrected, and rejected statuses. Each decision retains the request, applied
-action if any, and warnings. A correction is therefore visible in metrics and
-replay rather than being hidden inside the controller.
+action if any, and structured warning records. A correction is therefore
+visible in metrics and replay rather than hidden inside the controller.
 
 `src/alexdoor_xas/adapters/a2.py` is the final Cartesian safety boundary. It
 validates shape and finiteness, clamps per-tick translation to 0.02 m and
@@ -53,8 +53,10 @@ commanded to the robot.
 
 `src/alexdoor_xas/adapters/rollout.py` is the learned-policy execution boundary.
 It stops on simulator termination/truncation, records pre-reset terminal state,
-and rejects non-finite simulator observations. Policies do not import or bypass
-this layer.
+and rejects invalid simulator state or rollout inputs. Policies build each query
+from rollout-validated state instead of rereading dynamic state; static
+door-pose terms are cached after reset. Result logs contain only their rollout's
+decisions.
 
 ## Contact and Force Semantics
 
@@ -88,6 +90,8 @@ carefully than independently generating one dataset per space; see
 
 ## Version Notes
 
+- 2026-08-12 — Unified policy and adapter state reads, isolated per-rollout
+  logs, and removed unused rollout hooks and duplicate warning fields.
 - 2026-08-12 — Unified exact contact-flag decoding and made geometric contact
   inference respect the full three-dimensional panel extent.
 - 2026-08-12 — Required proper A3 rotations and aligned A4 environment-end

@@ -24,7 +24,7 @@ from alexdoor_xas.adapters.limits import RobotLimitsCfg  # noqa: E402
 from alexdoor_xas.data_engine import DataEngineCfg  # noqa: E402
 from alexdoor_xas.policies.scripted import DoorPushControllerCfg  # noqa: E402
 
-TEST_ROBOT_LIMITS = RobotLimitsCfg(robot="test_double")
+TEST_ROBOT_LIMITS = RobotLimitsCfg()
 
 
 def make_test_engine_cfg(**overrides) -> DataEngineCfg:

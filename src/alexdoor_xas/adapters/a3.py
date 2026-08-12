@@ -73,7 +73,6 @@ class A3Adapter:
             status=a2_decision.status,
             reason=a2_decision.reason,
             checks=checks,
-            warnings=a2_decision.warnings,
             warning_records=a2_decision.warning_records,
             requested=requested,
             applied=applied,

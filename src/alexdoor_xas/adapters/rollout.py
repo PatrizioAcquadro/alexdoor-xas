@@ -5,6 +5,7 @@ Each command is adapted against fresh validated state before ``env.step``.
 
 from __future__ import annotations
 
+import operator
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -279,22 +280,24 @@ def step_env(env, delta_world: np.ndarray) -> tuple[bool, bool]:
         np.asarray(delta_world, dtype=np.float64), dtype=torch.float32
     ).reshape(1, -1)
     result = env.step(action)
-    if isinstance(result, tuple) and len(result) >= 4:
-        terminated = bool(_numpy(result[2]).reshape(-1)[0])
-        truncated = bool(_numpy(result[3]).reshape(-1)[0])
-        return terminated, truncated
-    return False, False
+    if not isinstance(result, tuple) or len(result) != 5:
+        raise RuntimeError("env.step() must return the Gymnasium 5-tuple")
+    return _termination_flag("terminated", result[2]), _termination_flag("truncated", result[3])
 
 
-TERMINATION_REASONS = (
-    "success",
-    "policy_exhausted",
-    "rejection_stop",
-    "environment_terminated",
-    "environment_truncated",
-    "invalid_simulator_state",
-    "tick_budget",
-)
+def _termination_flag(name: str, value) -> bool:
+    array = np.asarray(_numpy(value))
+    if array.size != 1:
+        raise RuntimeError(f"env.step() {name} flag must contain one value")
+    scalar = array.reshape(-1)[0]
+    if isinstance(scalar, (bool, np.bool_)):
+        return bool(scalar)
+    if not isinstance(scalar, (int, float, np.integer, np.floating)):
+        raise RuntimeError(f"env.step() {name} flag must be bool, 0, or 1")
+    numeric = float(scalar)
+    if not np.isfinite(numeric) or numeric not in (0.0, 1.0):
+        raise RuntimeError(f"env.step() {name} flag must be bool, 0, or 1")
+    return bool(numeric)
 
 
 @dataclass
@@ -388,8 +391,6 @@ class _RolloutRuntime:
     max_ticks: int
     stop_on_reject: bool
     success_angle_rad: float | None
-    post_success_diagnostic: bool
-    step_hook: Callable[[int], None] | None
 
     def crossed_success(self) -> bool:
         return (
@@ -401,8 +402,7 @@ class _RolloutRuntime:
         if not self.crossed_success():
             return
         self.state.first_success_tick = 0
-        if not self.post_success_diagnostic:
-            self.state.reason = "success"
+        self.state.reason = "success"
 
     def active(self) -> bool:
         return self.state.reason is None and self.state.ticks < self.max_ticks
@@ -427,8 +427,6 @@ class _RolloutRuntime:
         if terminated or truncated:
             self._stop_on_environment_end(terminated, truncated)
             return
-        if self.step_hook is not None:
-            self.step_hook(state.ticks)
         if not self._refresh_context():
             return
         self._record_post_step_state()
@@ -463,8 +461,7 @@ class _RolloutRuntime:
         state.contact_ever_sensed = state.contact_ever_sensed or state.ctx.contact_sensed is True
         if state.first_success_tick is None and self.crossed_success():
             state.first_success_tick = state.ticks
-            if not self.post_success_diagnostic:
-                state.reason = "success"
+            state.reason = "success"
         if state.ticks >= self.max_ticks and not state.notes:
             state.notes = f"tick budget exhausted ({self.max_ticks})"
 
@@ -512,6 +509,33 @@ def _invalid_start_result(
     )
 
 
+def _validate_rollout_inputs(
+    max_ticks: int,
+    success_angle_rad: float | None,
+) -> tuple[int, float | None]:
+    if isinstance(max_ticks, bool):
+        raise ValueError("max_ticks must be a positive integer")
+    try:
+        max_ticks = operator.index(max_ticks)
+    except TypeError as exc:
+        raise ValueError("max_ticks must be a positive integer") from exc
+    if max_ticks <= 0:
+        raise ValueError("max_ticks must be a positive integer")
+    if success_angle_rad is None:
+        return max_ticks, None
+    try:
+        success_angle_rad = float(success_angle_rad)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("success_angle_rad must be finite") from exc
+    if not np.isfinite(success_angle_rad):
+        raise ValueError("success_angle_rad must be finite")
+    return max_ticks, success_angle_rad
+
+
+def _rollout_log(log: AdapterLog, start: int) -> AdapterLog:
+    return AdapterLog(decisions=list(log.decisions[start:]))
+
+
 def _normalize_chunk(chunk: Any) -> np.ndarray:
     normalized = np.asarray(chunk, dtype=np.float64)
     if normalized.ndim == 1:
@@ -530,19 +554,15 @@ def rollout_chunks(
     max_ticks: int = 600,
     stop_on_reject: bool = False,
     success_angle_rad: float | None = None,
-    post_success_diagnostic: bool = False,
-    step_hook: Callable[[int], None] | None = None,
 ) -> RolloutResult:
-    """Execute adapted chunks on a reset env until a factual stop condition.
-
-    Success is checked per tick. Termination freezes the last pre-reset state;
-    ``step_hook`` runs only after completed, non-terminated steps.
-    """
+    """Execute adapted chunks on a reset env until a factual stop condition."""
+    max_ticks, success_angle_rad = _validate_rollout_inputs(max_ticks, success_angle_rad)
     log: AdapterLog = adapter.log
+    log_start = len(log.decisions)
     try:
         start = _read_rollout_start(env, adapter)
     except InvalidSimulatorStateError as exc:
-        return _invalid_start_result(log, exc, success_angle_rad)
+        return _invalid_start_result(_rollout_log(log, log_start), exc, success_angle_rad)
 
     state = _RolloutState(
         ctx=start.ctx,
@@ -557,8 +577,6 @@ def rollout_chunks(
         max_ticks=max_ticks,
         stop_on_reject=stop_on_reject,
         success_angle_rad=success_angle_rad,
-        post_success_diagnostic=post_success_diagnostic,
-        step_hook=step_hook,
     )
     runtime.latch_initial_success()
 
@@ -574,7 +592,7 @@ def rollout_chunks(
 
     runtime.finish()
     runtime.assert_no_silent_reset()
-    return state.to_result(log, success_angle_rad)
+    return state.to_result(_rollout_log(log, log_start), success_angle_rad)
 
 
 def replay_source(actions) -> ChunkSource:

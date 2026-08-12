@@ -91,7 +91,6 @@ class _ChunkValidationError(ValueError):
 class _ChunkValidationState:
     chunk: ObjectCentricChunk
     checks: dict[str, bool] = field(default_factory=dict)
-    warnings: list[str] = field(default_factory=list)
     warning_records: list[AdapterWarning] = field(default_factory=list)
     corrections: list[str] = field(default_factory=list)
 
@@ -238,10 +237,9 @@ class A4Adapter:
         a3: A3Adapter,
         *,
         cfg: A4AdapterCfg,
-        geometry: DoorPanelGeometry | None = None,
     ):
         self.a3 = a3
-        self.geometry = geometry or DoorPanelGeometry()
+        self.geometry = DoorPanelGeometry()
         self.cfg = cfg
 
     @property
@@ -277,7 +275,6 @@ class A4Adapter:
                 chunk,
                 state.checks,
                 str(exc),
-                warnings=state.warnings,
                 warning_records=state.warning_records,
             )
         corrected_chunk = replace(
@@ -290,7 +287,6 @@ class A4Adapter:
                 status=AdapterStatus.CORRECTED,
                 reason="; ".join(state.corrections),
                 checks=state.checks,
-                warnings=tuple(state.warnings),
                 warning_records=tuple(state.warning_records),
                 requested=numeric,
                 applied=np.array(
@@ -305,7 +301,6 @@ class A4Adapter:
             decision = AdapterDecision(
                 status=AdapterStatus.ACCEPTED,
                 checks=state.checks,
-                warnings=tuple(state.warnings),
                 warning_records=tuple(state.warning_records),
                 requested=numeric,
                 applied=numeric,
@@ -398,7 +393,6 @@ class A4Adapter:
             f"chunk target x={target[0]:.3f} deviates from the EE-at-face convention "
             f"x={face_x:.3f}; planning recomputes x from phase clearances"
         )
-        state.warnings.append(message)
         state.warning_records.append(
             AdapterWarning(
                 id="a4.target_face_deviation",
@@ -481,7 +475,6 @@ class A4Adapter:
         chunk: ObjectCentricChunk,
         checks: dict[str, bool],
         reason: str,
-        warnings: list[str] | None = None,
         warning_records: list[AdapterWarning] | None = None,
     ) -> AdapterDecision:
         requested = self._chunk_requested_vector(chunk)
@@ -489,7 +482,6 @@ class A4Adapter:
             status=AdapterStatus.REJECTED,
             reason=reason,
             checks=checks,
-            warnings=tuple(warnings or ()),
             warning_records=tuple(warning_records or ()),
             requested=requested,
             applied=None,

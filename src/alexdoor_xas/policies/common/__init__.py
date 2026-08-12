@@ -24,8 +24,8 @@ from alexdoor_xas.policies.common.inspect import open_loop_report, predict_episo
 from alexdoor_xas.policies.common.obs import (
     OBS_CLIP,
     ROLLOUT_OBS_PRESETS,
-    build_env_obs,
-    stop_on_hinge_angle,
+    build_rollout_obs,
+    read_door_pose_obs,
 )
 
 __all__ = [
@@ -35,7 +35,7 @@ __all__ = [
     "PolicyData",
     "PolicyDataError",
     "aggregate_closed_loop",
-    "build_env_obs",
+    "build_rollout_obs",
     "factual_rollout_row",
     "load_policy_data",
     "make_eval_factory",
@@ -44,5 +44,5 @@ __all__ = [
     "open_loop_report",
     "predict_episode_open_loop",
     "protocol_rollouts",
-    "stop_on_hinge_angle",
+    "read_door_pose_obs",
 ]

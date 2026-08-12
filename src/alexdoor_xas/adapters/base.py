@@ -38,7 +38,6 @@ class AdapterDecision:
     status: AdapterStatus
     reason: str = ""
     checks: dict[str, bool] = field(default_factory=dict)
-    warnings: tuple[str, ...] = ()
     warning_records: tuple[AdapterWarning, ...] = ()
     requested: np.ndarray | None = None
     applied: np.ndarray | None = None
@@ -48,7 +47,6 @@ class AdapterDecision:
             "status": str(self.status),
             "reason": self.reason,
             "checks": dict(self.checks),
-            "warnings": list(self.warnings),
             "warning_records": [warning.to_dict() for warning in self.warning_records],
             "requested": None if self.requested is None else np.asarray(self.requested).tolist(),
             "applied": None if self.applied is None else np.asarray(self.applied).tolist(),

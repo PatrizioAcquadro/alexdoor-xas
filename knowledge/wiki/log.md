@@ -207,3 +207,14 @@ scene generation while retaining runtime identity and physical validation.
 Verified all 23 wiki pages, 31 internal links, complete index coverage, nine
 phase pages, Markdown whitespace, protected raw boundaries, and removal of
 current references to the retired diagnostic scene APIs.
+
+## 2026-08-12 — update : Rollout execution simplification
+
+Documented shared validated state for policy and adapter execution, cached
+static door-pose observations, isolated result logs, strict rollout inputs, and
+removal of unused hooks and duplicate warning fields.
+
+## 2026-08-12 — lint : Rollout execution simplification
+
+Verified wiki structure and links, source references, Markdown whitespace,
+protected raw boundaries, and removal of obsolete rollout interfaces.

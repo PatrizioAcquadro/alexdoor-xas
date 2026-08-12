@@ -39,7 +39,6 @@ class WorkspaceSphere:
 class RobotLimitsCfg:
     """Limits enforced and logged before the environment's hard clamps."""
 
-    robot: str
     max_pos_delta_m: float = 0.02
     max_rot_delta_rad: float = 0.05
     workspace: WorkspaceSphere | None = None
@@ -75,7 +74,6 @@ def alex_v2_limits(
     ):
         raise ValueError("calibrated contact-approach limits are invalid")
     return RobotLimitsCfg(
-        robot=ALEX_V2_ROBOT_TAG,
         workspace=WorkspaceSphere(
             center_w=tuple(float(value) for value in center),
             min_reach_m=float(min_reach_m),

@@ -11,7 +11,7 @@ import pytest
 import torch
 
 from alexdoor_xas.adapters.a2 import A2Adapter
-from alexdoor_xas.adapters.rollout import rollout_chunks
+from alexdoor_xas.adapters.rollout import read_door_frame, read_step_context, rollout_chunks
 from alexdoor_xas.assets.alex_v2_contract import RobotAssetRef
 from alexdoor_xas.dataset import DatasetNormStats, EpisodeRecord, NormStats
 from alexdoor_xas.policies.act.checkpoint import (
@@ -21,14 +21,10 @@ from alexdoor_xas.policies.act.checkpoint import (
 )
 from alexdoor_xas.policies.act.config import ActModelCfg, ActTrainCfg
 from alexdoor_xas.policies.act.model import ACTModel, act_loss, sinusoidal_table
-from alexdoor_xas.policies.act.policy import (
-    ActPolicy,
-    act_chunk_source,
-    build_env_obs,
-    stop_on_hinge_angle,
-)
+from alexdoor_xas.policies.act.policy import ActPolicy, act_chunk_source
 from alexdoor_xas.policies.act.train import make_seeded_model, train_act
 from alexdoor_xas.policies.common.inspect import open_loop_report
+from alexdoor_xas.policies.common.obs import build_rollout_obs, read_door_pose_obs
 from conftest import (
     TEST_ROBOT_LIMITS,
     FakeDoorPushEnv,
@@ -495,49 +491,51 @@ def test_act_policy_rejects_mismatched_stats() -> None:
         ActPolicy(model, stats)
 
 
-# --- env observation builder -------------------------------------------------
+# --- rollout observation builder ---------------------------------------------
 
 
-def test_build_env_obs_matches_direct_env_reads() -> None:
+def _step_context(env):
+    return read_step_context(env, read_door_frame(env))
+
+
+def test_build_rollout_obs_matches_validated_context() -> None:
     env = FakeDoorPushEnv()
     env.reset()
-    obs = build_env_obs(env, "core")
+    ctx = _step_context(env)
+    obs = build_rollout_obs(ctx, "core")
 
-    ee_pos, ee_quat = env.ee_pose_w()
-    angle, velocity = env.hinge_state()
     expected = np.concatenate(
         [
-            ee_pos.numpy().reshape(-1),
-            ee_quat.numpy().reshape(-1),
-            [float(angle[0]), float(velocity[0])],
+            ctx.ee_pos_w,
+            ctx.ee_quat_w_xyzw,
+            [ctx.hinge_angle_rad, ctx.hinge_velocity_rad_s],
         ]
     )
     assert obs.shape == (9,)
     np.testing.assert_allclose(obs, expected)
 
 
-def test_build_env_obs_core_contact_needs_force_sensing() -> None:
+def test_build_rollout_obs_core_contact_needs_force_sensing() -> None:
     plain = FakeDoorPushEnv()
     plain.reset()
     with pytest.raises(ValueError, match="contact_sensed"):
-        build_env_obs(plain, "core_contact")
+        build_rollout_obs(_step_context(plain), "core_contact")
 
     force = FakeForceDoorPushEnv()
     force.reset()
-    obs = build_env_obs(force, "core_contact")
+    obs = build_rollout_obs(_step_context(force), "core_contact")
     assert obs.shape == (10,)
     assert obs[-1] in (0.0, 1.0)
 
 
-def test_build_env_obs_rejects_presets_without_live_reader() -> None:
+def test_build_rollout_obs_rejects_unsupported_presets() -> None:
     env = FakeForceDoorPushEnv()
     env.reset()
-    with pytest.raises(ValueError, match="no closed-loop env reader"):
-        build_env_obs(env, "alex_full")
+    with pytest.raises(ValueError, match="no closed-loop reader"):
+        build_rollout_obs(_step_context(env), "alex_full")
 
 
-def test_build_env_obs_core_door_pose_matches_dataset_ordering() -> None:
-    """Live core_door_pose reader parity with the recorded dataset preset."""
+def test_build_rollout_obs_core_door_pose_matches_dataset_ordering() -> None:
     from alexdoor_xas.data_engine import plan_episodes, run_episode
     from alexdoor_xas.dataset import obs_matrix
     from alexdoor_xas.dataset.loader import EpisodeRecord
@@ -547,7 +545,11 @@ def test_build_env_obs_core_door_pose_matches_dataset_ordering() -> None:
 
     live_env = FakeDoorPushEnv(yaw_rad=yaw, origin=origin)
     live_env.reset(seed=0)
-    live = build_env_obs(live_env, "core_door_pose")
+    live = build_rollout_obs(
+        _step_context(live_env),
+        "core_door_pose",
+        read_door_pose_obs(live_env),
+    )
     assert live.shape == (14,)
     np.testing.assert_allclose(live[9:12], origin, atol=1e-12)
     np.testing.assert_allclose(live[12], np.sin(yaw), atol=1e-12)
@@ -635,25 +637,6 @@ def test_act_chunk_source_rejects_presets_without_live_reader() -> None:
         act_chunk_source(policy, env, obs_preset="alex_full")
 
 
-def test_stop_on_hinge_angle_ends_rollout_past_threshold() -> None:
-    class _Ctx:
-        def __init__(self, angle: float) -> None:
-            self.hinge_angle_rad = angle
-
-    inner_calls: list[float] = []
-
-    def inner(ctx):
-        inner_calls.append(ctx.hinge_angle_rad)
-        return np.zeros((1, 6))
-
-    source = stop_on_hinge_angle(inner, threshold_rad=math.pi / 4)
-
-    assert source(_Ctx(0.1)) is not None
-    assert source(_Ctx(math.pi / 4)) is None
-    assert source(_Ctx(1.0)) is None
-    assert inner_calls == [0.1]
-
-
 class _QueuePolicy:
     """Duck-typed policy stub emitting predetermined chunks."""
 
@@ -676,12 +659,13 @@ def test_temporal_ensemble_weights_match_the_paper_scheme() -> None:
     source = act_chunk_source(
         _QueuePolicy([chunk_a, chunk_b]), env, temporal_ensemble=True, ensemble_m=m
     )
+    ctx = _step_context(env)
 
-    first = source(None)
+    first = source(ctx)
     assert first.shape == (1, 6)
     np.testing.assert_allclose(first[0], chunk_a[0])
 
-    second = source(None)
+    second = source(ctx)
     weights = np.array([1.0, math.exp(-m)])  # oldest chunk first, weight exp(-m * i)
     expected = (chunk_a[1] * weights[0] + chunk_b[0] * weights[1]) / weights.sum()
     np.testing.assert_allclose(second[0], expected)

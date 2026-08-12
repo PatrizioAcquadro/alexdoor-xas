@@ -1,12 +1,4 @@
-"""Rollout-facing ACT policy wrapper: normalization + chunk-source factory.
-
-Bridges the trained :class:`ACTModel` to the adapter-v1 rollout driver
-(``adapters/rollout.rollout_chunks``) without importing it — the adapters
-never import policies and vice versa; scripts compose the two. The live obs
-readers and the success-stop wrapper are shared across chunk policies and
-live in ``policies.common.obs`` (re-exported here for compatibility).
-No Isaac imports.
-"""
+"""Rollout-facing ACT policy normalization and chunk-source factory."""
 
 from __future__ import annotations
 
@@ -26,8 +18,8 @@ from alexdoor_xas.policies.act.model import ACTModel
 from alexdoor_xas.policies.common.obs import (
     OBS_CLIP,
     ROLLOUT_OBS_PRESETS,
-    build_env_obs,
-    stop_on_hinge_angle,
+    build_rollout_obs,
+    read_door_pose_obs,
 )
 
 
@@ -124,20 +116,19 @@ def act_chunk_source(
             f"obs preset {preset!r} has no closed-loop env reader "
             f"(supported: {list(ROLLOUT_OBS_PRESETS)})"
         )
+    door_pose = read_door_pose_obs(env) if preset == "core_door_pose" else None
 
     if not temporal_ensemble:
 
         def source(ctx):
-            del ctx
-            return policy.predict(build_env_obs(env, preset))
+            return policy.predict(build_rollout_obs(ctx, preset, door_pose))
 
         return source
 
     pending: list[np.ndarray] = []  # oldest first; each holds its remaining future rows
 
     def ensemble_source(ctx):
-        del ctx
-        pending.append(policy.predict(build_env_obs(env, preset)))
+        pending.append(policy.predict(build_rollout_obs(ctx, preset, door_pose)))
         current = np.stack([chunk[0] for chunk in pending])
         weights = np.exp(-ensemble_m * np.arange(len(pending), dtype=np.float64))
         action = (current * weights[:, None]).sum(axis=0) / weights.sum()
@@ -153,6 +144,4 @@ __all__ = [
     "ROLLOUT_OBS_PRESETS",
     "ActPolicy",
     "act_chunk_source",
-    "build_env_obs",
-    "stop_on_hinge_angle",
 ]
