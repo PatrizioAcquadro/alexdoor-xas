@@ -16,10 +16,8 @@ pytest.importorskip("diffusers")
 
 from alexdoor_xas.adapters import (  # noqa: E402
     A2Adapter,
-    limits_for_robot,
     rollout_chunks,
 )
-from alexdoor_xas.adapters.limits import PROXY_ROBOT_TAG  # noqa: E402
 from alexdoor_xas.dataset import DatasetNormStats, EpisodeRecord, NormStats  # noqa: E402
 from alexdoor_xas.policies.common.inspect import open_loop_report  # noqa: E402
 from alexdoor_xas.policies.diffusion.checkpoint import (  # noqa: E402
@@ -56,7 +54,7 @@ from alexdoor_xas.policies.diffusion.train import (  # noqa: E402
     make_seeded_model,
     train_diffusion,
 )
-from conftest import FakeDoorPushEnv  # noqa: E402
+from conftest import TEST_ROBOT_LIMITS, FakeDoorPushEnv  # noqa: E402
 
 ACTION_DIM = 6
 OBS_DIM = 9
@@ -670,7 +668,7 @@ def test_diffusion_chunk_source_receding_horizon_drives_a2_rollout() -> None:
     policy = _rollout_policy()
     policy.seed(0)
     source = diffusion_chunk_source(policy, env, n_action_steps=4)
-    adapter = A2Adapter(limits_for_robot(PROXY_ROBOT_TAG))
+    adapter = A2Adapter(TEST_ROBOT_LIMITS)
 
     chunk = source(None)
     assert chunk.shape == (4, ACTION_DIM)

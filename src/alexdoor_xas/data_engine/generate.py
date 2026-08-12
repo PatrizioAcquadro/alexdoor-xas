@@ -1,9 +1,9 @@
-"""Deterministic scripted-episode generation (Phase 2 data engine).
+"""Deterministic scripted-episode generation for the Alex V2 benchmark.
 
-The engine drives a :class:`DoorPushEnv`-shaped environment with the scripted
+The engine drives a door-push environment with the scripted
 controller and records every control tick to the episode schema. The env is
-duck-typed through its Phase 2 state accessors (``door_frame_pose_w``,
-``hinge_state``, ``proxy_pose_w``, ``set_proxy_pose``, ``step``, ``reset``), so
+duck-typed through its benchmark state accessors (``door_frame_pose_w``,
+``hinge_state``, ``ee_pose_w``, ``set_ee_pose_w``, ``step``, ``reset``), so
 the loop itself has no Isaac imports and is testable against a synthetic env.
 
 Recorded actions are the executed world-frame EE deltas (A2). The controller's
@@ -42,15 +42,8 @@ from alexdoor_xas.recording import EpisodeBuffer, EpisodeMeta, EpisodeOutcome, E
 
 CONTACT_SOURCE = "inferred_geometric"
 CONTACT_SOURCE_FORCE = "force_sensor+geometric"
-
-PROXY_LIMITATIONS = (
-    "Robot is a velocity-driven proxy sphere (`proxy_ee_sphere_v0`), not Alex; "
-    "A2 rotation components are accepted but physically inert for the sphere.",
-    "`A1_joint_delta` is not exported: the proxy has no joints.",
-    "Contact flags are geometric inference (`inferred_geometric`), not force sensing.",
-    "The door frame pose is read from the USD stage at reset (world-fixed by the "
-    "task layer); live articulation pose reads return zeros in this Isaac Lab build.",
-)
+DEFAULT_SUCCESS_ANGLE_RAD = math.pi / 4.0
+DEFAULT_MAX_TICKS = 600
 
 _MISSING = object()
 
@@ -59,14 +52,14 @@ _MISSING = object()
 class DataEngineCfg:
     """Engine-level settings shared by all episodes of one run."""
 
-    task: str = "door_push"
-    scene: str = "outputs/door_task/door_task.usda"
-    robot: str = "proxy_ee_sphere_v0"
-    policy: str = "scripted"
-    success_angle_rad: float = math.pi / 4.0
-    max_ticks: int = 600
-    limitations: tuple[str, ...] = PROXY_LIMITATIONS
+    task: str
+    robot: str
+    limitations: tuple[str, ...]
     """Known limitations of the run setup, surfaced in the run report."""
+    scene: str = "outputs/door_task/door_task.usda"
+    policy: str = "scripted"
+    success_angle_rad: float = DEFAULT_SUCCESS_ANGLE_RAD
+    max_ticks: int = DEFAULT_MAX_TICKS
     door_pose_id: str | None = None
     """Label of the door-task pose this run was generated at (e.g. ``D0``).
     ``None`` = the default pose. The pose itself is fixed per process (the
@@ -166,12 +159,11 @@ def _validated_robot_asset_provenance(
 def run_episode(
     env,
     item: EpisodePlanItem,
-    engine_cfg: DataEngineCfg | None = None,
+    engine_cfg: DataEngineCfg,
     controller_cfg: DoorPushControllerCfg | None = None,
     render_hook=None,
 ) -> EpisodeBuffer:
     """Roll out and record one episode; deterministic given (env state, item)."""
-    engine_cfg = engine_cfg or DataEngineCfg()
     base_controller_cfg = controller_cfg or DoorPushControllerCfg()
     robot_asset_ref, robot_asset_manifest = _validated_robot_asset_provenance(env)
 
@@ -212,7 +204,7 @@ def run_episode(
     # into the scene USD per process, and the frame is static within a rollout).
     # Yaw is derived from the recorded door-frame rotation; the translation is
     # the door-frame origin relative to the robot base (world origin for the
-    # base-less proxy) so it stays meaningful if the robot is ever re-based.
+    # origin for base-less test doubles) so it stays meaningful if re-based.
     door_yaw_rad = float(math.atan2(door_frame.rot[1, 0], door_frame.rot[0, 0]))
     base_pos_w = np.zeros(3)
     if hasattr(env, "robot_base_pos_w"):
@@ -229,7 +221,7 @@ def run_episode(
     last_command = None
     for tick in range(engine_cfg.max_ticks):
         angle, velocity = _hinge_state(env)
-        ee_pos_w, ee_quat_w = _proxy_pose(env)
+        ee_pos_w, ee_quat_w = _ee_pose(env)
         contact_sensed: bool | None = None
         contact_force_n = 0.0
         if has_force_contact:
@@ -478,13 +470,13 @@ def apply_start_offset(
     Returns the env's realized-state settle report when it exposes one
     (``start_pose_settle_report``): requested/realized position, residual,
     settle ticks, and pass/fail — the fail-closed postcondition itself lives
-    in the env's ``set_proxy_pose``. Teleporting envs (proxy sphere, test
-    fakes) realize the request exactly and return ``None``.
+    in the env's ``set_ee_pose_w``. Teleporting test fakes realize the request
+    exactly and return ``None``.
     """
-    pos, quat = env.proxy_pose_w()
+    pos, quat = env.ee_pose_w()
     offset_w = door_frame.vector_to_world(np.asarray(variation.start_offset_door_frame))
     new_pos = _numpy(pos)[0] + offset_w
-    env.set_proxy_pose(
+    env.set_ee_pose_w(
         torch.as_tensor(new_pos, dtype=torch.float32).reshape(1, 3), quat.reshape(1, 4)
     )
     if hasattr(env, "start_pose_settle_report"):
@@ -497,8 +489,8 @@ def _hinge_state(env) -> tuple[float, float]:
     return float(_numpy(angle)[0]), float(_numpy(velocity)[0])
 
 
-def _proxy_pose(env) -> tuple[np.ndarray, np.ndarray]:
-    pos, quat = env.proxy_pose_w()
+def _ee_pose(env) -> tuple[np.ndarray, np.ndarray]:
+    pos, quat = env.ee_pose_w()
     return _numpy(pos)[0].astype(np.float64), _numpy(quat)[0].astype(np.float64)
 
 
@@ -511,7 +503,8 @@ def _numpy(value) -> np.ndarray:
 __all__ = [
     "CONTACT_SOURCE",
     "CONTACT_SOURCE_FORCE",
-    "PROXY_LIMITATIONS",
+    "DEFAULT_MAX_TICKS",
+    "DEFAULT_SUCCESS_ANGLE_RAD",
     "DataEngineCfg",
     "EpisodePlanItem",
     "plan_episodes",

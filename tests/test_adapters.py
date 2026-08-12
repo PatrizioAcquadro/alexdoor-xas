@@ -15,7 +15,6 @@ from alexdoor_xas.action.spaces import A4_PHASE_VOCAB, EE_DELTA_DIM, ObjectCentr
 from alexdoor_xas.adapters import (
     ALEX_V2_ROBOT_TAG,
     MAX_HINGE_ANGLE_RAD,
-    PROXY_LIMITS,
     A2Adapter,
     A3Adapter,
     A4Adapter,
@@ -31,10 +30,10 @@ from alexdoor_xas.adapters import (
     rollout_chunks,
     validate_object_frame,
 )
-from alexdoor_xas.data_engine import DataEngineCfg, plan_episodes, run_episode
+from alexdoor_xas.data_engine import plan_episodes, run_episode
 from alexdoor_xas.policies.scripted import DoorPushController, DoorPushControllerCfg
 from alexdoor_xas.policies.scripted.door_push import PHASE_ORDER, DoorPushPhase
-from conftest import FakeDoorPushEnv, FakeForceDoorPushEnv
+from conftest import TEST_ROBOT_LIMITS, FakeDoorPushEnv, FakeForceDoorPushEnv, make_test_engine_cfg
 
 
 def _ctx(
@@ -86,7 +85,7 @@ def _chunk(
 
 
 def test_a2_accepts_in_range_delta():
-    adapter = A2Adapter(PROXY_LIMITS)
+    adapter = A2Adapter(TEST_ROBOT_LIMITS)
     delta = np.array([0.01, -0.005, 0.0, 0.0, 0.0, 0.0])
     applied, decision = adapter.process(delta, _ctx())
     assert decision.status is AdapterStatus.ACCEPTED
@@ -96,13 +95,13 @@ def test_a2_accepts_in_range_delta():
 
 
 def test_a2_clamps_and_logs_correction():
-    adapter = A2Adapter(PROXY_LIMITS)
+    adapter = A2Adapter(TEST_ROBOT_LIMITS)
     delta = np.array([0.05, 0.0, 0.0, 0.0, 0.0, 0.2])
     applied, decision = adapter.process(delta, _ctx())
     assert decision.status is AdapterStatus.CORRECTED
     assert "clamp" in decision.reason
-    np.testing.assert_allclose(applied[:3], [PROXY_LIMITS.max_pos_delta_m, 0.0, 0.0])
-    assert applied[5] == pytest.approx(PROXY_LIMITS.max_rot_delta_rad)
+    np.testing.assert_allclose(applied[:3], [TEST_ROBOT_LIMITS.max_pos_delta_m, 0.0, 0.0])
+    assert applied[5] == pytest.approx(TEST_ROBOT_LIMITS.max_rot_delta_rad)
     np.testing.assert_allclose(decision.requested, delta)
     np.testing.assert_allclose(decision.applied, applied)
 
@@ -176,7 +175,7 @@ def test_a2_does_not_shape_subthreshold_sensor_dropout_command() -> None:
 
 @pytest.mark.parametrize("bad", [np.full(6, np.nan), np.zeros(3), np.zeros((2, 6)).reshape(-1)])
 def test_a2_rejects_malformed_deltas(bad):
-    adapter = A2Adapter(PROXY_LIMITS)
+    adapter = A2Adapter(TEST_ROBOT_LIMITS)
     applied, decision = adapter.process(bad, _ctx())
     assert decision.status is AdapterStatus.REJECTED
     assert decision.reason
@@ -208,7 +207,7 @@ def test_a2_warns_near_min_reach_but_accepts():
 
 
 def test_a2_flags_joint_limit_excess_as_warning():
-    adapter = A2Adapter(PROXY_LIMITS)
+    adapter = A2Adapter(TEST_ROBOT_LIMITS)
     n = 4
     joint_state = {
         "joint_pos": np.zeros(n),
@@ -250,7 +249,7 @@ def test_a2_flags_joint_limit_excess_as_warning():
 
 
 def test_a2_emits_one_warning_per_simultaneous_joint_limit_violation() -> None:
-    adapter = A2Adapter(PROXY_LIMITS)
+    adapter = A2Adapter(TEST_ROBOT_LIMITS)
     joint_limits = {
         "joint_pos_limits": np.array([[-2.5, 2.5], [-2.5, 2.5], [-2.5, 2.5]]),
         "joint_vel_limits": np.array([10.0, 10.0, 10.0]),
@@ -283,7 +282,7 @@ def test_a2_emits_one_warning_per_simultaneous_joint_limit_violation() -> None:
 
 
 def test_a2_tracks_secondary_velocity_violation_per_joint_across_ticks() -> None:
-    adapter = A2Adapter(PROXY_LIMITS)
+    adapter = A2Adapter(TEST_ROBOT_LIMITS)
     joint_limits = {
         "joint_pos_limits": np.array([[-2.5, 2.5], [-2.5, 2.5]]),
         "joint_vel_limits": np.array([10.0, 10.0]),
@@ -336,11 +335,10 @@ def test_a2_chunk_is_cut_at_first_rejection():
 
 
 def test_limits_for_robot_rejects_unknown_tag():
-    assert limits_for_robot("proxy_ee_sphere_v0") is PROXY_LIMITS
     with pytest.raises(ValueError, match="workspace_center_w"):
         limits_for_robot(ALEX_V2_ROBOT_TAG)
     with pytest.raises(KeyError, match="no adapter limits"):
-        limits_for_robot("robot_from_the_future_v9")
+        limits_for_robot("test_double")
 
 
 def test_alex_v2_limits_use_calibrated_shell_and_caller_center() -> None:
@@ -380,7 +378,7 @@ def test_alex_v2_limits_reject_invalid_caller_center(center) -> None:
 
 def test_a3_matches_frame_conversion():
     frame = ObjectFrame(origin=np.array([1.0, -2.0, 0.5]), rot=rot_z(0.7))
-    adapter = A3Adapter(A2Adapter(PROXY_LIMITS))
+    adapter = A3Adapter(A2Adapter(TEST_ROBOT_LIMITS))
     delta_door = np.array([0.01, -0.004, 0.002, 0.0, 0.0, 0.0])
     applied, decision = adapter.process(delta_door, _ctx(door_frame=frame))
     assert decision.status is AdapterStatus.ACCEPTED
@@ -391,7 +389,7 @@ def test_a3_matches_frame_conversion():
 
 
 def test_a3_rejects_missing_or_corrupt_frame():
-    adapter = A3Adapter(A2Adapter(PROXY_LIMITS))
+    adapter = A3Adapter(A2Adapter(TEST_ROBOT_LIMITS))
     applied, decision = adapter.process(np.zeros(6), _ctx(door_frame=None))
     assert decision.status is AdapterStatus.REJECTED
     assert "unavailable" in decision.reason
@@ -445,7 +443,7 @@ def test_a4_phase_contract_is_shared_across_actions_dataset_and_controller():
 # -- A4 validation ----------------------------------------------------------------
 
 
-def _a4(limits=PROXY_LIMITS, cfg: A4AdapterCfg | None = None) -> A4Adapter:
+def _a4(limits=TEST_ROBOT_LIMITS, cfg: A4AdapterCfg | None = None) -> A4Adapter:
     return A4Adapter(A3Adapter(A2Adapter(limits)), cfg=cfg)
 
 
@@ -648,13 +646,13 @@ def test_a4_rejection_commands_no_motion(chunks, reason, requested_hinge_delta):
 def test_a2_replay_reproduces_scripted_episode():
     item = plan_episodes(1, 0, base_seed=3)[0]
     env = FakeDoorPushEnv(yaw_rad=0.3, origin=(0.5, 0.5, 0.0))
-    episode = run_episode(env, item, DataEngineCfg())
+    episode = run_episode(env, item, make_test_engine_cfg())
     assert episode.outcome.success
 
     replay_env = FakeDoorPushEnv(yaw_rad=0.3, origin=(0.5, 0.5, 0.0))
     replay_env.reset(seed=item.seed)
     actions = [step.action for step in episode.steps]
-    result = rollout_chunks(replay_env, replay_source(actions), A2Adapter(PROXY_LIMITS))
+    result = rollout_chunks(replay_env, replay_source(actions), A2Adapter(TEST_ROBOT_LIMITS))
     assert result.n_ticks == episode.n_steps
     assert result.log.n_rejected == 0
     assert result.final_angle_rad == pytest.approx(episode.outcome.final_door_angle, abs=1e-9)
@@ -663,12 +661,12 @@ def test_a2_replay_reproduces_scripted_episode():
 def test_a3_replay_matches_a2_replay():
     item = plan_episodes(1, 0, base_seed=3)[0]
     env = FakeForceDoorPushEnv()
-    episode = run_episode(env, item, DataEngineCfg())
+    episode = run_episode(env, item, make_test_engine_cfg())
     actions_door = np.asarray(episode.extras["action_door_frame"])
 
     replay_env = FakeForceDoorPushEnv()
     replay_env.reset(seed=item.seed)
-    adapter = A3Adapter(A2Adapter(PROXY_LIMITS))
+    adapter = A3Adapter(A2Adapter(TEST_ROBOT_LIMITS))
     result = rollout_chunks(replay_env, replay_source(actions_door), adapter)
     assert result.n_ticks == episode.n_steps
     assert result.final_angle_rad == pytest.approx(episode.outcome.final_door_angle, abs=1e-9)

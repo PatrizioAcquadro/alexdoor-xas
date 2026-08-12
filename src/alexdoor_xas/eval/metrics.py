@@ -21,7 +21,7 @@ def episode_metrics(episode: EpisodeBuffer) -> dict[str, Any]:
     )
     times = np.array([step.t for step in episode.steps], dtype=np.float64)
     # Force-sensed contact takes precedence over geometric inference when the
-    # episode recorded it (Alex envs); proxy episodes fall back unchanged.
+    # episode recorded it; synthetic episodes may use geometric inference.
     contact = np.array([_step_contact(step) for step in episode.steps], dtype=bool)
     forces = np.array(
         [float(step.contact.get("force_n", 0.0)) for step in episode.steps], dtype=np.float64
@@ -115,8 +115,7 @@ def aggregate_metrics(per_episode: list[dict[str, Any]]) -> dict[str, Any]:
         "mean_time_to_threshold_s": float(np.mean(times)) if times else None,
         "failure_labels": dict(failure_counts),
     }
-    # Force block only for runs with force-sensed episodes (Alex); proxy runs
-    # have geometric contact only and no force stats.
+    # Force block only for runs with force-sensed episodes.
     force_eps = [m for m in per_episode if m.get("mean_contact_force_n") is not None]
     if force_eps:
         summary["contact_force_n"] = {

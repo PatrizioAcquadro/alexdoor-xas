@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from alexdoor_xas.data_engine import DataEngineCfg, export_datasets, plan_episodes, run_episode
+from alexdoor_xas.data_engine import export_datasets, plan_episodes, run_episode
 from alexdoor_xas.dataset import (
     EpisodeDataset,
     compute_norm_stats,
@@ -20,7 +20,7 @@ from alexdoor_xas.policies.act.checkpoint import CHECKPOINT_FORMAT, load_checkpo
 from alexdoor_xas.policies.act.config import ActModelCfg
 from alexdoor_xas.policies.act.model import ACTModel
 from alexdoor_xas.policies.common.data import PolicyDataError, load_policy_data
-from conftest import FakeForceDoorPushEnv
+from conftest import FakeForceDoorPushEnv, make_test_engine_cfg
 
 
 def _dataset(tmp_path: Path) -> tuple[Path, EpisodeDataset]:
@@ -28,7 +28,7 @@ def _dataset(tmp_path: Path) -> tuple[Path, EpisodeDataset]:
         run_episode(
             FakeForceDoorPushEnv(start_door_frame=(0.7, 0.2 + index * 0.01, 0.0)),
             plan_episodes(0, 1, index)[0],
-            DataEngineCfg(task="door_push", door_pose_id="D0"),
+            make_test_engine_cfg(task="door_push", door_pose_id="D0"),
         )
         for index in range(4)
     ]

@@ -19,7 +19,7 @@ from alexdoor_xas.action.spaces import (
     A4_OBJ_CENTRIC_CHUNK,
     EE_DELTA_DIM,
 )
-from alexdoor_xas.data_engine import DataEngineCfg, export_datasets, plan_episodes, run_episode
+from alexdoor_xas.data_engine import export_datasets, plan_episodes, run_episode
 from alexdoor_xas.dataset import (
     A4_FEATURE_DIM,
     A4_PHASE_VOCAB,
@@ -42,7 +42,7 @@ from alexdoor_xas.dataset import (
     validate_matched_action_space_datasets,
     validate_norm_stats,
 )
-from conftest import FakeDoorPushEnv, FakeForceDoorPushEnv
+from conftest import FakeDoorPushEnv, FakeForceDoorPushEnv, make_test_engine_cfg
 
 requires_h5py = pytest.mark.skipif(
     importlib.util.find_spec("h5py") is None, reason="h5py is not installed"
@@ -83,7 +83,7 @@ def _export(tmp_root, env_factory):
         run_episode(
             env_factory(start_door_frame=(0.7, 0.2 + 0.005 * seed, 0.0)),
             plan_episodes(1, 0, seed)[0],
-            DataEngineCfg(),
+            make_test_engine_cfg(),
         )
         for seed in range(N_EPISODES)
     ]
@@ -198,7 +198,7 @@ def test_core_door_pose_preset_is_14dim_and_encodes_yaw(tmp_path) -> None:
     episode = run_episode(
         FakeDoorPushEnv(yaw_rad=yaw, origin=origin),
         plan_episodes(1, 0, 0)[0],
-        DataEngineCfg(),
+        make_test_engine_cfg(),
     )
     exported = export_datasets([episode], tmp_path, version="v0")
     dataset = EpisodeDataset(exported[A2_EE_DELTA])

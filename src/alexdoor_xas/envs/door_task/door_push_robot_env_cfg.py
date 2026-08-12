@@ -35,9 +35,9 @@ HINGE_DAMPING_NM_S_PER_RAD = 4.0
 class DoorPushRobotEnvCfg(DirectRLEnvCfg):
     """Direct-RL config shared by calibrated articulated-robot executors.
 
-    Frozen Phase 2 numbers are shared with the proxy env: same sim dt /
-    decimation, action/observation terms, per-tick clamps, and door cfg. As on
-    the proxy sphere, the A2 rotation deltas are clamped and recorded but NOT
+    The frozen benchmark retains the same sim dt, decimation,
+    action/observation terms, per-tick clamps, and door config. A2 rotation
+    deltas are clamped and recorded but not
     actuated: the env runs position-only differential IK (a 6-DoF pose
     constraint is ill-conditioned from the arm's ready pose — see the env).
     """
@@ -72,8 +72,7 @@ class DoorPushRobotEnvCfg(DirectRLEnvCfg):
         # task USD hinge is frictionless, so a single arm tap sends the door
         # coasting to full open ahead of the pusher and the FSM never gets a
         # sustained push (measured on the gate). With damping the door moves
-        # only while pushed — closer to a real door. Articulated env only; the proxy
-        # env keeps the undamped hinge (frozen Phase 2 behavior).
+        # only while pushed — closer to a real door.
         actuators={
             "hinge_damper": ImplicitActuatorCfg(
                 joint_names_expr=["Hinge"],
@@ -99,7 +98,7 @@ class DoorPushRobotEnvCfg(DirectRLEnvCfg):
 
     settle_ticks = 90
     """Physics ticks the reset-time IK settle loop may use to reach a requested
-    start EE pose (see ``DoorPushRobotEnv.set_proxy_pose``)."""
+    start EE pose (see ``DoorPushRobotEnv.set_ee_pose_w``)."""
 
     settle_target_m = 0.005
     """Settle-loop early-exit target: position error below this ends the loop."""

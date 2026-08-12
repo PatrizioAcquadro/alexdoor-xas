@@ -1,9 +1,8 @@
 """Canonical action-space tags and structs (see the action-representation wiki page).
 
 The tags are the single source of dispatch for episode metadata, dataset layout,
-and (later) action-space-conditioned policies. Phase 2 exports A2/A3/A4 from the
-scripted proxy-end-effector baseline; A1 stays a documented placeholder because
-the proxy has no joints.
+and action-space-conditioned policies. Alex V2 exports all four representations
+from one recorded episode set.
 """
 
 from __future__ import annotations
@@ -23,9 +22,8 @@ ALL_ACTION_SPACES: tuple[str, ...] = (
     A4_OBJ_CENTRIC_CHUNK,
 )
 
-# Spaces the data engine exports for every robot. A1 is additionally exported
-# when per-tick joint targets were recorded (Alex episodes, since Phase 2.5);
-# the proxy sphere has no joints, so proxy runs stay A1-less (see the action wiki page).
+# Spaces exported without requiring recorded joint targets. A1 is additionally
+# exported whenever per-tick joint targets are present.
 EXPORTED_ACTION_SPACES: tuple[str, ...] = (
     A2_EE_DELTA,
     A3_OBJ_REL_EE_DELTA,

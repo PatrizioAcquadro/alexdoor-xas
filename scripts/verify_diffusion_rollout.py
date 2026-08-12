@@ -72,7 +72,11 @@ from alexdoor_xas.adapters import (  # noqa: E402
     rollout_chunks,
 )
 from alexdoor_xas.assets.alex_v2_contract import RobotAssetRef  # noqa: E402
-from alexdoor_xas.data_engine import DataEngineCfg, apply_start_offset, plan_episodes  # noqa: E402
+from alexdoor_xas.data_engine import (  # noqa: E402
+    DEFAULT_SUCCESS_ANGLE_RAD,
+    apply_start_offset,
+    plan_episodes,
+)
 from alexdoor_xas.envs.door_task.door_push_alex_v2_env_cfg import (  # noqa: E402
     ALEX_V2_ROBOT_TAG,
     DoorPushAlexV2EnvCfg,
@@ -119,7 +123,7 @@ def _rollout(env, policy, seed: int, variation) -> dict:
         diffusion_chunk_source(policy, env, n_action_steps=args.n_action_steps),
         adapter,
         max_ticks=args.max_ticks,
-        success_angle_rad=DataEngineCfg().success_angle_rad,
+        success_angle_rad=DEFAULT_SUCCESS_ANGLE_RAD,
     )
     if result.env_truncated:
         raise RuntimeError(f"rollout hit env truncation at tick {result.n_ticks}")
@@ -159,7 +163,7 @@ def _check_checkpoint(env, label: str, checkpoint: str, out_dir) -> None:
         raise RuntimeError(
             f"--checkpoint-{label} is a {policy.action_space} model, expected {expected_space}"
         )
-    success_angle = DataEngineCfg().success_angle_rad
+    success_angle = DEFAULT_SUCCESS_ANGLE_RAD
 
     fixed = _rollout(env, policy, args.seed, None)
     (out_dir / f"{label}_fixed.json").write_text(json.dumps(fixed, indent=2) + "\n")

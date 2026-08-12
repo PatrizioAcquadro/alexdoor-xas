@@ -82,7 +82,7 @@ class EpisodeStep:
     t: float
     action: np.ndarray  # (EE_DELTA_DIM,) in meta.action_space
     obs_ref: dict[str, float]  # inline low-dim state (no image tensors in Phase 2)
-    proprio: dict[str, np.ndarray]  # proxy EE pose (stands in for robot state)
+    proprio: dict[str, np.ndarray]  # EE pose plus optional robot joint state
     object_state: dict[str, float]  # door angle / angular velocity
     contact: dict[str, Any]  # inferred contact flag + source tag
     safety: dict[str, Any]  # adapter clamp flags

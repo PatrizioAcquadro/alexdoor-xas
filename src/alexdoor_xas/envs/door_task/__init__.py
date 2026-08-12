@@ -1,14 +1,6 @@
-"""Gym registration for the single-door Isaac Lab tasks."""
+"""Gym registration for the supported Alex V2 door benchmark."""
 
 from __future__ import annotations
-
-DOOR_TASK_ENV_ID = "AlexDoor-DoorTask-Direct-v0"
-DOOR_TASK_ENV_ENTRY_POINT = "alexdoor_xas.envs.door_task.door_env:DoorTaskEnv"
-DOOR_TASK_ENV_CFG_ENTRY_POINT = "alexdoor_xas.envs.door_task.door_env_cfg:DoorTaskEnvCfg"
-
-DOOR_PUSH_ENV_ID = "AlexDoor-DoorPush-Proxy-v0"
-DOOR_PUSH_ENV_ENTRY_POINT = "alexdoor_xas.envs.door_task.door_push_env:DoorPushEnv"
-DOOR_PUSH_ENV_CFG_ENTRY_POINT = "alexdoor_xas.envs.door_task.door_push_env_cfg:DoorPushEnvCfg"
 
 DOOR_PUSH_ALEX_V2_ENV_ID = "AlexDoor-DoorPush-AlexV2-v0"
 DOOR_PUSH_ALEX_V2_ENV_ENTRY_POINT = (
@@ -26,15 +18,11 @@ def _register_gym_envs() -> None:
     except ModuleNotFoundError:
         return
 
-    registrations = (
-        (DOOR_TASK_ENV_ID, DOOR_TASK_ENV_ENTRY_POINT, DOOR_TASK_ENV_CFG_ENTRY_POINT),
-        (DOOR_PUSH_ENV_ID, DOOR_PUSH_ENV_ENTRY_POINT, DOOR_PUSH_ENV_CFG_ENTRY_POINT),
-        (
-            DOOR_PUSH_ALEX_V2_ENV_ID,
-            DOOR_PUSH_ALEX_V2_ENV_ENTRY_POINT,
-            DOOR_PUSH_ALEX_V2_ENV_CFG_ENTRY_POINT,
-        ),
-    )
+    registrations = ((
+        DOOR_PUSH_ALEX_V2_ENV_ID,
+        DOOR_PUSH_ALEX_V2_ENV_ENTRY_POINT,
+        DOOR_PUSH_ALEX_V2_ENV_CFG_ENTRY_POINT,
+    ),)
     for env_id, entry_point, cfg_entry_point in registrations:
         try:
             gym.spec(env_id)
@@ -53,10 +41,4 @@ __all__ = [
     "DOOR_PUSH_ALEX_V2_ENV_CFG_ENTRY_POINT",
     "DOOR_PUSH_ALEX_V2_ENV_ENTRY_POINT",
     "DOOR_PUSH_ALEX_V2_ENV_ID",
-    "DOOR_PUSH_ENV_CFG_ENTRY_POINT",
-    "DOOR_PUSH_ENV_ENTRY_POINT",
-    "DOOR_PUSH_ENV_ID",
-    "DOOR_TASK_ENV_CFG_ENTRY_POINT",
-    "DOOR_TASK_ENV_ENTRY_POINT",
-    "DOOR_TASK_ENV_ID",
 ]

@@ -11,7 +11,6 @@ import pytest
 import torch
 
 from alexdoor_xas.adapters import (
-    PROXY_LIMITS,
     A2Adapter,
     A3Adapter,
     AdapterDecision,
@@ -31,7 +30,7 @@ from alexdoor_xas.policies.common.rollout_eval import (
     rollout_failure_label,
     rollout_trace_hash,
 )
-from conftest import FakeDoorPushEnv, FakeForceDoorPushEnv
+from conftest import TEST_ROBOT_LIMITS, FakeDoorPushEnv, FakeForceDoorPushEnv
 
 SUCCESS_RAD = 0.3
 
@@ -49,7 +48,7 @@ def _push_source(horizon: int):
 def _run(env, horizon: int, **kwargs) -> RolloutResult:
     env.reset(seed=0)
     return rollout_chunks(
-        env, _push_source(horizon), A2Adapter(PROXY_LIMITS), **kwargs
+        env, _push_source(horizon), A2Adapter(TEST_ROBOT_LIMITS), **kwargs
     )
 
 
@@ -150,8 +149,8 @@ class NonFiniteStateEnv(FakeForceDoorPushEnv):
             velocity[0] = float("inf")
         return angle, velocity
 
-    def proxy_pose_w(self):
-        position, orientation = super().proxy_pose_w()
+    def ee_pose_w(self):
+        position, orientation = super().ee_pose_w()
         if self.field == "ee_position":
             position[0, 0] = float("nan")
         elif self.field == "ee_orientation":
@@ -259,7 +258,7 @@ def test_success_at_reset_state_executes_zero_ticks() -> None:
     env = ScriptedAngleEnv([SUCCESS_RAD + 0.1] * 5)
     env.reset(seed=0)
     result = rollout_chunks(
-        env, _push_source(4), A2Adapter(PROXY_LIMITS), success_angle_rad=SUCCESS_RAD
+        env, _push_source(4), A2Adapter(TEST_ROBOT_LIMITS), success_angle_rad=SUCCESS_RAD
     )
     assert result.n_ticks == 0
     assert result.first_success_tick == 0
@@ -273,7 +272,7 @@ def test_cross_then_rebound_keeps_success_and_crossing_tick() -> None:
     result = rollout_chunks(
         env,
         _push_source(4),
-        A2Adapter(PROXY_LIMITS),
+        A2Adapter(TEST_ROBOT_LIMITS),
         max_ticks=6,
         success_angle_rad=SUCCESS_RAD,
         post_success_diagnostic=True,
@@ -289,7 +288,7 @@ def test_cross_then_rebound_keeps_success_and_crossing_tick() -> None:
     stopped = rollout_chunks(
         env,
         _push_source(4),
-        A2Adapter(PROXY_LIMITS),
+        A2Adapter(TEST_ROBOT_LIMITS),
         max_ticks=6,
         success_angle_rad=SUCCESS_RAD,
     )
@@ -305,7 +304,7 @@ def test_policy_exhaustion_and_tick_budget_reasons() -> None:
     env = FakeDoorPushEnv()
     env.reset(seed=0)
     chunks = iter([np.zeros((2, 6)), None])
-    result = rollout_chunks(env, lambda ctx: next(chunks), A2Adapter(PROXY_LIMITS))
+    result = rollout_chunks(env, lambda ctx: next(chunks), A2Adapter(TEST_ROBOT_LIMITS))
     assert result.termination_reason == "policy_exhausted"
     assert result.success is None  # no threshold given
 
@@ -334,7 +333,7 @@ def test_step_hook_does_not_capture_auto_reset_tick() -> None:
     result = rollout_chunks(
         env,
         _push_source(3),
-        A2Adapter(PROXY_LIMITS),
+        A2Adapter(TEST_ROBOT_LIMITS),
         step_hook=observed_ticks.append,
     )
 
@@ -351,7 +350,7 @@ def test_env_truncation_freezes_pre_reset_state() -> None:
     env = TruncatingEnv(truncate_at=truncate_at)
     env.reset(seed=0)
     result = rollout_chunks(
-        env, _push_source(3), A2Adapter(PROXY_LIMITS), success_angle_rad=SUCCESS_RAD
+        env, _push_source(3), A2Adapter(TEST_ROBOT_LIMITS), success_angle_rad=SUCCESS_RAD
     )
     assert result.termination_reason == "env_truncated"
     assert result.env_truncated is True
@@ -369,7 +368,7 @@ def test_silent_mid_rollout_reset_fails_loudly() -> None:
     env = SilentResetEnv(reset_at=4)
     env.reset(seed=0)
     with pytest.raises(RuntimeError, match="auto-reset mid-rollout"):
-        rollout_chunks(env, _push_source(3), A2Adapter(PROXY_LIMITS), max_ticks=9)
+        rollout_chunks(env, _push_source(3), A2Adapter(TEST_ROBOT_LIMITS), max_ticks=9)
 
 
 def test_failure_label_covers_new_reasons() -> None:

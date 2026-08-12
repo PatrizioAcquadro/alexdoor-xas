@@ -290,9 +290,9 @@ def final_ee_state(env, result) -> dict[str, Any]:
     """
     if result.env_truncated:
         raise RuntimeError("cannot capture final EE state after env auto-reset/truncation")
-    pose = env.proxy_pose_w()
+    pose = env.ee_pose_w()
     if not isinstance(pose, tuple) or len(pose) != 2:
-        raise RuntimeError("env proxy_pose_w() must return (position, orientation)")
+        raise RuntimeError("env ee_pose_w() must return (position, orientation)")
 
     def vector(value, width: int, label: str) -> list[float] | None:
         if value is None:

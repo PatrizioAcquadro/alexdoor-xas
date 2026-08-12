@@ -157,7 +157,7 @@ def _numpy(value: Any) -> np.ndarray:
 
 def _sample_reach_distance(env: DoorPushAlexV2CalibrationEnv) -> float:
     shoulder = _numpy(env.shoulder_position_world_m())[0]
-    tool = _numpy(env.proxy_pose_w()[0])[0]
+    tool = _numpy(env.ee_pose_w()[0])[0]
     return float(np.linalg.norm(tool - shoulder))
 
 

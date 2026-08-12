@@ -40,7 +40,7 @@ def write_run_report(
         ]
 
     # Force columns only when the run recorded force-sensed contact (Alex);
-    # proxy runs keep the original table.
+    # Runs without force sensing keep the original table.
     has_force = any(m.get("mean_contact_force_n") is not None for m in per_episode_metrics)
     lines += ["## Episodes", ""]
     header = "| seed | randomized | steps | final angle (deg) | success | failure label |"
@@ -119,10 +119,7 @@ def _a1_status_note(
             "joint positions/velocities/targets, so A1 is relabelable "
             "(see knowledge/wiki/topics/action-representations-and-adapters.md)."
         )
-    return (
-        f"- `{A1_JOINT_DELTA}`: **not exported** — the proxy end-effector has no joints "
-        "(see knowledge/wiki/topics/action-representations-and-adapters.md)."
-    )
+    return f"- `{A1_JOINT_DELTA}`: **not exported** — joint targets were not recorded."
 
 
 def _force_cell(value: float | None) -> str:

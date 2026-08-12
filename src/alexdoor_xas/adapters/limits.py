@@ -1,8 +1,8 @@
-"""Per-robot execution limits and door-panel geometry for adapter checks.
+"""Alex V2 execution limits and door-panel geometry for adapter checks.
 
-The proxy preset is static. Alex V2 reach limits are constructed from the
-validated door calibration plus a caller-supplied live shoulder center; this
-module never invents or persists a workspace center.
+Alex V2 reach limits are constructed from validated door calibration plus a
+caller-supplied live shoulder center; this module never invents or persists a
+workspace center.
 
 :class:`DoorPanelGeometry` duplicates the panel constants of the scripted
 controller's ``DoorPushControllerCfg`` on purpose: adapters must not import
@@ -20,7 +20,6 @@ import numpy as np
 from alexdoor_xas import paths
 from alexdoor_xas.calibration.alex_v2_door import AlexV2DoorCalibration
 
-PROXY_ROBOT_TAG = "proxy_ee_sphere_v0"
 ALEX_V2_ROBOT_TAG = paths.ALEX_V2_ROBOT_TAG
 
 
@@ -49,8 +48,7 @@ class RobotLimitsCfg:
 
     ``max_pos_delta_m`` / ``max_rot_delta_rad`` mirror the env clamps (the env
     stays the hard back-stop; the adapter clamps first and *logs* the
-    correction). ``workspace`` is ``None`` for robots without a kinematic
-    reach model (the velocity-driven proxy sphere).
+    correction). ``workspace`` may be ``None`` for synthetic test doubles.
     """
 
     robot: str
@@ -66,11 +64,6 @@ class RobotLimitsCfg:
     """Calibrated align standoff where bounded first-contact approach begins."""
     contact_approach_max_step_m: float | None = None
     """Calibrated translation-norm bound for an unsensed inward contact transition."""
-
-
-PROXY_LIMITS = RobotLimitsCfg(robot=PROXY_ROBOT_TAG)
-"""The proxy sphere is velocity-driven and unconstrained kinematically; only
-the per-tick clamps apply."""
 
 
 def alex_v2_limits(
@@ -107,8 +100,8 @@ def alex_v2_limits(
             min_reach_m=float(min_reach_m),
             max_reach_m=float(max_reach_m),
         ),
-        # Alex's env exposes the collision-derived tool point rather than a
-        # proxy sphere center, so contact is at the physical panel thickness.
+        # Alex exposes the collision-derived tool point, so contact is at the
+        # physical panel thickness.
         contact_surface_x_m=DoorPanelGeometry().panel_thickness_m,
         contact_approach_start_clearance_m=contact_approach_start_clearance_m,
         contact_approach_max_step_m=contact_approach_max_step_m,
@@ -123,18 +116,13 @@ def limits_for_robot(
 ) -> RobotLimitsCfg:
     """Limits for a frozen robot tag, requiring live inputs for Alex V2."""
 
-    if robot_tag == PROXY_ROBOT_TAG:
-        return PROXY_LIMITS
     if robot_tag == ALEX_V2_ROBOT_TAG:
         if calibration is None or workspace_center_w is None:
             raise ValueError(
                 "Alex V2 limits require validated calibration and workspace_center_w"
             )
         return alex_v2_limits(calibration, workspace_center_w=workspace_center_w)
-    raise KeyError(
-        f"no adapter limits for robot {robot_tag!r} "
-        f"(known: {[ALEX_V2_ROBOT_TAG, PROXY_ROBOT_TAG]})"
-    )
+    raise KeyError(f"no adapter limits for robot {robot_tag!r} (known: {[ALEX_V2_ROBOT_TAG]})")
 
 
 @dataclass(frozen=True)
@@ -200,8 +188,6 @@ MAX_HINGE_ANGLE_RAD = math.pi / 2.0
 __all__ = [
     "ALEX_V2_ROBOT_TAG",
     "MAX_HINGE_ANGLE_RAD",
-    "PROXY_LIMITS",
-    "PROXY_ROBOT_TAG",
     "DoorPanelGeometry",
     "RobotLimitsCfg",
     "WorkspaceSphere",

@@ -135,8 +135,8 @@ def test_bad_tolerance_rejected() -> None:
 class _SettleReportingEnv(FakeDoorPushEnv):
     """Teleporting fake that exposes the settle-report accessor (robot-env shape)."""
 
-    def set_proxy_pose(self, pos_w, quat_w, env_ids=None) -> None:
-        super().set_proxy_pose(pos_w, quat_w, env_ids)
+    def set_ee_pose_w(self, pos_w, quat_w, env_ids=None) -> None:
+        super().set_ee_pose_w(pos_w, quat_w, env_ids)
         requested = pos_w.detach().cpu().numpy().reshape(3)
         report = check_settle_postcondition(
             requested,

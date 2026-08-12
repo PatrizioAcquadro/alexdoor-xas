@@ -17,8 +17,6 @@ from .base import AdapterDecision, AdapterLog, AdapterStatus, AdapterWarning, St
 from .limits import (
     ALEX_V2_ROBOT_TAG,
     MAX_HINGE_ANGLE_RAD,
-    PROXY_LIMITS,
-    PROXY_ROBOT_TAG,
     DoorPanelGeometry,
     RobotLimitsCfg,
     WorkspaceSphere,
@@ -41,8 +39,6 @@ from .rollout import (
 __all__ = [
     "ALEX_V2_ROBOT_TAG",
     "MAX_HINGE_ANGLE_RAD",
-    "PROXY_LIMITS",
-    "PROXY_ROBOT_TAG",
     "TERMINATION_REASONS",
     "A2Adapter",
     "A3Adapter",

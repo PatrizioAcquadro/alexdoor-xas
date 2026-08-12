@@ -1,7 +1,6 @@
 """Deterministic scripted door-push controller (Phase 2 baseline).
 
-A small finite-state machine that drives one end-effector point (the Phase 2
-dynamic sphere proxy, or the Alex right-gripper EE in Phase 2.5) through::
+A small finite-state machine that drives the Alex right-gripper EE through::
 
     APPROACH -> ALIGN -> PRE_CONTACT -> CONTACT -> PUSH -> HOLD -> RELEASE
 
@@ -172,9 +171,8 @@ class DoorPushVariation:
 class VariationBounds:
     """Sampling ranges for :func:`sample_variation`.
 
-    Defaults reproduce the original Phase 2 proxy ranges bit-for-bit (same
-    draw order and bounds); robot-specific presets (e.g. the fixed-base Alex,
-    whose arm cannot reach the proxy's push band) narrow them.
+    Defaults preserve the frozen task ranges and RNG draw order; calibrated
+    robot-specific presets may narrow them.
     """
 
     start_offset_low: tuple[float, float, float] = (-0.05, -0.15, -0.10)
@@ -217,7 +215,7 @@ def alex_fixedbase_push_cfg() -> DoorPushControllerCfg:
 
     Same FSM, retuned geometry: the fixed-base right arm (measured ~0.58 m
     reach from the SHOULDER_Z link at world (-0.43, -0.10, 1.39)) cannot reach
-    the proxy's push point (80% width, -0.30 m). Pushing at 35% width and
+    the earlier task push point (80% width, -0.30 m). Pushing at 35% width and
     +0.15 m keeps the whole 0..50 deg push arc 0.25-0.51 m from the shoulder,
     and the shorter standoffs keep the approach waypoints in front of the
     chest. The push corridor (door-frame y ~ 0.29) clears the handle band
@@ -230,7 +228,7 @@ def alex_fixedbase_push_cfg() -> DoorPushControllerCfg:
         approach_standoff_m=0.12,
         align_standoff_m=0.06,
         # The PD-tracked arm reaches waypoints ~2-3x slower than the
-        # velocity-driven proxy; give the short phases more headroom.
+        # Give the short positioning phases more headroom.
         pre_contact_max_ticks=150,
         contact_max_ticks=150,
     )

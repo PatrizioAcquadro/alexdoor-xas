@@ -20,7 +20,22 @@ if str(WORKTREE_SRC) not in sys.path:
 import numpy as np  # noqa: E402
 
 from alexdoor_xas.action.frames import ObjectFrame, rot_z  # noqa: E402
+from alexdoor_xas.adapters import RobotLimitsCfg  # noqa: E402
+from alexdoor_xas.data_engine import DataEngineCfg  # noqa: E402
 from alexdoor_xas.policies.scripted import DoorPushControllerCfg  # noqa: E402
+
+TEST_ROBOT_LIMITS = RobotLimitsCfg(robot="test_double")
+
+
+def make_test_engine_cfg(**overrides) -> DataEngineCfg:
+    """Explicit metadata for synthetic data-engine tests."""
+    values = {
+        "task": "door_push",
+        "robot": "test_double",
+        "limitations": ("Synthetic test double; not runtime evidence.",),
+    }
+    values.update(overrides)
+    return DataEngineCfg(**values)
 
 
 @dataclass
@@ -54,7 +69,7 @@ class SyntheticDoorWorld:
 
 
 class FakeDoorPushEnv:
-    """Duck-typed stand-in for DoorPushEnv (the data engine's accessor protocol)."""
+    """Duck-typed stand-in for the data engine's environment protocol."""
 
     class _Cfg:
         class _Sim:
@@ -113,7 +128,7 @@ class FakeDoorPushEnv:
             torch.tensor([self.world.velocity], dtype=torch.float64),
         )
 
-    def proxy_pose_w(self):
+    def ee_pose_w(self):
         import torch
 
         assert self.world is not None
@@ -122,7 +137,7 @@ class FakeDoorPushEnv:
             torch.tensor([[0.0, 0.0, 0.0, 1.0]], dtype=torch.float64),
         )
 
-    def set_proxy_pose(self, pos_w, quat_w, env_ids=None) -> None:
+    def set_ee_pose_w(self, pos_w, quat_w, env_ids=None) -> None:
         assert self.world is not None
         self.world.ee_pos_w = pos_w.detach().cpu().numpy().reshape(3).astype(np.float64)
 

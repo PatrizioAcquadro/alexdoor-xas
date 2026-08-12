@@ -7,14 +7,14 @@ import math
 import pytest
 import torch
 
-from alexdoor_xas.data_engine import DataEngineCfg, plan_episodes, run_episode
+from alexdoor_xas.data_engine import plan_episodes, run_episode
 from alexdoor_xas.envs.door_task.contact_force import sum_actor_contact_forces
 from alexdoor_xas.eval.sanity import (
     FORCE_DATASET_LIMIT_N,
     check_alex_episode,
     contact_force_diagnostics,
 )
-from conftest import FakeForceDoorPushEnv
+from conftest import FakeForceDoorPushEnv, make_test_engine_cfg
 
 # --- test_contact_force ---
 
@@ -70,7 +70,7 @@ def test_sum_actor_contact_forces_rejects_invalid_active_data() -> None:
 
 
 def _episode():
-    return run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], DataEngineCfg())
+    return run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
 
 
 def test_terminal_contact_recorded_with_alignment() -> None:

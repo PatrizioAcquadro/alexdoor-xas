@@ -76,7 +76,12 @@ from alexdoor_xas.adapters import (  # noqa: E402
     replay_source,
     rollout_chunks,
 )
-from alexdoor_xas.data_engine import DataEngineCfg, plan_episodes, run_episode  # noqa: E402
+from alexdoor_xas.data_engine import (  # noqa: E402
+    DEFAULT_SUCCESS_ANGLE_RAD,
+    DataEngineCfg,
+    plan_episodes,
+    run_episode,
+)
 from alexdoor_xas.envs.door_task.alex_v2_runtime import ALEX_V2_LIMITATIONS  # noqa: E402
 from alexdoor_xas.envs.door_task.door_push_alex_v2_env_cfg import (  # noqa: E402
     ALEX_V2_ROBOT_TAG,
@@ -210,7 +215,7 @@ def _hinge_angle(env) -> float:
 
 
 def _ee_pos_w(env) -> np.ndarray:
-    return np.asarray(env.proxy_pose_w()[0].cpu())[0]
+    return np.asarray(env.ee_pose_w()[0].cpu())[0]
 
 
 def _assert_rejected_a4_case(env, out_dir, artifact_name: str, chunk, reason_substring: str):
@@ -324,7 +329,7 @@ def main() -> int:
         _, a3, _ = _fresh_adapters(env)
         _assert_replay(env, episode, actions_door, a3, "a3_replay", out_dir)
 
-        success_angle = DataEngineCfg().success_angle_rad
+        success_angle = DEFAULT_SUCCESS_ANGLE_RAD
         _assert_a4_execution(env, episode, success_angle, out_dir)
         _assert_a4_rejections(env, out_dir)
 

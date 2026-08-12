@@ -7,9 +7,8 @@ From one set of recorded episodes the engine exports:
   the door-frame deltas stored in ``extras["action_door_frame"]`` at record time.
 - **A4_obj_centric_chunk** — the controller's chunk log per episode, as JSON
   lines (the struct/variable contract is in the episode-and-dataset wiki page).
-- **A1_joint_delta** — only when every episode recorded per-tick joint targets
-  (Alex episodes): per-step actions relabeled to full-body joint-position-target
-  deltas. The proxy end-effector has no joints, so proxy runs skip A1.
+- **A1_joint_delta** — when every episode recorded per-tick joint targets:
+  per-step actions relabeled to full-body joint-position-target deltas.
 """
 
 from __future__ import annotations

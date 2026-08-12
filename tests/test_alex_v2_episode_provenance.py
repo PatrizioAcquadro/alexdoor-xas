@@ -15,7 +15,7 @@ from alexdoor_xas.assets.alex_v2_contract import (
 )
 from alexdoor_xas.assets.alex_v2_manifest import build_alex_v2_manifest
 from alexdoor_xas.data_engine import DataEngineCfg, plan_episodes, run_episode
-from conftest import FakeDoorPushEnv
+from conftest import FakeDoorPushEnv, make_test_engine_cfg
 
 
 def _shared_manifest() -> dict[str, Any]:
@@ -43,16 +43,17 @@ def _run(env: FakeDoorPushEnv):
         DataEngineCfg(
             task=paths.ALEX_V2_TASK,
             robot=paths.ALEX_V2_ROBOT_TAG,
+            limitations=("Synthetic provenance test.",),
             max_ticks=1,
         ),
     )
 
 
-def test_proxy_env_without_asset_accessor_preserves_episode_shape() -> None:
+def test_env_without_asset_accessor_preserves_episode_shape() -> None:
     episode = run_episode(
         FakeDoorPushEnv(),
         plan_episodes(1, 0, 7)[0],
-        DataEngineCfg(max_ticks=1),
+        make_test_engine_cfg(max_ticks=1),
     )
 
     assert episode.meta.robot_asset_id == ""

@@ -8,12 +8,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from alexdoor_xas.data_engine import DataEngineCfg, plan_episodes, run_episode
+from alexdoor_xas.data_engine import plan_episodes, run_episode
 from alexdoor_xas.eval import FAILURE_LABELS, aggregate_metrics, episode_metrics, label_episode
 from alexdoor_xas.policies.act.config import ActModelCfg
 from alexdoor_xas.policies.common.eval_metadata import checkpoint_metadata
 from alexdoor_xas.policies.scripted import DoorPushControllerCfg
-from conftest import FakeDoorPushEnv, FakeForceDoorPushEnv
+from conftest import FakeDoorPushEnv, FakeForceDoorPushEnv, make_test_engine_cfg
 
 # --- test_eval ---
 
@@ -21,7 +21,7 @@ from conftest import FakeDoorPushEnv, FakeForceDoorPushEnv
 def _episode(controller_cfg: DoorPushControllerCfg | None = None, seed: int = 0):
     env = FakeDoorPushEnv(controller_cfg=controller_cfg)
     return run_episode(
-        env, plan_episodes(1, 0, seed)[0], DataEngineCfg(), controller_cfg=controller_cfg
+        env, plan_episodes(1, 0, seed)[0], make_test_engine_cfg(), controller_cfg=controller_cfg
     )
 
 
@@ -37,7 +37,7 @@ FORCE_METRIC_KEYS = (
 
 
 def test_metrics_prefer_force_sensed_contact() -> None:
-    episode = run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], DataEngineCfg())
+    episode = run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
     metrics = episode_metrics(episode)
 
     sensed_ticks = sum(1 for step in episode.steps if step.contact["sensed"])
@@ -54,7 +54,7 @@ def test_metrics_prefer_force_sensed_contact() -> None:
 
 
 def test_force_metrics_details_and_aggregate_block() -> None:
-    episode = run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], DataEngineCfg())
+    episode = run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
     m = episode_metrics(episode)
 
     sensed = [float(s.contact["force_n"]) for s in episode.steps if s.contact["sensed"]]
@@ -187,8 +187,8 @@ def test_run_report_is_written(tmp_path) -> None:
     )
     text = report.read_text()
     assert "Scripted door-push baseline" in text
-    # Proxy episodes: A1 unavailable because the proxy has no joints, no force columns.
-    assert "`A1_joint_delta`: **not exported** — the proxy end-effector has no joints" in text
+    # Episodes without joint targets cannot export A1 and have no force columns.
+    assert "`A1_joint_delta`: **not exported** — joint targets were not recorded" in text
     assert "max force (N)" not in text
     assert "rendering unavailable in this shell" in text
 
@@ -213,7 +213,7 @@ def _write_report(tmp_path, episodes, exports):
 def test_run_report_a1_line_and_force_columns_for_alex_episodes(tmp_path) -> None:
     from pathlib import Path
 
-    episode = run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], DataEngineCfg())
+    episode = run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
 
     # Joint-recording episodes with A1 exported: A1 listed like any other space.
     exports = {
@@ -226,11 +226,11 @@ def test_run_report_a1_line_and_force_columns_for_alex_episodes(tmp_path) -> Non
     # Force evidence is surfaced in the episode table.
     assert "contact ticks | mean force (N) | max force (N)" in text
 
-    # Joint-recording episodes without an A1 export: relabelable, not proxy wording.
+    # Joint-recording episodes without an A1 export remain relabelable.
     text = _write_report(tmp_path / "without_a1", [episode], {"A2_ee_delta": Path("/tmp/a2")})
     assert "**not exported in this run**" in text
     assert "so A1 is relabelable" in text
-    assert "the proxy end-effector has no joints" not in text
+    assert "joint targets were not recorded" not in text
 
 
 def test_sanity_checks_pass_on_clean_episode_and_catch_bad_data() -> None:
@@ -238,7 +238,7 @@ def test_sanity_checks_pass_on_clean_episode_and_catch_bad_data() -> None:
 
     from alexdoor_xas.eval import check_alex_episode, contact_force_diagnostics
 
-    episode = run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], DataEngineCfg())
+    episode = run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
     result = check_alex_episode(episode)
     assert result.ok and not result.warnings
 
@@ -332,7 +332,7 @@ def test_sanity_checker_rejects_negative_force_magnitude_with_diagnostics() -> N
 
     from alexdoor_xas.eval import check_alex_episode, contact_force_diagnostics
 
-    episode = run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], DataEngineCfg())
+    episode = run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
     contact = dict(episode.steps[3].contact)
     contact["force_n"] = -2.5
     episode.steps[3] = dataclasses.replace(episode.steps[3], contact=contact)
@@ -359,7 +359,7 @@ def test_sanity_checker_rejects_non_finite_force_magnitude(force_n: float) -> No
 
     from alexdoor_xas.eval import check_alex_episode, contact_force_diagnostics
 
-    episode = run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], DataEngineCfg())
+    episode = run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
     contact = dict(episode.steps[3].contact)
     contact["force_n"] = force_n
     episode.steps[3] = dataclasses.replace(episode.steps[3], contact=contact)
@@ -379,7 +379,7 @@ def test_force_admission_accepts_exact_limit_and_preserves_lower_warning() -> No
 
     from alexdoor_xas.eval import check_alex_episode, contact_force_diagnostics
 
-    episode = run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], DataEngineCfg())
+    episode = run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
     contact = dict(episode.steps[3].contact)
     contact["force_n"] = 200.0
     episode.steps[3] = dataclasses.replace(episode.steps[3], contact=contact)

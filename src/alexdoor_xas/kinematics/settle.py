@@ -1,6 +1,6 @@
 """Start-pose settle postcondition (pure numpy; shared by envs and tests).
 
-``set_proxy_pose`` on an articulated executor can only *drive* the EE toward a
+``set_ee_pose_w`` on an articulated executor can only *drive* the EE toward a
 requested start pose through its kinematics — the request is not guaranteed to
 be realized. This helper is the fail-closed postcondition: it measures the
 realized-vs-requested residual against an explicit tolerance and produces the
@@ -33,7 +33,7 @@ class StartPoseError(RuntimeError):
 
 @dataclass(frozen=True)
 class SettleReport:
-    """Realized-state evidence for one ``set_proxy_pose`` request."""
+    """Realized-state evidence for one ``set_ee_pose_w`` request."""
 
     requested_pos_m: tuple[float, float, float]
     realized_pos_m: tuple[float, float, float]

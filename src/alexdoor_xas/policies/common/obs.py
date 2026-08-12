@@ -1,8 +1,8 @@
 """Live observation readers and rollout-termination wrappers (policy-agnostic).
 
-The env is duck-typed through the frozen Phase 2 accessor surface
-(``proxy_pose_w`` / ``hinge_state`` / optional ``contact_sensed``), so the pure
-test fakes and both Isaac envs work unchanged. No Isaac imports.
+The env is duck-typed through the benchmark accessor surface
+(``ee_pose_w`` / ``hinge_state`` / optional ``contact_sensed``), so the pure
+test fakes and the Isaac env work unchanged. No Isaac imports.
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ def build_env_obs(env, preset: str) -> np.ndarray:
             f"obs preset {preset!r} has no closed-loop env reader "
             f"(supported: {list(ROLLOUT_OBS_PRESETS)})"
         )
-    ee_pos, ee_quat = env.proxy_pose_w()
+    ee_pos, ee_quat = env.ee_pose_w()
     angle, velocity = env.hinge_state()
     parts = [
         np.asarray(

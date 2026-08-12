@@ -60,7 +60,7 @@ def run_baseline(
     n_fixed: int,
     n_randomized: int,
     base_seed: int,
-    engine_cfg: DataEngineCfg | None = None,
+    engine_cfg: DataEngineCfg,
     controller_cfg: DoorPushControllerCfg | None = None,
     variation_bounds: VariationBounds | None = None,
     video: bool = False,
@@ -85,7 +85,6 @@ def run_baseline(
     ``datasets/`` — the mode multi-pose generation uses so partial per-pose
     passes cannot masquerade as an official dataset version.
     """
-    engine_cfg = engine_cfg or DataEngineCfg()
     # Posed runs never export directly: a re-export replaces the version dir,
     # so one posed run with export=True would silently overwrite the official
     # default-pose dataset (and its splits/norm stats) the trained checkpoints
@@ -221,7 +220,7 @@ def _run_sanity_checks(
     """Sanity-check force-sensing (Alex) episodes; write metrics/sanity.json.
 
     Same episode condition the Phase 3.0 dataset gate uses (joint proprio
-    present). Returns ``None`` for runs with no such episodes (proxy). The
+    present). Returns ``None`` for synthetic runs without joint state. The
     summary carries every warning/error message verbatim plus the anti-windup
     IK clamp telemetry per episode — warnings are reported, never suppressed.
     """

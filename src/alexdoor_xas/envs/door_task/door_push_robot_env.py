@@ -5,9 +5,9 @@ control tick (A2). The clamped translation becomes a relative position command
 for differential IK, and the resulting joint targets are applied to a robot
 articulation supplied by a concrete calibrated executor.
 
-The env exposes the same duck-typed accessor surface the data engine consumes
-(``door_frame_pose_w`` / ``hinge_state`` / ``proxy_pose_w`` / ``set_proxy_pose``)
-— ``proxy_pose_w`` reports the configured robot EE pose — plus new
+The env exposes the duck-typed accessor surface the data engine consumes
+(``door_frame_pose_w`` / ``hinge_state`` / ``ee_pose_w`` / ``set_ee_pose_w``)
+plus optional
 optional accessors (``robot_joint_state``, ``contact_force_w``,
 ``contact_sensed``) the engine picks up via ``hasattr``.
 """
@@ -93,7 +93,7 @@ class DoorPushRobotEnv(DirectRLEnv):
         # (dls trades the tiny translation gain against large near-null joint
         # swings and the EE barely moves). Rotation action components are
         # clamped and recorded but not actuated — the same contract as the
-        # proxy sphere, where rotation was physically inert.
+        # earlier task execution, where rotation was physically inert.
         ik_cfg = DifferentialIKControllerCfg(
             command_type="position", use_relative_mode=True, ik_method=self.cfg.ik_method
         )
@@ -231,7 +231,7 @@ class DoorPushRobotEnv(DirectRLEnv):
         super()._reset_idx(env_ids)
 
         # Door: hinge state only; the root is world-anchored (same rule as the
-        # proxy env — never write root poses for world-anchored articulations).
+        # Never write root poses for world-anchored articulations.
         door_joint_pos = _as_torch(self._door.data.default_joint_pos)[env_ids].clone()
         door_joint_vel = torch.zeros_like(_as_torch(self._door.data.default_joint_vel)[env_ids])
         self._door.write_joint_position_to_sim_index(position=door_joint_pos, env_ids=env_ids)
@@ -266,20 +266,17 @@ class DoorPushRobotEnv(DirectRLEnv):
             _as_torch(self._door.data.joint_vel)[:, self._hinge_joint_id].clone(),
         )
 
-    def proxy_pose_w(self) -> tuple[torch.Tensor, torch.Tensor]:
-        """World position and ``(x, y, z, w)`` orientation of the configured EE.
-
-        Named for the frozen data-engine contract; there is no proxy sphere here.
-        """
+    def ee_pose_w(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """World position and ``(x, y, z, w)`` orientation of the configured EE."""
         return self._ee_pose_w()
 
-    def set_proxy_pose(
+    def set_ee_pose_w(
         self, pos_w: torch.Tensor, quat_w: torch.Tensor, env_ids: torch.Tensor | None = None
     ) -> None:
         """Drive the EE toward a requested start position with a bounded IK settle.
 
-        Unlike the teleporting proxy sphere, a robot EE can only move through its
-        kinematics: this runs up to ``cfg.settle_ticks`` physics-only control
+        A robot EE can only move through its kinematics: this runs up to
+        ``cfg.settle_ticks`` physics-only control
         ticks of the same clamped IK tracking the policy path uses. Orientation
         is ignored (the scripted task commands no rotation), so no orientation
         residual is defined. Fail-closed postcondition: the realized EE
@@ -326,7 +323,7 @@ class DoorPushRobotEnv(DirectRLEnv):
         self._last_settle_report = report.to_dict()
 
     def start_pose_settle_report(self) -> dict | None:
-        """Requested/realized/residual record of the last ``set_proxy_pose``.
+        """Requested/realized/residual record of the last ``set_ee_pose_w``.
 
         ``None`` when no start pose was requested since the last reset (the
         default fixed reset needs no settle).
@@ -392,7 +389,7 @@ class DoorPushRobotEnv(DirectRLEnv):
     def ik_clamp_telemetry(self) -> dict:
         """Anti-windup clamp telemetry since the last reset (env 0, JSON-able).
 
-        Covers every IK solve after the reset — the ``set_proxy_pose`` settle
+        Covers every IK solve after the reset — the ``set_ee_pose_w`` settle
         ticks and the per-control-tick episode solves — so a recorded episode
         reports exactly how often (and how far) the raw diff-IK targets ran
         past the arm's position limits before clamping.

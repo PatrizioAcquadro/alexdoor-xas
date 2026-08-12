@@ -47,7 +47,7 @@ class A4AdapterCfg:
     """Guarded-execution geometry and budgets (defaults = the Alex preset).
 
     Standoffs/clearances are the Phase 2.5 Alex controller values
-    (``alex_fixedbase_push_cfg``); they also work for the proxy sphere, which
+    (``alex_fixedbase_push_cfg``); they also work for synthetic test doubles, which
     has no reach constraints.
     """
 

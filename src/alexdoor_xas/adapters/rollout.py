@@ -7,10 +7,10 @@ every step passes through an adapter (:class:`A2Adapter` for world-frame
 deltas, :class:`A3Adapter` for door-frame deltas), and the adapted command is
 what the env executes. Nothing here depends on a specific model.
 
-The env is duck-typed through the frozen Phase 2 accessor surface
-(``door_frame_pose_w`` / ``hinge_state`` / ``proxy_pose_w`` and the optional
-Phase 2.5 accessors probed via ``hasattr``) — the same protocol the data
-engine uses, so the fakes in ``tests/conftest.py`` and both Isaac envs work
+The env is duck-typed through the benchmark accessor surface
+(``door_frame_pose_w`` / ``hinge_state`` / ``ee_pose_w`` and optional
+accessors probed via ``hasattr``) — the same protocol the data engine uses,
+so the fakes in ``tests/conftest.py`` and the Isaac env work
 unchanged. No Isaac imports; torch only at the ``env.step`` boundary.
 """
 
@@ -166,7 +166,7 @@ def read_step_context(
     angle, velocity = env.hinge_state()
     angle_array = _finite_array("hinge angle", angle).reshape(-1)
     velocity_array = _finite_array("hinge velocity", velocity).reshape(-1)
-    ee_pos, ee_quat = env.proxy_pose_w()
+    ee_pos, ee_quat = env.ee_pose_w()
     position = _first_vector("end-effector position", ee_pos, 3)
     orientation = _first_vector("end-effector orientation", ee_quat, 4)
     orientation_norm = float(np.linalg.norm(orientation))

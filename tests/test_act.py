@@ -9,8 +9,7 @@ import numpy as np
 import pytest
 import torch
 
-from alexdoor_xas.adapters import A2Adapter, StepContext, limits_for_robot, rollout_chunks
-from alexdoor_xas.adapters.limits import PROXY_ROBOT_TAG
+from alexdoor_xas.adapters import A2Adapter, StepContext, rollout_chunks
 from alexdoor_xas.dataset import DatasetNormStats, EpisodeRecord, NormStats
 from alexdoor_xas.policies.act.checkpoint import (
     CHECKPOINT_FORMAT,
@@ -35,7 +34,12 @@ from alexdoor_xas.policies.act.rollout_eval import (
 from alexdoor_xas.policies.act.train import make_seeded_model, train_act
 from alexdoor_xas.policies.scripted import VariationBounds
 from alexdoor_xas.tracking import WandbConfig, start_wandb_run
-from conftest import FakeDoorPushEnv, FakeForceDoorPushEnv
+from conftest import (
+    TEST_ROBOT_LIMITS,
+    FakeDoorPushEnv,
+    FakeForceDoorPushEnv,
+    make_test_engine_cfg,
+)
 
 TINY_MODEL_CFG = ActModelCfg(
     chunk_size=8,
@@ -434,7 +438,7 @@ def test_build_env_obs_matches_direct_env_reads() -> None:
     env.reset()
     obs = build_env_obs(env, "core")
 
-    ee_pos, ee_quat = env.proxy_pose_w()
+    ee_pos, ee_quat = env.ee_pose_w()
     angle, velocity = env.hinge_state()
     expected = np.concatenate(
         [
@@ -469,7 +473,7 @@ def test_build_env_obs_rejects_presets_without_live_reader() -> None:
 
 def test_build_env_obs_core_door_pose_matches_dataset_ordering() -> None:
     """Live core_door_pose reader parity with the recorded dataset preset."""
-    from alexdoor_xas.data_engine import DataEngineCfg, plan_episodes, run_episode
+    from alexdoor_xas.data_engine import plan_episodes, run_episode
     from alexdoor_xas.dataset import obs_matrix
     from alexdoor_xas.dataset.loader import EpisodeRecord
 
@@ -489,7 +493,7 @@ def test_build_env_obs_core_door_pose_matches_dataset_ordering() -> None:
     episode = run_episode(
         FakeDoorPushEnv(yaw_rad=yaw, origin=origin),
         plan_episodes(1, 0, 0)[0],
-        DataEngineCfg(),
+        make_test_engine_cfg(),
     )
     obs = {}
     for table in ("proprio", "object_state", "contact"):
@@ -542,7 +546,7 @@ def test_act_chunk_source_drives_a2_adapter_rollout() -> None:
     env.reset()
     policy = _rollout_policy()
     source = act_chunk_source(policy, env)
-    adapter = A2Adapter(limits_for_robot(PROXY_ROBOT_TAG))
+    adapter = A2Adapter(TEST_ROBOT_LIMITS)
 
     result = rollout_chunks(env, source, adapter, max_ticks=20)
 
@@ -630,7 +634,7 @@ def test_rollout_eval_warning_summary_and_aggregate() -> None:
         joint_state=joint_state,
         joint_limits=joint_limits,
     )
-    adapter = A2Adapter(limits_for_robot(PROXY_ROBOT_TAG))
+    adapter = A2Adapter(TEST_ROBOT_LIMITS)
     _, decision = adapter.process(np.zeros(ACTION_DIM), ctx)
     warnings = summarize_decision_warnings([decision])
 
