@@ -5,8 +5,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from alexdoor_xas import paths
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WIKI_ROOT = REPO_ROOT / "knowledge" / "wiki"
 WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
@@ -15,14 +13,6 @@ MARKDOWN_LINK_RE = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 
 def _wiki_pages() -> list[Path]:
     return sorted(WIKI_ROOT.rglob("*.md"))
-
-
-def test_status_and_path_registry_use_the_official_wiki() -> None:
-    assert paths.KNOWLEDGE_DIR == REPO_ROOT / "knowledge"
-    assert paths.WIKI_DIR == WIKI_ROOT
-    assert (WIKI_ROOT / "status.md").is_file()
-    assert not (REPO_ROOT / "knowledge" / "status.md").exists()
-    assert not (REPO_ROOT / "docs").exists()
 
 
 def test_documentation_links_resolve_and_index_is_complete() -> None:

@@ -1,86 +1,32 @@
-"""Canonical path registry for AlexDoor-XAS (single source of truth).
-
-Assets are **referenced in place** — the Alex V2 model lives in ``~/Desktop/Alex``
-and the scenes in ``~/Desktop/CombinedScene``; nothing is copied into this repo.
-The Alex root is overridden with ``ALEX_V2_ASSET_ROOT`` to match Isaac Lab.  The
-scene root remains controlled by ``ALEXDOOR_ASSETS_ROOT``.
-
-This module is pure-Python and imports nothing from Isaac — it is safe to import
-anywhere (tests, the light env check, and inside Isaac scripts alike).
-"""
-
-from __future__ import annotations
+"""Canonical paths and identifiers for AlexDoor-XAS."""
 
 import os
 from pathlib import Path
 
-# ── Repository ────────────────────────────────────────────────────────────────
-# paths.py lives at <repo>/src/alexdoor_xas/paths.py → parents[2] is the repo root.
-REPO_ROOT: Path = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DATASETS_DIR = REPO_ROOT / "datasets"
+OUTPUTS_DIR = REPO_ROOT / "outputs"
+ALEX_V2_CALIBRATION = REPO_ROOT / "configs" / "alex_v2_door.json"
 
-DATASETS_DIR: Path = REPO_ROOT / "datasets"  # reusable exported episodes (Phase 2+)
-OUTPUTS_DIR: Path = REPO_ROOT / "outputs"  # canonical scenes + learned-policy runs
-KNOWLEDGE_DIR: Path = REPO_ROOT / "knowledge"
-WIKI_DIR: Path = KNOWLEDGE_DIR / "wiki"
-ALEX_V2_CALIBRATION: Path = REPO_ROOT / "configs" / "alex_v2_door.json"
-
-# Runtime caches and arbitrary generated artifacts never belong in outputs/.
-RUNTIME_CACHE_ROOT: Path = Path(
+_RUNTIME_CACHE_ROOT = Path(
     os.environ.get("ALEXDOOR_CACHE_ROOT", str(Path.home() / ".cache" / "alexdoor-xas"))
 ).expanduser()
-VERIFICATION_CACHE_DIR: Path = RUNTIME_CACHE_ROOT / "verification"
-SCRIPTED_RUNS_CACHE_DIR: Path = RUNTIME_CACHE_ROOT / "scripted_runs"
+VERIFICATION_CACHE_DIR = _RUNTIME_CACHE_ROOT / "verification"
+SCRIPTED_RUNS_CACHE_DIR = _RUNTIME_CACHE_ROOT / "scripted_runs"
 
-# ── External asset root (referenced in place, overridable) ───────────────────
-ASSETS_ROOT: Path = Path(
-    os.environ.get("ALEXDOOR_ASSETS_ROOT", str(Path.home() / "Desktop"))
-).expanduser()
-
-# ── Alex V2 simulator-neutral asset ──────────────────────────────────────────
-ALEX_V2_ASSET_ROOT: Path = (
+ALEX_V2_ASSET_ROOT = (
     Path(os.environ.get("ALEX_V2_ASSET_ROOT", str(Path.home() / "Desktop" / "Alex")))
     .expanduser()
     .resolve()
 )
-ALEX_V2_URDF: Path = ALEX_V2_ASSET_ROOT / "urdf" / "alex_v2.urdf"
-ALEX_V2_RUNTIME_CACHE_ROOT: Path = Path(
-    os.environ.get(
-        "ALEXDOOR_V2_RUNTIME_CACHE_ROOT",
-        str(Path.home() / ".cache" / "alexdoor-xas" / "alex-v2"),
-    )
-).expanduser()
+ALEX_V2_URDF = ALEX_V2_ASSET_ROOT / "urdf" / "alex_v2.urdf"
 
-# Canonical Alex V2 runtime, dataset, and output identifiers.
 ALEX_V2_TASK = "door_push_alex_v2"
 ALEX_V2_DATASET_VERSION = "v2_pose"
 ALEX_V2_ROBOT_TAG = "alex_v2_fullbody_fixedbase_standard_forearm_v0"
-ALEX_V2_DATASETS_DIR: Path = DATASETS_DIR / ALEX_V2_TASK
-ALEX_V2_OUTPUTS_DIR: Path = OUTPUTS_DIR / ALEX_V2_TASK
-DOOR_SCENE_DIR: Path = OUTPUTS_DIR / "door_scene"
-
-# ── Scenes (CombinedScene) ───────────────────────────────────────────────────
-SCENES_ROOT: Path = ASSETS_ROOT / "CombinedScene"
-# Optional registered path for manual scene composition.
-COMBINED_SCENE_USD: Path = SCENES_ROOT / "CombinedHallwayScene" / "combinedScene.usda"
-# Standalone articulated door (handle + hinge) for the door benchmark.
-DOOR_USD: Path = SCENES_ROOT / "Door.usd"
-
-
-def iter_assets() -> list[tuple[str, Path, bool]]:
-    """Required external assets as ``(name, path, required)`` triples.
-
-    Used by ``scripts/check_env.py`` and path tests for the supported benchmark.
-    Optional manually composed scene paths are intentionally not included.
-    """
-    return [
-        *iter_alex_v2_assets(),
-        ("Door USD", DOOR_USD, True),
-    ]
-
-
-def iter_alex_v2_assets() -> list[tuple[str, Path, bool]]:
-    """Static external assets required by the Alex V2 lineage."""
-    return [
-        ("Alex V2 asset root", ALEX_V2_ASSET_ROOT, True),
-        ("Alex V2 URDF", ALEX_V2_URDF, True),
-    ]
+DOOR_SCENE_DIR = OUTPUTS_DIR / "door_scene"
+DOOR_USD = (
+    Path(os.environ.get("ALEXDOOR_ASSETS_ROOT", str(Path.home() / "Desktop"))).expanduser()
+    / "CombinedScene"
+    / "Door.usd"
+)

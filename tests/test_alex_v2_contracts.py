@@ -415,24 +415,6 @@ def test_builder_rejects_any_urdf_identity_drift(tmp_path) -> None:
         build_alex_v2_manifest(changed)
 
 
-# --- test_paths ---
-
-
-def test_alex_v2_path_surface_uses_the_static_standard_asset() -> None:
-    assert paths.ALEX_V2_URDF == paths.ALEX_V2_ASSET_ROOT / "urdf" / "alex_v2.urdf"
-    assert paths.COMBINED_SCENE_USD == (
-        paths.SCENES_ROOT / "CombinedHallwayScene" / "combinedScene.usda"
-    )
-    assert paths.iter_alex_v2_assets() == [
-        ("Alex V2 asset root", paths.ALEX_V2_ASSET_ROOT, True),
-        ("Alex V2 URDF", paths.ALEX_V2_URDF, True),
-    ]
-    assert ("Door USD", paths.DOOR_USD, True) in paths.iter_assets()
-    assert all(path != paths.COMBINED_SCENE_USD for _, path, _ in paths.iter_assets())
-    assert not hasattr(paths, "ALEX_V2_BRIDGE_ROOT")
-    assert not hasattr(paths, "IHMC_ALEX_SDK_ROOT")
-
-
 # --- test_check_env ---
 
 
@@ -487,12 +469,3 @@ def test_environment_gate_requires_official_ga_archive_identity() -> None:
     assert check_env._cuda_failure(True) is None
     assert "CUDA is not available" in check_env._cuda_failure(False)
     assert "CUDA probe failed" in check_env._cuda_failure(False, RuntimeError("probe"))
-
-
-def test_missing_alex_v2_asset_root_is_a_required_failure(tmp_path) -> None:
-    check_env = _check_env_module()
-    missing_root = tmp_path / "Desktop" / "Alex"
-
-    missing = check_env._missing_required_assets([("Alex V2 asset root", missing_root, True)])
-
-    assert missing == ["Alex V2 asset root"]

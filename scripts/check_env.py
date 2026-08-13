@@ -184,12 +184,6 @@ def _alex_v2_module_failure(
     )
 
 
-def _missing_required_assets(assets: list[tuple[str, Path, bool]]) -> list[str]:
-    """Return required asset names whose paths do not exist."""
-
-    return [name for name, path, required in assets if required and not path.exists()]
-
-
 def main() -> int:
     from alexdoor_xas import paths
 
@@ -219,7 +213,6 @@ def main() -> int:
         print(f"cuda        : could not probe ({error.__class__.__name__}: {error})")
         cuda_failure = _cuda_failure(False, error)
 
-    print(f"assets_root : {paths.ASSETS_ROOT}")
     print("-- install paths --")
     missing_paths = []
     for name, path in (
@@ -243,11 +236,14 @@ def main() -> int:
     print("-- assets --")
     required_pkgs = ("isaaclab", "ihmc-alex-isaaclab", "torch", "numpy")
     missing_pkgs = [n for n in required_pkgs if versions[n] == "MISSING"]
-    assets = paths.iter_assets()
-    missing_assets = _missing_required_assets(assets)
-    for name, path, required in assets:
+    assets = (
+        ("Alex V2 URDF", paths.ALEX_V2_URDF),
+        ("Door USD", paths.DOOR_USD),
+    )
+    missing_assets = [name for name, path in assets if not path.exists()]
+    for name, path in assets:
         ok = path.exists()
-        flag = "ok " if ok else ("ERR" if required else "opt")
+        flag = "ok " if ok else "ERR"
         print(f"  [{flag}] {name}: {path}")
 
     print("-- result --")
