@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from alexdoor_xas.policies.act import load_act_config
+from alexdoor_xas.policies.act.config import load_act_config
 from alexdoor_xas.policies.common.closed_loop import (
     aggregate_closed_loop,
     closed_loop_trace_payload,

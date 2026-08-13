@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 
 from alexdoor_xas import paths
-from alexdoor_xas.policies.act import (
+from alexdoor_xas.policies.act.config import (
     ActConfig,
     ActConfigError,
     act_config_from_dict,
@@ -30,7 +30,7 @@ from alexdoor_xas.policies.common.runs import (
     write_run_report,
     write_training_summary,
 )
-from alexdoor_xas.policies.diffusion import (
+from alexdoor_xas.policies.diffusion.config import (
     DiffusionConfig,
     DiffusionConfigError,
     diffusion_config_from_dict,

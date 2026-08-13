@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from alexdoor_xas.policies.act import load_act_config
+from alexdoor_xas.policies.act.config import load_act_config
 from alexdoor_xas.policies.common.runs import (
     allocate_run_directory,
     dataset_token,

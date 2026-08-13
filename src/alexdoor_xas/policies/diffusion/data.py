@@ -28,7 +28,7 @@ from alexdoor_xas.policies.common.data import (
 from alexdoor_xas.policies.common.data import (
     make_train_factory as _make_train_factory,
 )
-from alexdoor_xas.policies.diffusion.config import DiffusionDatasetCfg
+from alexdoor_xas.policies.common.types import PolicyDatasetCfg
 
 RANGE_EPS = 1e-8
 """A dimension whose train-split range is below this is treated as constant."""
@@ -62,7 +62,7 @@ class MinMaxNormalizer:
         return np.asarray(x, dtype=np.float64) / self.scale + self.center
 
 
-def load_diffusion_data(cfg: DiffusionDatasetCfg, **kwargs) -> PolicyData:
+def load_diffusion_data(cfg: PolicyDatasetCfg, **kwargs) -> PolicyData:
     """The shared dataset/splits/stats loader (staleness checks included)."""
     return load_policy_data(cfg, **kwargs)
 

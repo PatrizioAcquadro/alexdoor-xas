@@ -6,10 +6,10 @@ import pytest
 
 from alexdoor_xas import paths
 from alexdoor_xas.action.spaces import A2_EE_DELTA, A3_OBJ_REL_EE_DELTA
-from alexdoor_xas.policies.act import ActConfigError, load_act_config
-from alexdoor_xas.policies.diffusion import DiffusionConfigError, load_diffusion_config
+from alexdoor_xas.policies.act.config import ActConfigError, load_act_config
+from alexdoor_xas.policies.diffusion.config import DiffusionConfigError, load_diffusion_config
 from alexdoor_xas.policies.scripted import DoorPushControllerCfg
-from alexdoor_xas.scripted_baseline_config import (
+from alexdoor_xas.policies.scripted.config import (
     ScriptedBaselineConfigError,
     apply_controller_overrides,
     load_scripted_baseline_config,

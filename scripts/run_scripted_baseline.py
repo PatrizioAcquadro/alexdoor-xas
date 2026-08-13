@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 # -- AppLauncher must be configured before any other Isaac import.
 from isaaclab.app import AppLauncher
 
-from alexdoor_xas.scripted_baseline_config import (
+from alexdoor_xas.policies.scripted.config import (
     ScriptedBaselineConfigError,
     apply_controller_overrides,
     load_scripted_baseline_config,
