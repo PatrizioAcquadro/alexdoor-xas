@@ -292,3 +292,14 @@ minimal preflight and selective traces.
 Verified all 23 wiki pages, 31 internal links, complete index coverage, current
 source references, Markdown whitespace, and unchanged raw, dataset, output,
 and historical evidence boundaries.
+
+## 2026-08-13 — update : Canonical door-scene naming
+
+Documented the unified `door_scene` module, API, configuration field, and USD
+prim contract while preserving `door_push_alex_v2` as the task identity.
+
+## 2026-08-13 — lint : Canonical door-scene naming
+
+Verified wiki links and source references, D0-D4 scene validation, the complete
+deterministic suite, and both maintained Isaac gates on `cuda:0`; protected raw
+and dataset boundaries remained unchanged.

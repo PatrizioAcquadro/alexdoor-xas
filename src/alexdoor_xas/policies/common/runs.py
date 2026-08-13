@@ -15,7 +15,7 @@ import numpy as np
 
 from alexdoor_xas import paths
 from alexdoor_xas.action.spaces import A2_EE_DELTA, A3_OBJ_REL_EE_DELTA
-from alexdoor_xas.assets.door_task import CANONICAL_DOOR_POSES
+from alexdoor_xas.assets.door_scene import CANONICAL_DOOR_POSES
 
 RUN_FORMAT = "alexdoor_xas.run.v1"
 POLICY_DIRS = ("act", "diffusion")

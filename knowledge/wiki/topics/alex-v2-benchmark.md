@@ -20,7 +20,7 @@ randomization limits.
 
 ## Canonical scenes
 
-`src/alexdoor_xas/assets/door_task.py` owns one immutable pose registry and `outputs/door_scene/` contains exactly its five generated layers: D0 yaw `0.00`, XY `(0.00, 0.00)`; D1 yaw `+0.05`, XY `(+0.02, 0.00)`; D2 yaw `-0.05`, XY `(0.00, -0.02)`; D3 yaw `+0.10`, XY `(+0.02, +0.02)`; D4 yaw `-0.10`, XY `(+0.02, -0.02)`. D0 is the default. Runtime and data APIs accept only these pose IDs.
+`src/alexdoor_xas/assets/door_scene.py` owns one immutable pose registry and `outputs/door_scene/` contains exactly its five generated layers: D0 yaw `0.00`, XY `(0.00, 0.00)`; D1 yaw `+0.05`, XY `(+0.02, 0.00)`; D2 yaw `-0.05`, XY `(0.00, -0.02)`; D3 yaw `+0.10`, XY `(+0.02, +0.02)`; D4 yaw `-0.10`, XY `(+0.02, -0.02)`. D0 is the default. Each source layer uses `/World/Door`; the runtime instance uses `/World/envs/env_0/DoorScene/Door`. Runtime and data APIs accept only these pose IDs.
 
 ## Control and sensing
 
@@ -36,6 +36,7 @@ The benchmark is simulation-only. It has no physical robot command path, hardwar
 
 ## Version Notes
 
+- 2026-08-13 — Unified the scene module, API, configuration field, and USD prim names under `door_scene`; retained `door_push_alex_v2` exclusively as the task, dataset, and learned-run identity.
 - 2026-08-12 — Unified config, scene construction, calibration, IK, reset, sensing, and telemetry in the concrete single-environment Alex V2 runtime and replaced the two contact accessors with one atomic snapshot.
 - 2026-08-12 — Removed duplicate calibration authoring; the active JSON is the single source and changes require the maintained runtime gates.
 - 2026-08-12 — Removed unused asset evidence fields and noncanonical scene-generation APIs while preserving runtime identity, D0-D4 validation, and physical scene checks.

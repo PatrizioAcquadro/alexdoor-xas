@@ -11,7 +11,7 @@ import torch
 
 from alexdoor_xas.action.frames import ObjectFrame, door_frame_from_body_pose, frame_delta_to_world
 from alexdoor_xas.action.spaces import A2_EE_DELTA
-from alexdoor_xas.assets.door_task import DEFAULT_DOOR_POSE_ID, canonical_door_pose
+from alexdoor_xas.assets.door_scene import DEFAULT_DOOR_POSE_ID, canonical_door_pose
 from alexdoor_xas.policies.scripted.door_push import (
     DoorPushController,
     DoorPushControllerCfg,

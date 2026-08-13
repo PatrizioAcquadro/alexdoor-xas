@@ -7,7 +7,7 @@ from dataclasses import dataclass, fields, replace
 from typing import Any
 
 from alexdoor_xas import paths
-from alexdoor_xas.assets.door_task import DEFAULT_DOOR_POSE_ID, canonical_door_pose
+from alexdoor_xas.assets.door_scene import DEFAULT_DOOR_POSE_ID, canonical_door_pose
 from alexdoor_xas.policies.common.config import load_config
 from alexdoor_xas.policies.scripted.door_push import DoorPushControllerCfg
 

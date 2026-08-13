@@ -22,7 +22,7 @@ def Xform "World"
         float inputs:intensity = 400
     }
 
-    def Xform "DoorTaskDoor" (
+    def Xform "Door" (
         prepend apiSchemas = ["PhysicsArticulationRootAPI"]
         prepend references = @/home/pacquadr/Desktop/CombinedScene/Door.usd@</DoorObject>
     )
@@ -41,7 +41,7 @@ def Xform "World"
 
         def PhysicsFixedJoint "FixDoorframe"
         {
-            rel physics:body1 = </World/DoorTaskDoor/Doorframe>
+            rel physics:body1 = </World/Door/Doorframe>
             bool physics:jointEnabled = 1
             point3f physics:localPos0 = (-0.7007639, -0.46605408, 1.0096998)
             point3f physics:localPos1 = (0, 0, 0)

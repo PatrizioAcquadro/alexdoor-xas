@@ -43,6 +43,6 @@ def test_alex_v2_env_cfg_contract_if_isaaclab_available() -> None:
     assert cfg.sim.dt == pytest.approx(1 / 120)
     assert cfg.sim.render_interval == cfg.decimation
     assert cfg.scene.num_envs == 1
-    assert cfg.door_task_scene.prim_path == "/World/envs/env_0/DoorTaskScene"
-    assert cfg.door.prim_path == "/World/envs/env_.*/DoorTaskScene/DoorTaskDoor"
+    assert cfg.door_scene.prim_path == "/World/envs/env_0/DoorScene"
+    assert cfg.door.prim_path == "/World/envs/env_.*/DoorScene/Door"
     assert cfg.ee_contact.prim_path.endswith("/RIGHT_GRIPPER_Z_LINK")

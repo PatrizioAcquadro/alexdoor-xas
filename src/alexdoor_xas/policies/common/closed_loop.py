@@ -9,7 +9,7 @@ from typing import Any
 
 import numpy as np
 
-from alexdoor_xas.assets.door_task import CANONICAL_DOOR_POSES
+from alexdoor_xas.assets.door_scene import CANONICAL_DOOR_POSES
 from alexdoor_xas.policies.common.runs import (
     RUN_FORMAT,
     load_resolved_config,

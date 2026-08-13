@@ -41,8 +41,8 @@ _ALEX_V2_ARM_JOINT_NAMES = (
     "RIGHT_WRIST_Z",
     "RIGHT_WRIST_X",
 )
-_DOOR_SCENE_SOURCE_PRIM_PATH = "/World/envs/env_0/DoorTaskScene"
-_DOOR_ARTICULATION_PRIM_PATH = "/World/envs/env_.*/DoorTaskScene/DoorTaskDoor"
+_DOOR_SCENE_SOURCE_PRIM_PATH = "/World/envs/env_0/DoorScene"
+_DOOR_ARTICULATION_PRIM_PATH = "/World/envs/env_.*/DoorScene/Door"
 _DOOR_PANEL_BODY_PRIM_PATH = f"{_DOOR_ARTICULATION_PRIM_PATH}/Door"
 _HINGE_DAMPING_NM_S_PER_RAD = 4.0
 
@@ -66,7 +66,7 @@ class DoorPushAlexV2EnvCfg(DirectRLEnvCfg):
     )
     viewer: ViewerCfg = ViewerCfg(eye=(1.5, 2.6, 2.0), lookat=(-0.7, 0.0, 0.9))
 
-    door_task_scene = AssetBaseCfg(
+    door_scene = AssetBaseCfg(
         prim_path=_DOOR_SCENE_SOURCE_PRIM_PATH,
         spawn=sim_utils.UsdFileCfg(usd_path=""),
     )

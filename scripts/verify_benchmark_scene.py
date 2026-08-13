@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Verify the complete Door + Alex V2 benchmark scene in Isaac Lab.
 
-The gate validates the pinned Alex V2 manifest and generated door-task USD,
+The gate validates the pinned Alex V2 manifest and generated door-scene USD,
 then loads the production environment, resets it, and checks that Alex, the
 hinge, door frame, and panel remain finite and stable during zero-action steps.
 
@@ -57,15 +57,15 @@ from alexdoor_xas.assets.alex_v2_contract import (  # noqa: E402
     EXPECTED_RUNTIME_JOINTS,
     RobotAssetRef,
 )
-from alexdoor_xas.assets.door_task import (  # noqa: E402
-    ensure_door_task_usd,
-    validate_door_task_usd,
+from alexdoor_xas.assets.door_scene import (  # noqa: E402
+    ensure_door_scene_usd,
+    validate_door_scene_usd,
 )
 from alexdoor_xas.envs.door_task.door_push_alex_v2_env_cfg import (  # noqa: E402
     DoorPushAlexV2EnvCfg,
 )
 
-EXPECTED_HINGE_PRIM_PATH = "/World/DoorTaskDoor/Doorframe/Hinge"
+EXPECTED_HINGE_PRIM_PATH = "/World/Door/Doorframe/Hinge"
 DOOR_BODY_NAMES = ("Doorframe", "Door", "Handle")
 USD_EXTENSIONS = (".usd", ".usda", ".usdc")
 
@@ -78,10 +78,10 @@ def _check_static_usd(usd_path: Path) -> str:
     """Validate generation, dependencies, hinge, and authored mass/inertia."""
     from pxr import Usd, UsdPhysics, UsdUtils  # noqa: PLC0415
 
-    validate_door_task_usd(usd_path)
+    validate_door_scene_usd(usd_path)
     stage = Usd.Stage.Open(str(usd_path), Usd.Stage.LoadAll)
     if stage is None:
-        raise RuntimeError(f"could not open door task USD: {usd_path}")
+        raise RuntimeError(f"could not open door scene USD: {usd_path}")
 
     layers, resolved, unresolved = UsdUtils.ComputeAllDependencies(str(usd_path))
     scan_text = "\n".join(
@@ -94,10 +94,10 @@ def _check_static_usd(usd_path: Path) -> str:
         ]
     ).lower()
     if "file:/c:" in scan_text:
-        raise RuntimeError("door task USD contains a forbidden file:/C:/ reference")
+        raise RuntimeError("door scene USD contains a forbidden file:/C:/ reference")
     unresolved_usd = [asset for asset in unresolved if _is_usd_like_asset(asset)]
     if unresolved_usd:
-        raise RuntimeError(f"door task USD has unresolved USD references: {unresolved_usd}")
+        raise RuntimeError(f"door scene USD has unresolved USD references: {unresolved_usd}")
     unresolved_non_usd = [asset for asset in unresolved if not _is_usd_like_asset(asset)]
     if unresolved_non_usd:
         print(f"[door] ignored unresolved non-USD assets: {unresolved_non_usd}", flush=True)
@@ -109,7 +109,7 @@ def _check_static_usd(usd_path: Path) -> str:
         raise RuntimeError(
             f"expected exactly one hinge at {EXPECTED_HINGE_PRIM_PATH}; found {hinges}"
         )
-    for prim_path in ("/World/DoorTaskDoor/Door", "/World/DoorTaskDoor/Handle"):
+    for prim_path in ("/World/Door/Door", "/World/Door/Handle"):
         prim = stage.GetPrimAtPath(prim_path)
         mass_api = UsdPhysics.MassAPI(prim)
         mass = mass_api.GetMassAttr().Get()
@@ -280,7 +280,7 @@ def main() -> int:
     rc = 0
     try:
         asset, ref = build_alex_v2_door_asset()
-        usd_path = ensure_door_task_usd()
+        usd_path = ensure_door_scene_usd()
         hinge_prim_path = _check_static_usd(usd_path)
         evidence = _run_live_environment(ref, hinge_prim_path)
         _print_summary(usd_path, asset, ref, evidence)

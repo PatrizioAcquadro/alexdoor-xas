@@ -37,7 +37,7 @@ The executable registry is limited to D0 `(0.00, 0.00, 0.00)`, D1 `(+0.05, +0.02
 - `src/alexdoor_xas/action/spaces.py`
 - `src/alexdoor_xas/action/frames.py`
 - `src/alexdoor_xas/data_engine/export.py`
-- `src/alexdoor_xas/assets/door_task.py`
+- `src/alexdoor_xas/assets/door_scene.py`
 - `tests/test_action_spaces.py`
 - `scripts/verify_dataset_interface.py`
 

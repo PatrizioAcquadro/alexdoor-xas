@@ -17,7 +17,7 @@ from isaaclab.utils.math import combine_frame_transforms
 
 from alexdoor_xas.assets.alex_v2 import build_alex_v2_door_asset, load_alex_v2_articulation_cfg
 from alexdoor_xas.assets.alex_v2_tool_frame import derive_right_gripper_tool_frame
-from alexdoor_xas.assets.door_task import ensure_door_task_usd
+from alexdoor_xas.assets.door_scene import ensure_door_scene_usd
 from alexdoor_xas.calibration.alex_v2_door import (
     AlexV2DoorCalibration,
     load_alex_v2_door_calibration,
@@ -67,7 +67,7 @@ def _read_door_frame_from_stage() -> tuple[tuple[float, ...], tuple[float, ...]]
     import omni.usd  # noqa: PLC0415
     from pxr import Usd, UsdGeom  # noqa: PLC0415
 
-    prim_path = "/World/envs/env_0/DoorTaskScene/DoorTaskDoor/Doorframe"
+    prim_path = "/World/envs/env_0/DoorScene/Door/Doorframe"
     stage = omni.usd.get_context().get_stage()
     prim = stage.GetPrimAtPath(prim_path)
     if not prim.IsValid():
@@ -100,7 +100,7 @@ class DoorPushAlexV2Env(DirectRLEnv):
         calibration = load_alex_v2_door_calibration(cfg.calibration_path)
         _validate_tool_frame(asset.manifest, calibration)
         _configure_robot(cfg, calibration)
-        cfg.door_task_scene.spawn.usd_path = str(ensure_door_task_usd(cfg.door_pose_id))
+        cfg.door_scene.spawn.usd_path = str(ensure_door_scene_usd(cfg.door_pose_id))
 
         self._calibration = calibration
         self._robot_asset = runtime_asset
@@ -174,11 +174,11 @@ class DoorPushAlexV2Env(DirectRLEnv):
         self._last_settle_report: dict | None = None
 
     def _setup_scene(self) -> None:
-        self.cfg.door_task_scene.spawn.func(
-            self.cfg.door_task_scene.prim_path,
-            self.cfg.door_task_scene.spawn,
-            translation=self.cfg.door_task_scene.init_state.pos,
-            orientation=self.cfg.door_task_scene.init_state.rot,
+        self.cfg.door_scene.spawn.func(
+            self.cfg.door_scene.prim_path,
+            self.cfg.door_scene.spawn,
+            translation=self.cfg.door_scene.init_state.pos,
+            orientation=self.cfg.door_scene.init_state.rot,
         )
         self._door = Articulation(self.cfg.door)
         self._robot = Articulation(self.cfg.robot)
