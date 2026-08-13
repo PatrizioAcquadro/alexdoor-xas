@@ -15,7 +15,6 @@ import torch
 
 from alexdoor_xas.action.frames import ObjectFrame, door_frame_from_body_pose
 from alexdoor_xas.action.spaces import EE_DELTA_DIM
-from alexdoor_xas.envs.door_task.contact_force import decode_contact_flag
 
 from .base import AdapterDecision, AdapterLog, AdapterStatus, StepContext
 from .limits import RobotLimitsCfg
@@ -128,10 +127,8 @@ def read_door_frame(env) -> ObjectFrame:
         ) from exc
 
 
-def read_joint_limits(env) -> dict[str, np.ndarray] | None:
-    """Isaac-reported joint limits, when the env exposes them (read once)."""
-    if not hasattr(env, "robot_joint_limits"):
-        return None
+def read_joint_limits(env) -> dict[str, np.ndarray]:
+    """Read and validate the Isaac-reported joint limits."""
     raw = env.robot_joint_limits()
     if not isinstance(raw, dict):
         raise InvalidSimulatorStateError(
@@ -159,33 +156,22 @@ def _read_ee_pose(env) -> tuple[np.ndarray, np.ndarray]:
     return position, orientation
 
 
-def _read_contact_state(env) -> tuple[bool | None, float | None]:
-    contact_sensed: bool | None = None
-    if hasattr(env, "contact_sensed"):
-        try:
-            contact_sensed = decode_contact_flag(env.contact_sensed())
-        except ValueError as exc:
-            raise InvalidSimulatorStateError(
-                f"invalid simulator state: contact value is invalid ({exc})"
-            ) from exc
-    contact_force_n: float | None = None
-    if hasattr(env, "contact_force_w"):
-        force = _finite_array("contact force", env.contact_force_w())
-        if force.ndim == 0 or force.shape[-1] != 3:
-            raise InvalidSimulatorStateError(
-                f"invalid simulator state: contact force must end in shape (3,), got {force.shape}"
-            )
-        contact_force_n = float(np.linalg.norm(force.reshape(-1, 3)[0]))
-        if not np.isfinite(contact_force_n):
-            raise InvalidSimulatorStateError(
-                "invalid simulator state: contact force magnitude is non-finite"
-            )
-    return contact_sensed, contact_force_n
+def _read_contact_state(env) -> tuple[bool, float]:
+    force_w, sensed = env.contact_state()
+    force = _finite_array("contact force", force_w)
+    if force.shape != (1, 3):
+        raise InvalidSimulatorStateError(
+            f"invalid simulator state: contact force must have shape (1, 3), got {force.shape}"
+        )
+    sensed_array = np.asarray(_numpy(sensed))
+    if sensed_array.shape != (1,) or sensed_array.dtype.kind != "b":
+        raise InvalidSimulatorStateError(
+            "invalid simulator state: contact flag must be one Boolean"
+        )
+    return bool(sensed_array[0]), float(np.linalg.norm(force[0]))
 
 
-def _read_joint_state(env) -> tuple[dict[str, np.ndarray] | None, tuple[str, ...] | None]:
-    if not hasattr(env, "robot_joint_state"):
-        return None, None
+def _read_joint_state(env) -> tuple[dict[str, np.ndarray], tuple[str, ...]]:
     raw_joint_state = env.robot_joint_state()
     if not isinstance(raw_joint_state, dict):
         raise InvalidSimulatorStateError(
@@ -206,8 +192,6 @@ def _read_joint_state(env) -> tuple[dict[str, np.ndarray] | None, tuple[str, ...
             "invalid simulator state: joint positions, velocities, and targets "
             "must have matching shapes"
         )
-    if not hasattr(env, "robot_joint_names"):
-        return joint_state, None
     joint_names = tuple(str(name) for name in env.robot_joint_names())
     if len(joint_names) != joint_state["joint_pos"].size:
         raise InvalidSimulatorStateError(
@@ -221,11 +205,9 @@ def _read_joint_state(env) -> tuple[dict[str, np.ndarray] | None, tuple[str, ...
 
 
 def _validate_joint_state_limits(
-    joint_state: dict[str, np.ndarray] | None,
-    joint_limits: dict[str, np.ndarray] | None,
+    joint_state: dict[str, np.ndarray],
+    joint_limits: dict[str, np.ndarray],
 ) -> None:
-    if joint_limits is None:
-        return
     required_limits = ("joint_pos_limits", "joint_vel_limits")
     missing_limits = [name for name in required_limits if name not in joint_limits]
     if missing_limits:
@@ -238,7 +220,7 @@ def _validate_joint_state_limits(
         raise InvalidSimulatorStateError(
             "invalid simulator state: joint position limits must have shape (N, 2)"
         )
-    if joint_state is not None and (
+    if (
         pos_limits.shape[0] != joint_state["joint_pos"].size
         or vel_limits.reshape(-1).size != joint_state["joint_pos"].size
     ):
@@ -255,6 +237,8 @@ def read_step_context(
 ) -> StepContext:
     """Snapshot and validate all physical state used by adapter execution."""
     _validate_execution_limits(execution_limits)
+    if joint_limits is None:
+        joint_limits = read_joint_limits(env)
     angle, velocity = _read_hinge_state(env)
     position, orientation = _read_ee_pose(env)
     contact_sensed, contact_force_n = _read_contact_state(env)
@@ -311,8 +295,8 @@ class RolloutResult:
     notes: str = ""
     decisions_per_tick: list[AdapterDecision] = field(default_factory=list)
     # Post-step values; a terminating auto-reset tick has no valid sample.
-    contact_per_tick: list[bool | None] = field(default_factory=list)
-    force_n_per_tick: list[float | None] = field(default_factory=list)
+    contact_per_tick: list[bool] = field(default_factory=list)
+    force_n_per_tick: list[float] = field(default_factory=list)
     termination_reason: str = "tick_budget"
     # Exact first crossing; zero means the reset state already met the threshold.
     first_success_tick: int | None = None
@@ -343,7 +327,7 @@ class RolloutResult:
 @dataclass(frozen=True)
 class _RolloutStart:
     door_frame: ObjectFrame
-    joint_limits: dict[str, np.ndarray] | None
+    joint_limits: dict[str, np.ndarray]
     ctx: StepContext
 
 
@@ -359,8 +343,8 @@ class _RolloutState:
     environment_truncated: bool = False
     contact_ever_sensed: bool = False
     decisions: list[AdapterDecision] = field(default_factory=list)
-    contact_per_tick: list[bool | None] = field(default_factory=list)
-    force_n_per_tick: list[float | None] = field(default_factory=list)
+    contact_per_tick: list[bool] = field(default_factory=list)
+    force_n_per_tick: list[float] = field(default_factory=list)
 
     def to_result(self, log: AdapterLog, success_angle_rad: float | None) -> RolloutResult:
         return RolloutResult(
@@ -458,7 +442,7 @@ class _RolloutRuntime:
         state = self.state
         state.contact_per_tick.append(state.ctx.contact_sensed)
         state.force_n_per_tick.append(state.ctx.contact_force_n)
-        state.contact_ever_sensed = state.contact_ever_sensed or state.ctx.contact_sensed is True
+        state.contact_ever_sensed = state.contact_ever_sensed or bool(state.ctx.contact_sensed)
         if state.first_success_tick is None and self.crossed_success():
             state.first_success_tick = state.ticks
             state.reason = "success"
@@ -473,8 +457,6 @@ class _RolloutRuntime:
     def assert_no_silent_reset(self) -> None:
         state = self.state
         if state.environment_terminated or state.environment_truncated:
-            return
-        if not hasattr(self.env, "episode_length_buf"):
             return
         env_ticks = int(_numpy(self.env.episode_length_buf).reshape(-1)[0])
         if env_ticks < state.ticks:
@@ -567,7 +549,7 @@ def rollout_chunks(
     state = _RolloutState(
         ctx=start.ctx,
         initial_angle_rad=start.ctx.hinge_angle_rad,
-        contact_ever_sensed=start.ctx.contact_sensed is True,
+        contact_ever_sensed=bool(start.ctx.contact_sensed),
     )
     runtime = _RolloutRuntime(
         env=env,

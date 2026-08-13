@@ -68,8 +68,8 @@ from alexdoor_xas.data_engine import (  # noqa: E402
     run_episode,
     traces_equal,
 )
-from alexdoor_xas.envs.door_task.alex_v2_runtime import ALEX_V2_LIMITATIONS  # noqa: E402
 from alexdoor_xas.envs.door_task.door_push_alex_v2_env_cfg import (  # noqa: E402
+    ALEX_V2_LIMITATIONS,
     DoorPushAlexV2EnvCfg,
 )
 from alexdoor_xas.policies.scripted import (  # noqa: E402

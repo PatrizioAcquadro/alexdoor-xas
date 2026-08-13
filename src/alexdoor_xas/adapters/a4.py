@@ -205,7 +205,7 @@ class _StageExecution:
     stage: _Stage
     ctx: Any
     door_frame: Any
-    joint_limits: dict[str, np.ndarray] | None
+    joint_limits: dict[str, np.ndarray]
     max_ticks: int
     total_ticks: int
     stage_ticks: int = 0
@@ -720,11 +720,7 @@ class A4Adapter:
     def _stage_observation(self, execution: _StageExecution) -> _StageObservation:
         angle = execution.ctx.hinge_angle_rad
         ee_door = execution.door_frame.point_from_world(execution.ctx.ee_pos_w)
-        ee_panel = rot_z(angle).T @ ee_door
-        sensed = execution.ctx.contact_sensed
-        in_contact = (
-            bool(sensed) if sensed is not None else self.geometry.geometric_contact(ee_panel)
-        )
+        in_contact = execution.ctx.contact_sensed
         execution.contact_reached = execution.contact_reached or in_contact
         return _StageObservation(angle, ee_door, in_contact)
 

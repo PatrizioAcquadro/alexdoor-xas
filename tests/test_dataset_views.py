@@ -16,13 +16,13 @@ from alexdoor_xas.dataset.normalize import (
     view_norm_stats_path,
 )
 from alexdoor_xas.policies.common.data import PolicyDataError, load_policy_data
-from conftest import FakeForceDoorPushEnv, make_test_engine_cfg
+from conftest import FakeDoorPushEnv, make_test_engine_cfg
 
 
 def _dataset(tmp_path: Path) -> tuple[Path, EpisodeDataset]:
     episodes = [
         run_episode(
-            FakeForceDoorPushEnv(start_door_frame=(0.7, 0.2 + index * 0.01, 0.0)),
+            FakeDoorPushEnv(start_door_frame=(0.7, 0.2 + index * 0.01, 0.0)),
             plan_episodes(0, 1, index)[0],
             make_test_engine_cfg(task="door_push", door_pose_id="D0"),
         )

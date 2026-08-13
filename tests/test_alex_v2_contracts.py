@@ -32,15 +32,9 @@ from alexdoor_xas.assets.alex_v2_manifest import (
     AlexV2ManifestError,
     build_alex_v2_manifest,
 )
-from alexdoor_xas.calibration.alex_v2_door import AlexV2DoorCalibration
 from alexdoor_xas.dataset.robot_asset import (
     dataset_robot_asset_payload,
     load_dataset_robot_asset,
-)
-from alexdoor_xas.envs.door_task.alex_v2_runtime import (
-    ALEX_V2_PRIM_PATH,
-    AlexV2RuntimeContractError,
-    inject_alex_v2_runtime_cfg,
 )
 from alexdoor_xas.recording import EpisodeMeta
 
@@ -504,65 +498,3 @@ def test_missing_alex_v2_asset_root_is_a_required_failure(tmp_path) -> None:
     missing = check_env._missing_required_assets([("Alex V2 asset root", missing_root, True)])
 
     assert missing == ["Alex V2 asset root"]
-
-
-# --- test_alex_v2_executor_contract ---
-
-
-class _FakeRobotCfg:
-    def __init__(self) -> None:
-        self.prim_path = "/World/Wrong"
-        self.init_state = SimpleNamespace(pos=None, rot=None, joint_pos=None)
-
-    def replace(self, *, prim_path: str):
-        self.prim_path = prim_path
-        return self
-
-
-def _calibration() -> AlexV2DoorCalibration:
-    return AlexV2DoorCalibration(
-        base_pose={
-            "position_m": [-0.55, -0.25, 0.95],
-            "orientation_xyzw": [0.0, 0.0, 1.0, 0.0],
-        },
-        ready_joint_pos={
-            "RIGHT_SHOULDER_Y": 0.2,
-            "RIGHT_SHOULDER_X": -0.2,
-            "RIGHT_SHOULDER_Z": 0.1,
-            "RIGHT_ELBOW_Y": -0.8,
-            "RIGHT_WRIST_Z": 0.05,
-            "RIGHT_WRIST_X": 0.1,
-        },
-        tool_frame={
-            "translation_m": [0.11, 0.0, -0.06],
-            "orientation_xyzw": [0.0, 0.0, 0.0, 1.0],
-        },
-        reach_shell_m=(0.2, 0.8),
-        controller={"contact_force_threshold_n": 2.5},
-        randomization_bounds={},
-    )
-
-
-def test_v2_runtime_injects_dedicated_asset_and_calibrated_init_state() -> None:
-    env_cfg = SimpleNamespace(robot=None, contact_force_threshold_n=0.0)
-    robot_cfg = _FakeRobotCfg()
-
-    result = inject_alex_v2_runtime_cfg(env_cfg, robot_cfg, _calibration())
-
-    assert result is env_cfg
-    assert env_cfg.robot is robot_cfg
-    assert robot_cfg.prim_path == ALEX_V2_PRIM_PATH
-    assert robot_cfg.init_state.pos == (-0.55, -0.25, 0.95)
-    assert robot_cfg.init_state.rot == (0.0, 0.0, 1.0, 0.0)
-    assert env_cfg.contact_force_threshold_n == 2.5
-    ready = robot_cfg.init_state.joint_pos
-    assert len(ready) == 7
-    assert ready["RIGHT_ELBOW_Y"] == -0.8
-    catch_all = next(name for name in ready if name.startswith("(?!(?:"))
-    assert ready[catch_all] == 0.0
-    assert all(name in catch_all for name in _calibration().ready_joint_pos)
-
-
-def test_v2_runtime_refuses_missing_dedicated_articulation_cfg() -> None:
-    with pytest.raises(AlexV2RuntimeContractError, match="dedicated"):
-        inject_alex_v2_runtime_cfg(SimpleNamespace(), None, _calibration())

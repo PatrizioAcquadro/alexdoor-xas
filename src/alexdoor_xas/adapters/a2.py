@@ -162,12 +162,10 @@ class A2Adapter:
         return True
 
     def _joint_limit_flags(self, ctx: StepContext) -> list[AdapterWarning]:
-        if ctx.joint_state is None or ctx.joint_limits is None:
-            return []
         targets = np.asarray(ctx.joint_state.get("joint_pos_target"), dtype=np.float64)
         pos_limits = np.asarray(ctx.joint_limits.get("joint_pos_limits"), dtype=np.float64)
         warnings: list[AdapterWarning] = []
-        names = ctx.joint_names or tuple(f"joint_{index}" for index in range(targets.size))
+        names = ctx.joint_names
         if targets.ndim == 1 and pos_limits.shape == (targets.shape[0], 2):
             excess = np.maximum(pos_limits[:, 0] - targets, targets - pos_limits[:, 1])
             for joint in np.flatnonzero(excess > JOINT_LIMIT_IGNORE_RAD):

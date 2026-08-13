@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 import torch
 
+from alexdoor_xas import paths
 from alexdoor_xas.action.frames import ObjectFrame, frame_delta_to_world, rot_z
 from alexdoor_xas.action.spaces import A4_PHASE_VOCAB, EE_DELTA_DIM, ObjectCentricChunk
 from alexdoor_xas.adapters.a2 import A2Adapter
@@ -17,7 +18,6 @@ from alexdoor_xas.adapters.a3 import A3Adapter, validate_object_frame
 from alexdoor_xas.adapters.a4 import A4Adapter, A4AdapterCfg, alex_v2_a4_cfg
 from alexdoor_xas.adapters.base import AdapterStatus, StepContext
 from alexdoor_xas.adapters.limits import (
-    ALEX_V2_ROBOT_TAG,
     MAX_HINGE_ANGLE_RAD,
     DoorPanelGeometry,
     RobotLimitsCfg,
@@ -29,7 +29,7 @@ from alexdoor_xas.adapters.rollout import replay_source, rollout_chunks
 from alexdoor_xas.data_engine import plan_episodes, run_episode
 from alexdoor_xas.policies.scripted import DoorPushController, DoorPushControllerCfg
 from alexdoor_xas.policies.scripted.door_push import PHASE_ORDER, DoorPushPhase
-from conftest import TEST_ROBOT_LIMITS, FakeDoorPushEnv, FakeForceDoorPushEnv, make_test_engine_cfg
+from conftest import TEST_ROBOT_LIMITS, FakeDoorPushEnv, make_test_engine_cfg
 
 FACE_X_M = DoorPanelGeometry().surface_x_m(0.0)
 
@@ -40,13 +40,27 @@ def _ctx(
     hinge_angle: float = 0.0,
     **kwargs,
 ) -> StepContext:
-    return StepContext(
-        door_frame=door_frame,
-        hinge_angle_rad=hinge_angle,
-        hinge_velocity_rad_s=0.0,
-        ee_pos_w=np.asarray(ee_pos_w, dtype=np.float64),
-        **kwargs,
-    )
+    values = {
+        "door_frame": door_frame,
+        "hinge_angle_rad": hinge_angle,
+        "hinge_velocity_rad_s": 0.0,
+        "ee_pos_w": np.asarray(ee_pos_w, dtype=np.float64),
+        "ee_quat_w_xyzw": np.array([0.0, 0.0, 0.0, 1.0]),
+        "contact_sensed": False,
+        "contact_force_n": 0.0,
+        "joint_state": {
+            "joint_pos": np.zeros(1),
+            "joint_vel": np.zeros(1),
+            "joint_pos_target": np.zeros(1),
+        },
+        "joint_limits": {
+            "joint_pos_limits": np.array([[-2.5, 2.5]]),
+            "joint_vel_limits": np.array([10.0]),
+        },
+        "joint_names": ("J0",),
+    }
+    values.update(kwargs)
+    return StepContext(**values)
 
 
 def _identity_frame(origin=(0.0, 0.0, 0.0)) -> ObjectFrame:
@@ -317,7 +331,7 @@ def test_a2_tracks_secondary_velocity_violation_per_joint_across_ticks() -> None
 
 def test_limits_for_robot_rejects_unknown_tag():
     with pytest.raises(ValueError, match="workspace_center_w"):
-        limits_for_robot(ALEX_V2_ROBOT_TAG)
+        limits_for_robot(paths.ALEX_V2_ROBOT_TAG)
     with pytest.raises(KeyError, match="no adapter limits"):
         limits_for_robot("test_double")
 
@@ -334,7 +348,7 @@ def test_alex_v2_limits_use_calibrated_shell_and_caller_center() -> None:
     center = (4.0, -2.0, 1.25)
 
     limits = limits_for_robot(
-        ALEX_V2_ROBOT_TAG,
+        paths.ALEX_V2_ROBOT_TAG,
         calibration=calibration,
         workspace_center_w=center,
     )
@@ -560,11 +574,8 @@ def test_a4_lone_push_chunk_synthesizes_guarded_prefix():
 class _NeverSensesContactEnv(FakeDoorPushEnv):
     """Force-sensing surface that never trips: forces the missed-contact path."""
 
-    def contact_sensed(self):
-        return torch.tensor([False])
-
-    def contact_force_w(self):
-        return torch.zeros((1, 3), dtype=torch.float64)
+    def contact_state(self):
+        return torch.zeros((1, 3), dtype=torch.float64), torch.tensor([False])
 
 
 def test_a4_reports_missed_contact():
@@ -695,11 +706,11 @@ def test_a2_replay_reproduces_scripted_episode():
 
 def test_a3_replay_matches_a2_replay():
     item = plan_episodes(1, 0, base_seed=3)[0]
-    env = FakeForceDoorPushEnv()
+    env = FakeDoorPushEnv()
     episode = run_episode(env, item, make_test_engine_cfg())
     actions_door = np.asarray(episode.extras["action_door_frame"])
 
-    replay_env = FakeForceDoorPushEnv()
+    replay_env = FakeDoorPushEnv()
     replay_env.reset(seed=item.seed)
     adapter = A3Adapter(A2Adapter(TEST_ROBOT_LIMITS))
     result = rollout_chunks(replay_env, replay_source(actions_door), adapter)

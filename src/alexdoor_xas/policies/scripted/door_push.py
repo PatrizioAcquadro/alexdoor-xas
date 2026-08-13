@@ -128,10 +128,7 @@ class DoorPushObservation:
     hinge_angle_rad: float
     hinge_velocity_rad_s: float
     ee_pos_w: np.ndarray  # (3,)
-    contact_sensed: bool | None = None
-    """Force-sensed contact flag from the env's contact sensor, when available.
-    ``None`` (envs without force sensing) falls back to geometric inference for
-    the CONTACT-phase transition."""
+    contact_sensed: bool
 
 
 @dataclass(frozen=True)
@@ -232,9 +229,7 @@ class DoorPushController:
 
         ee_door = obs.door_frame.point_from_world(obs.ee_pos_w)
         contact_geometric = self._contact_inferred(ee_door, obs.hinge_angle_rad)
-        # Force-sensed contact drives the FSM when available; the geometric
-        # inference is always recorded (DoorPushCommand.contact_inferred).
-        contact = contact_geometric if obs.contact_sensed is None else obs.contact_sensed
+        contact = obs.contact_sensed
 
         if state.phase is DoorPushPhase.DONE or state.timed_out:
             return self._command(np.zeros(3), ee_door, contact_geometric)
@@ -309,10 +304,7 @@ class DoorPushController:
         if phase is DoorPushPhase.ALIGN:
             return distance <= cfg.align_tol_m
         if phase is DoorPushPhase.PRE_CONTACT:
-            # A force-sensed touch short-circuits the distance check: the hand
-            # has physically arrived even if the geometric model disagrees
-            # (e.g. a lagging arm meeting a moving panel). Sensed-only, so
-            # envs without force sensing (contact_sensed=None) are unchanged.
+            # Physical contact wins when geometry lags the moving panel.
             return distance <= cfg.pre_contact_tol_m or obs.contact_sensed is True
         if phase is DoorPushPhase.CONTACT:
             return contact

@@ -43,11 +43,20 @@ def _v2_calibration():
 
 
 def _observe(world: SyntheticDoorWorld) -> DoorPushObservation:
+    ee_door = world.door_frame.point_from_world(world.ee_pos_w)
+    ee_panel = rot_z(world.angle).T @ ee_door
+    half_height = world.cfg.panel_height_m / 2.0
+    contact_sensed = bool(
+        0.0 <= ee_panel[0] <= world.cfg.surface_x_m(world.cfg.contact_eps_m)
+        and 0.0 <= ee_panel[1] <= world.cfg.panel_width_m
+        and -half_height <= ee_panel[2] <= half_height
+    )
     return DoorPushObservation(
         door_frame=world.door_frame,
         hinge_angle_rad=world.angle,
         hinge_velocity_rad_s=world.velocity,
         ee_pos_w=world.ee_pos_w.copy(),
+        contact_sensed=contact_sensed,
     )
 
 

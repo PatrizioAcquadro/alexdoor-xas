@@ -20,14 +20,9 @@ def episode_metrics(episode: EpisodeBuffer) -> dict[str, Any]:
         [step.object_state["door_angle_rad"] for step in episode.steps], dtype=np.float64
     )
     times = np.array([step.t for step in episode.steps], dtype=np.float64)
-    # Force-sensed contact takes precedence over geometric inference when the
-    # episode recorded it; synthetic episodes may use geometric inference.
-    contact = np.array([_step_contact(step) for step in episode.steps], dtype=bool)
-    forces = np.array(
-        [float(step.contact.get("force_n", 0.0)) for step in episode.steps], dtype=np.float64
-    )
-    has_force = _has_force_contact(episode)
-    sensed_forces = forces[contact] if has_force else np.zeros(0)
+    contact = np.array([bool(step.contact["sensed"]) for step in episode.steps], dtype=bool)
+    forces = np.array([float(step.contact["force_n"]) for step in episode.steps], dtype=np.float64)
+    sensed_forces = forces[contact]
     phases = [str(step.safety["controller_phase"]) for step in episode.steps]
 
     success_angle = _success_angle(episode)
@@ -52,7 +47,7 @@ def episode_metrics(episode: EpisodeBuffer) -> dict[str, Any]:
         "duration_s": float(times[-1] + episode.meta.control_dt) if episode.n_steps else 0.0,
         "contact_ticks": int(contact.sum()),
         "mean_contact_force_n": float(sensed_forces.mean()) if sensed_forces.size else None,
-        **_force_metrics(episode, forces, contact, times, phases, has_force),
+        **_force_metrics(episode, forces, contact, times, phases),
         "phase_ticks": dict(Counter(phases)),
     }
 
@@ -63,10 +58,9 @@ def _force_metrics(
     contact: np.ndarray,
     times: np.ndarray,
     phases: list[str],
-    has_force: bool,
 ) -> dict[str, Any]:
-    """Force-sensed contact statistics; all ``None`` for episodes without force data."""
-    sensed = forces[contact] if has_force else np.zeros(0)
+    """Force statistics over sensed-contact ticks."""
+    sensed = forces[contact]
     if not sensed.size:
         return {
             "max_contact_force_n": None,
@@ -123,17 +117,6 @@ def aggregate_metrics(per_episode: list[dict[str, Any]]) -> dict[str, Any]:
             "mean_contact_ticks": float(np.mean([m["contact_ticks"] for m in force_eps])),
         }
     return summary
-
-
-def _step_contact(step) -> bool:
-    sensed = step.contact.get("sensed")
-    if sensed is not None:
-        return bool(sensed)
-    return bool(step.contact["inferred"])
-
-
-def _has_force_contact(episode: EpisodeBuffer) -> bool:
-    return any(step.contact.get("sensed") is not None for step in episode.steps)
 
 
 def _success_angle(episode: EpisodeBuffer) -> float | None:

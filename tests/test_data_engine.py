@@ -24,7 +24,7 @@ from alexdoor_xas.data_engine import (
     traces_equal,
 )
 from alexdoor_xas.recording import read_episode
-from conftest import FakeDoorPushEnv, FakeForceDoorPushEnv, make_test_engine_cfg
+from conftest import FakeDoorPushEnv, make_test_engine_cfg
 
 requires_h5py = pytest.mark.skipif(
     importlib.util.find_spec("h5py") is None, reason="h5py is not installed"
@@ -76,7 +76,13 @@ def test_run_episode_succeeds_and_matches_schema() -> None:
     ]
     step = episode.steps[0]
     assert set(step.obs_ref) >= {"door_angle_rad", "ee_pos_x_m"}
-    assert set(step.proprio) == {"ee_pos_w", "ee_quat_w_xyzw"}
+    assert set(step.proprio) == {
+        "ee_pos_w",
+        "ee_quat_w_xyzw",
+        "joint_pos",
+        "joint_vel",
+        "joint_pos_target",
+    }
     assert set(step.object_state) == {
         "door_angle_rad",
         "door_angular_velocity_rad_s",
@@ -85,7 +91,7 @@ def test_run_episode_succeeds_and_matches_schema() -> None:
         "door_rel_pos_y",
         "door_rel_pos_z",
     }
-    assert step.contact["source"] == "inferred_geometric"
+    assert step.contact["source"] == "force_sensor+geometric"
     assert step.safety["controller_phase"] == "approach"
 
 
@@ -114,11 +120,16 @@ def test_run_episode_records_environment_asset_provenance() -> None:
 
 
 @requires_h5py
-def test_export_datasets_produces_a2_a3_a4(tmp_path) -> None:
+def test_fake_episode_exports_a1_through_a4(tmp_path) -> None:
     episode = _generate()
     exported = export_datasets([episode], tmp_path, version="v0")
 
-    assert set(exported) == {A2_EE_DELTA, A3_OBJ_REL_EE_DELTA, A4_OBJ_CENTRIC_CHUNK}
+    assert set(exported) == {
+        A1_JOINT_DELTA,
+        A2_EE_DELTA,
+        A3_OBJ_REL_EE_DELTA,
+        A4_OBJ_CENTRIC_CHUNK,
+    }
     for directory in exported.values():
         meta = json.loads((directory / "meta.json").read_text())
         assert meta["task"] == "door_push"
@@ -154,7 +165,7 @@ def test_export_datasets_produces_a2_a3_a4(tmp_path) -> None:
 
 
 def test_force_sensing_env_records_sensed_contact_and_joint_state() -> None:
-    env = FakeForceDoorPushEnv()
+    env = FakeDoorPushEnv()
     episode = run_episode(env, plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
 
     assert episode.outcome is not None and episode.outcome.success
@@ -168,19 +179,27 @@ def test_force_sensing_env_records_sensed_contact_and_joint_state() -> None:
         "joint_vel",
         "joint_pos_target",
     }
-    assert step.proprio["joint_pos"].shape == (FakeForceDoorPushEnv.N_JOINTS,)
+    assert step.proprio["joint_pos"].shape == (FakeDoorPushEnv.N_JOINTS,)
     sensed_ticks = [s for s in episode.steps if s.contact["sensed"]]
     assert sensed_ticks, "expected at least one force-sensed contact tick"
     assert all(s.contact["force_n"] > 0.0 for s in sensed_ticks)
     assert episode.extras["joint_names"] == env.robot_joint_names()
     assert episode.extras["arm_joint_ids"] == env.arm_joint_ids()
-    assert episode.extras["final_joint_pos_target"].shape == (FakeForceDoorPushEnv.N_JOINTS,)
-    assert episode.extras["joint_pos_limits"].shape == (FakeForceDoorPushEnv.N_JOINTS, 2)
-    assert episode.extras["joint_vel_limits"].shape == (FakeForceDoorPushEnv.N_JOINTS,)
+    assert episode.extras["final_joint_pos_target"].shape == (FakeDoorPushEnv.N_JOINTS,)
+    assert episode.extras["joint_pos_limits"].shape == (FakeDoorPushEnv.N_JOINTS, 2)
+    assert episode.extras["joint_vel_limits"].shape == (FakeDoorPushEnv.N_JOINTS,)
+
+
+def test_each_recorded_snapshot_reads_contact_state_once() -> None:
+    env = FakeDoorPushEnv()
+    episode = run_episode(env, plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
+
+    # One pre-action snapshot per step, one controller-done snapshot, one terminal sample.
+    assert env._contact_state_calls == episode.n_steps + 2
 
 
 def _force_episode(seed: int = 0):
-    return run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, seed)[0], make_test_engine_cfg())
+    return run_episode(FakeDoorPushEnv(), plan_episodes(1, 0, seed)[0], make_test_engine_cfg())
 
 
 @requires_h5py
@@ -199,11 +218,11 @@ def test_a1_export_relabels_joint_target_deltas(tmp_path) -> None:
     a1 = read_episode(a1_files[0])
     assert a1.meta.action_space == A1_JOINT_DELTA
     actions = np.stack([step.action for step in a1.steps])
-    assert actions.shape == (episode.n_steps, FakeForceDoorPushEnv.N_JOINTS)
+    assert actions.shape == (episode.n_steps, FakeDoorPushEnv.N_JOINTS)
 
-    arm = list(FakeForceDoorPushEnv().arm_joint_ids())
-    held = [j for j in range(FakeForceDoorPushEnv.N_JOINTS) if j not in arm]
-    np.testing.assert_allclose(actions[:, arm], FakeForceDoorPushEnv.TARGET_STEP_RAD, atol=1e-12)
+    arm = list(FakeDoorPushEnv().arm_joint_ids())
+    held = [j for j in range(FakeDoorPushEnv.N_JOINTS) if j not in arm]
+    np.testing.assert_allclose(actions[:, arm], FakeDoorPushEnv.TARGET_STEP_RAD, atol=1e-12)
     np.testing.assert_allclose(actions[:, held], 0.0, atol=1e-12)
 
     targets = np.stack([step.proprio["joint_pos_target"] for step in a1.steps])
@@ -316,7 +335,6 @@ def test_door_pose_obs_terms_recorded_and_round_trip(tmp_path) -> None:
 
     step = episode.steps[0]
     assert step.object_state["door_yaw_rad"] == pytest.approx(yaw)
-    # No robot_base_pos_w on the synthetic test double -> world-relative.
     assert step.object_state["door_rel_pos_x"] == pytest.approx(origin[0])
     assert step.object_state["door_rel_pos_y"] == pytest.approx(origin[1])
     assert step.object_state["door_rel_pos_z"] == pytest.approx(origin[2])
@@ -381,7 +399,7 @@ def test_run_baseline_writes_sanity_summary_and_respects_no_export(tmp_path) -> 
     from alexdoor_xas.data_engine import run_baseline
 
     artifacts = run_baseline(
-        FakeForceDoorPushEnv(),
+        FakeDoorPushEnv(),
         outputs_root=tmp_path / "cache",
         datasets_root=tmp_path / "datasets",
         experiment="sanity",
@@ -406,7 +424,7 @@ def test_run_baseline_writes_sanity_summary_and_respects_no_export(tmp_path) -> 
 def test_run_baseline_aborts_before_export_on_force_admission_error(tmp_path) -> None:
     from alexdoor_xas.data_engine import run_baseline
 
-    class ForceSpikeEnv(FakeForceDoorPushEnv):
+    class ForceSpikeEnv(FakeDoorPushEnv):
         def _contact_force_n(self) -> float:
             if self._ticks == 3:
                 return 500.0
@@ -439,7 +457,7 @@ def test_run_baseline_refuses_direct_export_from_posed_runs(tmp_path) -> None:
 
     with pytest.raises(RuntimeError, match="non-default door pose"):
         run_baseline(
-            FakeForceDoorPushEnv(),
+            FakeDoorPushEnv(),
             outputs_root=tmp_path / "cache",
             datasets_root=tmp_path / "datasets",
             experiment="pose_guard",
@@ -452,7 +470,7 @@ def test_run_baseline_refuses_direct_export_from_posed_runs(tmp_path) -> None:
     assert not (tmp_path / "datasets").exists()
     # Cache-only posed runs remain available for diagnostics.
     artifacts = run_baseline(
-        FakeForceDoorPushEnv(),
+        FakeDoorPushEnv(),
         outputs_root=tmp_path / "cache",
         datasets_root=tmp_path / "datasets",
         experiment="pose_guard",

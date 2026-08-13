@@ -39,8 +39,6 @@ def write_run_report(
             "",
         ]
 
-    # Force columns only when the run recorded force-sensed contact (Alex);
-    # Runs without force sensing keep the original table.
     has_force = any(m.get("mean_contact_force_n") is not None for m in per_episode_metrics)
     lines += ["## Episodes", ""]
     header = "| seed | randomized | steps | final angle (deg) | success | termination |"

@@ -10,7 +10,7 @@ import pytest
 from alexdoor_xas.data_engine import plan_episodes, run_episode
 from alexdoor_xas.eval import aggregate_metrics, episode_metrics
 from alexdoor_xas.policies.scripted import DoorPushControllerCfg
-from conftest import FakeDoorPushEnv, FakeForceDoorPushEnv, make_test_engine_cfg
+from conftest import FakeDoorPushEnv, make_test_engine_cfg
 
 # --- test_eval ---
 
@@ -22,19 +22,8 @@ def _episode(controller_cfg: DoorPushControllerCfg | None = None, seed: int = 0)
     )
 
 
-FORCE_METRIC_KEYS = (
-    "mean_contact_force_n",
-    "max_contact_force_n",
-    "p95_contact_force_n",
-    "max_force_t_s",
-    "max_force_phase",
-    "first_contact_t_s",
-    "contact_force_impulse_ns",
-)
-
-
 def test_metrics_prefer_force_sensed_contact() -> None:
-    episode = run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
+    episode = run_episode(FakeDoorPushEnv(), plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
     metrics = episode_metrics(episode)
 
     sensed_ticks = sum(1 for step in episode.steps if step.contact["sensed"])
@@ -42,16 +31,9 @@ def test_metrics_prefer_force_sensed_contact() -> None:
     assert metrics["mean_contact_force_n"] is not None
     assert metrics["mean_contact_force_n"] > 0.0
 
-    # Episodes without force sensing keep the geometric count and report no force.
-    force_less = _episode()
-    force_less_metrics = episode_metrics(force_less)
-    inferred_ticks = sum(1 for step in force_less.steps if step.contact["inferred"])
-    assert force_less_metrics["contact_ticks"] == inferred_ticks
-    assert all(force_less_metrics[key] is None for key in FORCE_METRIC_KEYS)
-
 
 def test_force_metrics_details_and_aggregate_block() -> None:
-    episode = run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
+    episode = run_episode(FakeDoorPushEnv(), plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
     m = episode_metrics(episode)
 
     sensed = [float(s.contact["force_n"]) for s in episode.steps if s.contact["sensed"]]
@@ -70,10 +52,6 @@ def test_force_metrics_details_and_aggregate_block() -> None:
     assert block["max"] == pytest.approx(m["max_contact_force_n"])
     assert block["p95_max"] == pytest.approx(m["p95_contact_force_n"])
     assert block["mean_contact_ticks"] == pytest.approx(m["contact_ticks"])
-
-    # Force-less synthetic runs get no force block at all.
-    synthetic_summary = aggregate_metrics([episode_metrics(_episode())])
-    assert "contact_force_n" not in synthetic_summary
 
 
 def test_episode_and_aggregate_metrics_on_success_and_timeout() -> None:
@@ -135,9 +113,8 @@ def test_run_report_is_written(tmp_path) -> None:
     )
     text = report.read_text()
     assert "Scripted door-push baseline" in text
-    # Episodes without joint targets cannot export A1 and have no force columns.
-    assert "`A1_joint_delta`: **not exported** — joint targets were not recorded" in text
-    assert "max force (N)" not in text
+    assert "`A1_joint_delta`: **not exported in this run**" in text
+    assert "max force (N)" in text
     assert "rendering unavailable in this shell" in text
 
 
@@ -161,7 +138,7 @@ def _write_report(tmp_path, episodes, exports):
 def test_run_report_a1_line_and_force_columns_for_alex_episodes(tmp_path) -> None:
     from pathlib import Path
 
-    episode = run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
+    episode = run_episode(FakeDoorPushEnv(), plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
 
     # Joint-recording episodes with A1 exported: A1 listed like any other space.
     exports = {
@@ -186,7 +163,7 @@ def test_sanity_checks_pass_on_clean_episode_and_catch_bad_data() -> None:
 
     from alexdoor_xas.eval import check_alex_episode, contact_force_diagnostics
 
-    episode = run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
+    episode = run_episode(FakeDoorPushEnv(), plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
     result = check_alex_episode(episode)
     assert result.ok and not result.warnings
 
@@ -270,8 +247,12 @@ def test_sanity_checks_pass_on_clean_episode_and_catch_bad_data() -> None:
     assert not result.ok
     assert any("exceeded the 200 N force admission limit" in error for error in result.errors)
 
-    # Episodes without joint proprio are rejected outright.
-    result = check_alex_episode(_episode())
+    missing_joint_proprio = {
+        key: value
+        for key, value in episode.steps[0].proprio.items()
+        if key not in {"joint_pos", "joint_vel", "joint_pos_target"}
+    }
+    result = check_alex_episode(with_step(episode, 0, proprio=missing_joint_proprio))
     assert not result.ok
 
 
@@ -280,7 +261,7 @@ def test_sanity_checker_rejects_negative_force_magnitude_with_diagnostics() -> N
 
     from alexdoor_xas.eval import check_alex_episode, contact_force_diagnostics
 
-    episode = run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
+    episode = run_episode(FakeDoorPushEnv(), plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
     contact = dict(episode.steps[3].contact)
     contact["force_n"] = -2.5
     episode.steps[3] = dataclasses.replace(episode.steps[3], contact=contact)
@@ -307,7 +288,7 @@ def test_sanity_checker_rejects_non_finite_force_magnitude(force_n: float) -> No
 
     from alexdoor_xas.eval import check_alex_episode, contact_force_diagnostics
 
-    episode = run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
+    episode = run_episode(FakeDoorPushEnv(), plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
     contact = dict(episode.steps[3].contact)
     contact["force_n"] = force_n
     episode.steps[3] = dataclasses.replace(episode.steps[3], contact=contact)
@@ -327,7 +308,7 @@ def test_force_admission_accepts_exact_limit_and_preserves_lower_warning() -> No
 
     from alexdoor_xas.eval import check_alex_episode, contact_force_diagnostics
 
-    episode = run_episode(FakeForceDoorPushEnv(), plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
+    episode = run_episode(FakeDoorPushEnv(), plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
     contact = dict(episode.steps[3].contact)
     contact["force_n"] = 200.0
     episode.steps[3] = dataclasses.replace(episode.steps[3], contact=contact)

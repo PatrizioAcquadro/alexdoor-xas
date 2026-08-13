@@ -79,9 +79,8 @@ from alexdoor_xas.data_engine import (  # noqa: E402
     plan_episodes,
     run_episode,
 )
-from alexdoor_xas.envs.door_task.alex_v2_runtime import ALEX_V2_LIMITATIONS  # noqa: E402
 from alexdoor_xas.envs.door_task.door_push_alex_v2_env_cfg import (  # noqa: E402
-    ALEX_V2_ROBOT_TAG,
+    ALEX_V2_LIMITATIONS,
     DoorPushAlexV2EnvCfg,
 )
 from alexdoor_xas.policies.scripted import alex_v2_push_cfg  # noqa: E402
@@ -100,7 +99,7 @@ def _make_env():
 def _reference_episode(env):
     engine_cfg = DataEngineCfg(
         task=paths.ALEX_V2_TASK,
-        robot=ALEX_V2_ROBOT_TAG,
+        robot=paths.ALEX_V2_ROBOT_TAG,
         limitations=ALEX_V2_LIMITATIONS,
     )
     item = plan_episodes(1, 0, args.seed)[0]
@@ -118,7 +117,7 @@ def _reference_episode(env):
 def _fresh_adapters(env):
     center_w = env.shoulder_position_world_m()[0].detach().cpu().numpy()
     limits = limits_for_robot(
-        ALEX_V2_ROBOT_TAG,
+        paths.ALEX_V2_ROBOT_TAG,
         calibration=env.alex_v2_calibration(),
         workspace_center_w=center_w,
     )

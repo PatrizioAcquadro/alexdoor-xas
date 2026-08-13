@@ -95,17 +95,17 @@ class AdapterLog:
 
 @dataclass(frozen=True)
 class StepContext:
-    """Validated state used to adapt one command; optional fields may be ``None``."""
+    """Validated state used to adapt one command."""
 
     door_frame: ObjectFrame | None
     hinge_angle_rad: float
     hinge_velocity_rad_s: float
     ee_pos_w: np.ndarray  # (3,)
-    ee_quat_w_xyzw: np.ndarray | None = None  # (4,); validated but not commanded
-    contact_sensed: bool | None = None
-    contact_force_n: float | None = None
-    joint_state: dict[str, np.ndarray] | None = None
-    joint_limits: dict[str, np.ndarray] | None = None
-    joint_names: tuple[str, ...] | None = None
+    ee_quat_w_xyzw: np.ndarray  # (4,); validated but not commanded
+    contact_sensed: bool
+    contact_force_n: float
+    joint_state: dict[str, np.ndarray]
+    joint_limits: dict[str, np.ndarray]
+    joint_names: tuple[str, ...]
     tick_index: int | None = None
     rollout_phase: str = "unknown"

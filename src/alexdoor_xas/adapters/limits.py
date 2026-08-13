@@ -13,8 +13,6 @@ import numpy as np
 from alexdoor_xas import paths
 from alexdoor_xas.calibration.alex_v2_door import AlexV2DoorCalibration
 
-ALEX_V2_ROBOT_TAG = paths.ALEX_V2_ROBOT_TAG
-
 
 @dataclass(frozen=True)
 class WorkspaceSphere:
@@ -94,11 +92,13 @@ def limits_for_robot(
 ) -> RobotLimitsCfg:
     """Limits for a frozen robot tag, requiring live inputs for Alex V2."""
 
-    if robot_tag == ALEX_V2_ROBOT_TAG:
+    if robot_tag == paths.ALEX_V2_ROBOT_TAG:
         if calibration is None or workspace_center_w is None:
             raise ValueError("Alex V2 limits require validated calibration and workspace_center_w")
         return alex_v2_limits(calibration, workspace_center_w=workspace_center_w)
-    raise KeyError(f"no adapter limits for robot {robot_tag!r} (known: {[ALEX_V2_ROBOT_TAG]})")
+    raise KeyError(
+        f"no adapter limits for robot {robot_tag!r} (known: {[paths.ALEX_V2_ROBOT_TAG]})"
+    )
 
 
 @dataclass(frozen=True)

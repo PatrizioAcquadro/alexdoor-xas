@@ -88,7 +88,6 @@ from alexdoor_xas.data_engine import (  # noqa: E402
     plan_episodes,
 )
 from alexdoor_xas.envs.door_task.door_push_alex_v2_env_cfg import (  # noqa: E402
-    ALEX_V2_ROBOT_TAG,
     DoorPushAlexV2EnvCfg,
 )
 from alexdoor_xas.policies.act.policy import ActPolicy, act_chunk_source  # noqa: E402
@@ -155,7 +154,7 @@ def _make_env():
 def _adapter_for(action_space: str, env):
     center_w = env.shoulder_position_world_m()[0].detach().cpu().numpy()
     limits = limits_for_robot(
-        ALEX_V2_ROBOT_TAG,
+        paths.ALEX_V2_ROBOT_TAG,
         calibration=env.alex_v2_calibration(),
         workspace_center_w=center_w,
     )

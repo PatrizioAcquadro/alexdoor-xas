@@ -29,7 +29,6 @@ from alexdoor_xas.policies.common.obs import build_rollout_obs, read_door_pose_o
 from conftest import (
     TEST_ROBOT_LIMITS,
     FakeDoorPushEnv,
-    FakeForceDoorPushEnv,
     make_test_engine_cfg,
 )
 
@@ -516,21 +515,16 @@ def test_build_rollout_obs_matches_validated_context() -> None:
     np.testing.assert_allclose(obs, expected)
 
 
-def test_build_rollout_obs_core_contact_needs_force_sensing() -> None:
-    plain = FakeDoorPushEnv()
-    plain.reset()
-    with pytest.raises(ValueError, match="contact_sensed"):
-        build_rollout_obs(_step_context(plain), "core_contact")
-
-    force = FakeForceDoorPushEnv()
-    force.reset()
-    obs = build_rollout_obs(_step_context(force), "core_contact")
+def test_build_rollout_obs_core_contact_uses_sensor_state() -> None:
+    env = FakeDoorPushEnv()
+    env.reset()
+    obs = build_rollout_obs(_step_context(env), "core_contact")
     assert obs.shape == (10,)
     assert obs[-1] in (0.0, 1.0)
 
 
 def test_build_rollout_obs_rejects_unknown_presets() -> None:
-    env = FakeForceDoorPushEnv()
+    env = FakeDoorPushEnv()
     env.reset()
     with pytest.raises(ValueError, match="unknown obs preset"):
         build_rollout_obs(_step_context(env), "unsupported")

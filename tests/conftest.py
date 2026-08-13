@@ -1,15 +1,10 @@
-"""Shared pure-Python test helpers: synthetic door kinematics + a fake push env.
-
-No Isaac imports. The synthetic world approximates contact by rotating the
-hinge in proportion to commanded penetration past the panel face and pushing
-the EE back out to the face — just enough physics to exercise the controller
-FSM and the data engine loop end-to-end.
-"""
+"""Pure-Python full-contract door environment for software tests."""
 
 from __future__ import annotations
 
 import math
 import sys
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -21,10 +16,13 @@ import numpy as np  # noqa: E402
 
 from alexdoor_xas.action.frames import ObjectFrame, rot_z  # noqa: E402
 from alexdoor_xas.adapters.limits import RobotLimitsCfg  # noqa: E402
+from alexdoor_xas.assets.alex_v2_contract import build_alex_v2_runtime_manifest  # noqa: E402
 from alexdoor_xas.data_engine import DataEngineCfg  # noqa: E402
+from alexdoor_xas.kinematics import check_settle_postcondition  # noqa: E402
 from alexdoor_xas.policies.scripted import DoorPushControllerCfg  # noqa: E402
 
 TEST_ROBOT_LIMITS = RobotLimitsCfg()
+TEST_ROBOT_MANIFEST, TEST_ROBOT_REF = build_alex_v2_runtime_manifest()
 
 
 def make_test_engine_cfg(**overrides) -> DataEngineCfg:
@@ -69,7 +67,12 @@ class SyntheticDoorWorld:
 
 
 class FakeDoorPushEnv:
-    """Duck-typed stand-in for the data engine's environment protocol."""
+    """Complete synthetic stand-in for the Alex V2 environment contract."""
+
+    FORCE_GAIN_N_PER_M = 500.0
+    CONTACT_THRESHOLD_N = 1.0
+    N_JOINTS = 29
+    TARGET_STEP_RAD = 0.001
 
     class _Cfg:
         class _Sim:
@@ -94,8 +97,14 @@ class FakeDoorPushEnv:
         self._controller_cfg = controller_cfg or DoorPushControllerCfg()
         self._start_door_frame = np.asarray(start_door_frame, dtype=np.float64)
         self.world: SyntheticDoorWorld | None = None
+        self._ticks = 0
+        self._contact_state_calls = 0
+        self._last_settle_report: dict | None = None
 
     def reset(self, seed: int | None = None):
+        self._ticks = 0
+        self._contact_state_calls = 0
+        self._last_settle_report = None
         self.world = SyntheticDoorWorld(door_frame=self._frame, cfg=self._controller_cfg)
         self.world.ee_pos_w = self._frame.point_to_world(self._start_door_frame)
         return {"policy": None}, {}
@@ -104,6 +113,7 @@ class FakeDoorPushEnv:
         import torch
 
         assert self.world is not None, "reset() must be called before step()"
+        self._ticks += 1
         delta = action.detach().cpu().numpy().reshape(-1)
         clamped = delta.copy()
         clamped[:3] = np.clip(clamped[:3], -self.cfg.max_pos_delta_m, self.cfg.max_pos_delta_m)
@@ -137,49 +147,31 @@ class FakeDoorPushEnv:
             torch.tensor([[0.0, 0.0, 0.0, 1.0]], dtype=torch.float64),
         )
 
-    def set_ee_pose_w(self, pos_w, quat_w, env_ids=None) -> None:
+    def set_ee_pose_w(self, pos_w, quat_w) -> None:
         assert self.world is not None
-        self.world.ee_pos_w = pos_w.detach().cpu().numpy().reshape(3).astype(np.float64)
+        requested = pos_w.detach().cpu().numpy().reshape(3).astype(np.float64)
+        self.world.ee_pos_w = requested.copy()
+        self._last_settle_report = check_settle_postcondition(
+            requested,
+            self.world.ee_pos_w,
+            settle_ticks_used=0,
+            max_settle_ticks=90,
+        ).to_dict()
 
+    def start_pose_settle_report(self):
+        return self._last_settle_report
 
-class FakeForceDoorPushEnv(FakeDoorPushEnv):
-    """Force-sensing synthetic test double for the Alex V2 accessor surface.
-
-    Adds the optional duck-typed accessors the data engine probes via
-    ``hasattr`` (``contact_sensed`` / ``contact_force_w`` / ``robot_joint_state``
-    / ``robot_joint_names`` / ``arm_joint_ids``). The synthetic contact force is
-    proportional to the EE's depth past the geometric-contact surface, tuned so
-    the sensed flag trips exactly where geometric inference would.
-    """
-
-    FORCE_GAIN_N_PER_M = 500.0
-    CONTACT_THRESHOLD_N = 1.0
-    N_JOINTS = 29
-    TARGET_STEP_RAD = 0.001
-    """Per-tick arm joint-target increment: makes the recorded targets vary so
-    the A1 (target-delta) relabel is testable against a known constant delta."""
-
-    def reset(self, seed: int | None = None):
-        self._ticks = 0
-        return super().reset(seed)
-
-    def step(self, action):
-        self._ticks += 1
-        return super().step(action)
-
-    def contact_force_w(self):
+    def contact_state(self):
         import torch
 
-        return torch.tensor([[self._contact_force_n(), 0.0, 0.0]], dtype=torch.float64)
-
-    def contact_sensed(self):
-        import torch
-
-        return torch.tensor([self._contact_force_n() >= self.CONTACT_THRESHOLD_N])
+        self._contact_state_calls += 1
+        force_n = self._contact_force_n()
+        return (
+            torch.tensor([[force_n, 0.0, 0.0]], dtype=torch.float64),
+            torch.tensor([force_n >= self.CONTACT_THRESHOLD_N]),
+        )
 
     def robot_joint_state(self):
-        # Arm targets advance by TARGET_STEP_RAD per executed tick, so the A1
-        # relabel (target diffs) is a known constant; held joints stay at zero.
         targets = np.zeros(self.N_JOINTS)
         targets[self.arm_joint_ids()] = self.TARGET_STEP_RAD * self._ticks
         return {
@@ -200,6 +192,28 @@ class FakeForceDoorPushEnv(FakeDoorPushEnv):
                 [np.full(self.N_JOINTS, -2.5), np.full(self.N_JOINTS, 2.5)], axis=1
             ),
             "joint_vel_limits": np.full(self.N_JOINTS, 10.0),
+        }
+
+    def robot_base_pos_w(self):
+        import torch
+
+        return torch.zeros((1, 3), dtype=torch.float64)
+
+    @property
+    def episode_length_buf(self):
+        import torch
+
+        return torch.tensor([self._ticks])
+
+    def robot_asset_provenance(self):
+        return {**TEST_ROBOT_REF.to_dict(), "manifest": deepcopy(TEST_ROBOT_MANIFEST)}
+
+    def ik_clamp_telemetry(self):
+        return {
+            "joints": {},
+            "n_solve_ticks": self._ticks,
+            "max_excess_rad": 0.0,
+            "clamp_ticks_total": 0,
         }
 
     def _contact_force_n(self) -> float:

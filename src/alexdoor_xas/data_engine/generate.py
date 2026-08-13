@@ -12,7 +12,6 @@ import torch
 from alexdoor_xas.action.frames import ObjectFrame, door_frame_from_body_pose, frame_delta_to_world
 from alexdoor_xas.action.spaces import A2_EE_DELTA
 from alexdoor_xas.assets.door_task import DEFAULT_DOOR_POSE_ID, canonical_door_pose
-from alexdoor_xas.envs.door_task.contact_force import decode_contact_flag
 from alexdoor_xas.policies.scripted import (
     DoorPushController,
     DoorPushControllerCfg,
@@ -23,7 +22,6 @@ from alexdoor_xas.policies.scripted import (
 )
 from alexdoor_xas.recording import EpisodeBuffer, EpisodeMeta, EpisodeOutcome, EpisodeStep
 
-CONTACT_SOURCE = "inferred_geometric"
 CONTACT_SOURCE_FORCE = "force_sensor+geometric"
 DEFAULT_SUCCESS_ANGLE_RAD = math.pi / 4.0
 DEFAULT_MAX_TICKS = 600
@@ -101,12 +99,6 @@ def plan_randomized_seeds(
 
 
 @dataclass(frozen=True)
-class _EnvCapabilities:
-    force_contact: bool
-    joint_state: bool
-
-
-@dataclass(frozen=True)
 class _EpisodeSetup:
     buffer: EpisodeBuffer
     controller: DoorPushController
@@ -115,7 +107,6 @@ class _EpisodeSetup:
     door_pose_obs: dict[str, float]
     control_dt: float
     settle_report: dict | None
-    capabilities: _EnvCapabilities
 
 
 @dataclass(frozen=True)
@@ -124,7 +115,7 @@ class _TickSnapshot:
     velocity: float
     ee_pos_w: np.ndarray
     ee_quat_w: np.ndarray
-    contact_sensed: bool | None
+    contact_sensed: bool
     contact_force_n: float
 
 
@@ -170,12 +161,12 @@ def _prepare_episode(
     controller_cfg: DoorPushControllerCfg | None,
 ) -> _EpisodeSetup:
     base_controller_cfg = controller_cfg or DoorPushControllerCfg()
-    robot_asset = env.robot_asset_provenance() if hasattr(env, "robot_asset_provenance") else None
+    robot_asset = env.robot_asset_provenance()
     env.reset(seed=item.seed)
     door_frame = _read_door_frame(env)
 
     active_cfg = base_controller_cfg
-    settle_report: dict | None = None
+    settle_report = env.start_pose_settle_report()
     if item.variation is not None:
         active_cfg = item.variation.apply(base_controller_cfg)
         settle_report = apply_start_offset(env, door_frame, item.variation)
@@ -191,12 +182,11 @@ def _prepare_episode(
         seed=item.seed,
         sim_dt=sim_dt,
         control_dt=control_dt,
-        robot_asset_id=str(robot_asset["id"]) if robot_asset is not None else "",
-        robot_asset_sha256=str(robot_asset["sha256"]) if robot_asset is not None else "",
+        robot_asset_id=str(robot_asset["id"]),
+        robot_asset_sha256=str(robot_asset["sha256"]),
     )
     buffer = EpisodeBuffer(meta=meta)
-    if robot_asset is not None:
-        buffer.extras["robot_asset_manifest"] = robot_asset["manifest"]
+    buffer.extras["robot_asset_manifest"] = robot_asset["manifest"]
     return _EpisodeSetup(
         buffer=buffer,
         controller=DoorPushController(active_cfg),
@@ -205,19 +195,13 @@ def _prepare_episode(
         door_pose_obs=_door_pose_observation(env, door_frame),
         control_dt=control_dt,
         settle_report=settle_report,
-        capabilities=_EnvCapabilities(
-            force_contact=hasattr(env, "contact_sensed") and hasattr(env, "contact_force_w"),
-            joint_state=hasattr(env, "robot_joint_state"),
-        ),
     )
 
 
 def _door_pose_observation(env, door_frame: ObjectFrame) -> dict[str, float]:
     """Constant episode-level door pose expressed relative to the robot base."""
     door_yaw_rad = float(math.atan2(door_frame.rot[1, 0], door_frame.rot[0, 0]))
-    base_pos_w = np.zeros(3)
-    if hasattr(env, "robot_base_pos_w"):
-        base_pos_w = np.asarray(_numpy(env.robot_base_pos_w())[0], dtype=np.float64)
+    base_pos_w = np.asarray(_numpy(env.robot_base_pos_w())[0], dtype=np.float64)
     door_rel_pos = door_frame.origin - base_pos_w
     return {
         "door_yaw_rad": door_yaw_rad,
@@ -235,7 +219,7 @@ def _record_episode_ticks(
 ) -> _EpisodeRuntime:
     runtime = _EpisodeRuntime()
     for tick in range(engine_cfg.max_ticks):
-        snapshot = _read_tick_snapshot(env, setup.capabilities)
+        snapshot = _read_tick_snapshot(env)
         runtime.final_angle = snapshot.angle
         command = setup.controller.act(
             DoorPushObservation(
@@ -262,13 +246,10 @@ def _record_episode_ticks(
     return runtime
 
 
-def _read_tick_snapshot(env, capabilities: _EnvCapabilities) -> _TickSnapshot:
+def _read_tick_snapshot(env) -> _TickSnapshot:
     angle, velocity = _hinge_state(env)
     ee_pos_w, ee_quat_w = _ee_pose(env)
-    contact_sensed: bool | None = None
-    contact_force_n = 0.0
-    if capabilities.force_contact:
-        contact_sensed, contact_force_n = _read_force_contact(env)
+    contact_sensed, contact_force_n = _read_force_contact(env)
     return _TickSnapshot(
         angle,
         velocity,
@@ -280,9 +261,8 @@ def _read_tick_snapshot(env, capabilities: _EnvCapabilities) -> _TickSnapshot:
 
 
 def _read_force_contact(env) -> tuple[bool, float]:
-    sensed = decode_contact_flag(env.contact_sensed())
-    force_n = float(np.linalg.norm(_numpy(env.contact_force_w())[0]))
-    return sensed, force_n
+    force_w, sensed = env.contact_state()
+    return bool(_numpy(sensed).reshape(-1)[0]), float(np.linalg.norm(_numpy(force_w)[0]))
 
 
 def _controller_stop_reason(command) -> str:
@@ -304,9 +284,7 @@ def _build_episode_step(
         "ee_pos_w": snapshot.ee_pos_w,
         "ee_quat_w_xyzw": snapshot.ee_quat_w,
     }
-    if setup.capabilities.joint_state:
-        proprio.update(env.robot_joint_state())
-    contact = _step_contact(setup.capabilities, snapshot, command)
+    proprio.update(env.robot_joint_state())
     return EpisodeStep(
         t=setup.buffer.n_steps * setup.control_dt,
         action=delta_world,
@@ -323,7 +301,12 @@ def _build_episode_step(
             "door_angular_velocity_rad_s": snapshot.velocity,
             **setup.door_pose_obs,
         },
-        contact=contact,
+        contact={
+            "inferred": command.contact_inferred,
+            "sensed": snapshot.contact_sensed,
+            "force_n": snapshot.contact_force_n,
+            "source": CONTACT_SOURCE_FORCE,
+        },
         safety={
             "controller_phase": str(command.phase),
             "pos_clamped": bool(np.any(np.abs(delta_world[:3]) > env.cfg.max_pos_delta_m + 1e-12)),
@@ -332,19 +315,6 @@ def _build_episode_step(
             ),
         },
     )
-
-
-def _step_contact(
-    capabilities: _EnvCapabilities, snapshot: _TickSnapshot, command
-) -> dict[str, Any]:
-    if not capabilities.force_contact:
-        return {"inferred": command.contact_inferred, "source": CONTACT_SOURCE}
-    return {
-        "inferred": command.contact_inferred,
-        "sensed": snapshot.contact_sensed,
-        "force_n": snapshot.contact_force_n,
-        "source": CONTACT_SOURCE_FORCE,
-    }
 
 
 def _step_episode_env(env, delta_world: np.ndarray, tick: int, render_hook) -> _EnvStepOutcome:
@@ -378,8 +348,6 @@ def _assert_no_silent_episode_reset(
 ) -> None:
     if not buffer.n_steps or runtime.environment_terminated or runtime.environment_truncated:
         return
-    if not hasattr(env, "episode_length_buf"):
-        return
     env_ticks = int(_numpy(env.episode_length_buf)[0])
     if env_ticks < buffer.n_steps:
         raise RuntimeError(
@@ -391,7 +359,7 @@ def _assert_no_silent_episode_reset(
 
 
 def _record_terminal_contact(env, setup: _EpisodeSetup, runtime: _EpisodeRuntime) -> None:
-    if not setup.buffer.n_steps or not setup.capabilities.force_contact:
+    if not setup.buffer.n_steps:
         return
     if runtime.environment_terminated or runtime.environment_truncated:
         return
@@ -444,7 +412,7 @@ def _finalize_episode(
             else "",
         }
     )
-    _record_optional_final_state(env, setup)
+    _record_final_state(env, setup)
     success = (
         math.isfinite(runtime.final_angle) and runtime.final_angle >= engine_cfg.success_angle_rad
     )
@@ -461,21 +429,16 @@ def _finalize_episode(
     )
 
 
-def _record_optional_final_state(env, setup: _EpisodeSetup) -> None:
+def _record_final_state(env, setup: _EpisodeSetup) -> None:
     buffer = setup.buffer
-    if hasattr(env, "robot_joint_names"):
-        buffer.extras["joint_names"] = list(env.robot_joint_names())
-    if hasattr(env, "arm_joint_ids"):
-        buffer.extras["arm_joint_ids"] = [int(i) for i in env.arm_joint_ids()]
-    if setup.capabilities.joint_state:
-        buffer.extras["final_joint_pos_target"] = np.asarray(
-            env.robot_joint_state()["joint_pos_target"], dtype=np.float64
-        )
-    if hasattr(env, "robot_joint_limits"):
-        for name, value in env.robot_joint_limits().items():
-            buffer.extras[name] = np.asarray(value, dtype=np.float64)
-    if hasattr(env, "ik_clamp_telemetry"):
-        buffer.extras["ik_clamp_telemetry"] = env.ik_clamp_telemetry()
+    buffer.extras["joint_names"] = list(env.robot_joint_names())
+    buffer.extras["arm_joint_ids"] = [int(index) for index in env.arm_joint_ids()]
+    buffer.extras["final_joint_pos_target"] = np.asarray(
+        env.robot_joint_state()["joint_pos_target"], dtype=np.float64
+    )
+    for name, value in env.robot_joint_limits().items():
+        buffer.extras[name] = np.asarray(value, dtype=np.float64)
+    buffer.extras["ik_clamp_telemetry"] = env.ik_clamp_telemetry()
 
 
 def _step_termination_flags(step_result: Any) -> tuple[bool, bool]:
@@ -547,17 +510,18 @@ def _door_frame_quat(env) -> np.ndarray:
     return _numpy(frame_quat)[0].astype(np.float64)
 
 
-def apply_start_offset(env, door_frame: ObjectFrame, variation: DoorPushVariation) -> dict | None:
-    """Apply a door-frame start offset and return optional settle evidence."""
+def apply_start_offset(env, door_frame: ObjectFrame, variation: DoorPushVariation) -> dict:
+    """Apply a door-frame start offset and return its settle evidence."""
     pos, quat = env.ee_pose_w()
     offset_w = door_frame.vector_to_world(np.asarray(variation.start_offset_door_frame))
     new_pos = _numpy(pos)[0] + offset_w
     env.set_ee_pose_w(
         torch.as_tensor(new_pos, dtype=torch.float32).reshape(1, 3), quat.reshape(1, 4)
     )
-    if hasattr(env, "start_pose_settle_report"):
-        return env.start_pose_settle_report()
-    return None
+    report = env.start_pose_settle_report()
+    if report is None:
+        raise RuntimeError("environment did not record start-pose settle evidence")
+    return report
 
 
 def _hinge_state(env) -> tuple[float, float]:

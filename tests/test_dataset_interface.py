@@ -37,7 +37,7 @@ from alexdoor_xas.dataset.validate import (
     validate_episode,
     validate_matched_action_space_datasets,
 )
-from conftest import FakeDoorPushEnv, FakeForceDoorPushEnv, make_test_engine_cfg
+from conftest import FakeDoorPushEnv, make_test_engine_cfg
 
 requires_h5py = pytest.mark.skipif(
     importlib.util.find_spec("h5py") is None, reason="h5py is not installed"
@@ -92,7 +92,7 @@ def synthetic_exports(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def alex_exports(tmp_path_factory):
-    return _export(tmp_path_factory.mktemp("alex"), FakeForceDoorPushEnv)
+    return _export(tmp_path_factory.mktemp("alex"), FakeDoorPushEnv)
 
 
 @pytest.fixture(scope="module")
@@ -124,7 +124,7 @@ def test_dataset_loads_records_with_stacked_arrays(synthetic_a2) -> None:
 
 def test_a1_dataset_has_joint_wide_actions(alex_exports) -> None:
     a1 = EpisodeDataset(alex_exports[A1_JOINT_DELTA])
-    assert a1.action_dim == FakeForceDoorPushEnv.N_JOINTS
+    assert a1.action_dim == FakeDoorPushEnv.N_JOINTS
     assert validate_dataset(a1).ok
 
 

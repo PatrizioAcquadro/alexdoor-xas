@@ -4,8 +4,7 @@ Catches silently bad recorded data before it reaches Phase 3 dataset loaders:
 non-finite joint state, IK targets outside the robot's joint limits, runaway
 joint velocities, missing force sensing, and suspicious force spikes. The
 checks read only the episode schema (no Isaac imports): joint limits come from
-the ``joint_pos_limits`` / ``joint_vel_limits`` extras the data engine records
-when the env exposes ``robot_joint_limits()``.
+the mandatory ``joint_pos_limits`` / ``joint_vel_limits`` episode extras.
 """
 
 from __future__ import annotations

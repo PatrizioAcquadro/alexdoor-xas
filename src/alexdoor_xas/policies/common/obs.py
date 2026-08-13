@@ -35,16 +35,12 @@ def build_rollout_obs(
 ) -> np.ndarray:
     """Build a dataset-ordered observation from one validated state snapshot."""
     validate_obs_preset(preset)
-    if ctx.ee_quat_w_xyzw is None:
-        raise ValueError("rollout observation requires an end-effector orientation")
     parts = [
         np.asarray(ctx.ee_pos_w, dtype=np.float64).reshape(3),
         np.asarray(ctx.ee_quat_w_xyzw, dtype=np.float64).reshape(4),
         np.array([ctx.hinge_angle_rad, ctx.hinge_velocity_rad_s], dtype=np.float64),
     ]
     if preset == "core_contact":
-        if ctx.contact_sensed is None:
-            raise ValueError("obs preset 'core_contact' requires ctx.contact_sensed")
         parts.append(np.array([float(ctx.contact_sensed)], dtype=np.float64))
     if preset == "core_door_pose":
         if door_pose is None:
@@ -58,9 +54,7 @@ def read_door_pose_obs(env) -> np.ndarray:
     frame_pos, frame_quat = env.door_frame_pose_w()
     position = np.asarray(_numpy(frame_pos), dtype=np.float64).reshape(-1)[:3]
     quaternion = np.asarray(_numpy(frame_quat), dtype=np.float64).reshape(-1)[:4]
-    base = np.zeros(3)
-    if hasattr(env, "robot_base_pos_w"):
-        base = np.asarray(_numpy(env.robot_base_pos_w()), dtype=np.float64).reshape(-1)[:3]
+    base = np.asarray(_numpy(env.robot_base_pos_w()), dtype=np.float64).reshape(-1)[:3]
     rotation = quat_to_rot_matrix(quaternion)
     yaw = float(np.arctan2(rotation[1, 0], rotation[0, 0]))
     relative_position = position - base

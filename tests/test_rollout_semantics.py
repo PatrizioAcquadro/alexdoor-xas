@@ -13,7 +13,7 @@ from alexdoor_xas.adapters.a3 import A3Adapter
 from alexdoor_xas.adapters.base import AdapterStatus
 from alexdoor_xas.adapters.limits import RobotLimitsCfg, WorkspaceSphere
 from alexdoor_xas.adapters.rollout import RolloutResult, rollout_chunks
-from conftest import TEST_ROBOT_LIMITS, FakeDoorPushEnv, FakeForceDoorPushEnv
+from conftest import TEST_ROBOT_LIMITS, FakeDoorPushEnv
 
 SUCCESS_RAD = 0.3
 
@@ -46,12 +46,10 @@ class ScriptedAngleEnv(FakeDoorPushEnv):
         return super().reset(seed)
 
     def step(self, action):
-        result = super().step(action)
-        self._ticks = min(self._ticks + 1, len(self._angles) - 1)
-        return result
+        return super().step(action)
 
     def hinge_state(self):
-        angle = self._angles[self._ticks]
+        angle = self._angles[min(self._ticks, len(self._angles) - 1)]
         return (
             torch.tensor([angle], dtype=torch.float64),
             torch.tensor([0.0], dtype=torch.float64),
@@ -105,12 +103,7 @@ class SilentResetEnv(FakeDoorPushEnv):
         return result
 
 
-class NonBinaryContactEnv(FakeForceDoorPushEnv):
-    def contact_sensed(self):
-        return torch.tensor([0.5], dtype=torch.float64)
-
-
-class NonFiniteStateEnv(FakeForceDoorPushEnv):
+class NonFiniteStateEnv(FakeDoorPushEnv):
     """Inject one non-finite value into the shared adapter state surface."""
 
     def __init__(self, field: str):
@@ -160,16 +153,11 @@ class NonFiniteStateEnv(FakeForceDoorPushEnv):
             orientation[0, 3] = float("inf")
         return position, orientation
 
-    def contact_sensed(self):
-        if self.field == "contact":
-            return torch.tensor([float("nan")], dtype=torch.float64)
-        return super().contact_sensed()
-
-    def contact_force_w(self):
-        force = super().contact_force_w()
+    def contact_state(self):
+        force, sensed = super().contact_state()
         if self.field == "force":
             force[0, 0] = float("inf")
-        return force
+        return force, sensed
 
 
 def _state_validation_adapter(field: str) -> A2Adapter:
@@ -186,7 +174,7 @@ def _state_validation_adapter(field: str) -> A2Adapter:
     return A2Adapter(limits)
 
 
-class FirstContactImpactEnv(FakeForceDoorPushEnv):
+class FirstContactImpactEnv(FakeDoorPushEnv):
     """Force spike model driven by the actually executed first-contact step."""
 
     def __init__(self):
@@ -197,14 +185,15 @@ class FirstContactImpactEnv(FakeForceDoorPushEnv):
         self.last_dx_m = float(action.detach().cpu().numpy().reshape(-1)[0])
         return super().step(action)
 
-    def contact_force_w(self):
+    def contact_state(self):
         # An unshaped -15 mm contact step would report 300 N. The execution
         # correction must constrain the applied step before it reaches here.
+        self._contact_state_calls += 1
         force_n = 20_000.0 * abs(self.last_dx_m)
-        return torch.tensor([[force_n, 0.0, 0.0]], dtype=torch.float64)
-
-    def contact_sensed(self):
-        return torch.tensor([abs(self.last_dx_m) > 0.0])
+        return (
+            torch.tensor([[force_n, 0.0, 0.0]], dtype=torch.float64),
+            torch.tensor([abs(self.last_dx_m) > 0.0]),
+        )
 
 
 def test_first_success_is_exact_tick_for_h40_and_h8() -> None:
@@ -279,10 +268,8 @@ def test_silent_mid_rollout_reset_fails_loudly() -> None:
         rollout_chunks(env, _push_source(3), A2Adapter(TEST_ROBOT_LIMITS), max_ticks=9)
 
 
-def test_force_env_records_same_termination_fields() -> None:
-    # ACT- and Diffusion-style rollouts share RolloutResult: the force-sensing
-    # env exposes the identical timing/termination surface.
-    result = _run(FakeForceDoorPushEnv(), 8, success_angle_rad=SUCCESS_RAD)
+def test_rollout_records_contact_and_force_termination_fields() -> None:
+    result = _run(FakeDoorPushEnv(), 8, success_angle_rad=SUCCESS_RAD)
     assert result.termination_reason == "success"
     assert result.first_success_tick == result.n_ticks
     assert result.force_n_per_tick and result.force_n_per_tick[-1] is not None
@@ -303,7 +290,6 @@ def test_force_env_records_same_termination_fields() -> None:
         "workspace_center",
         "workspace_min_reach",
         "workspace_max_reach",
-        "contact",
         "force",
     ],
 )
@@ -355,22 +341,6 @@ def test_non_finite_a3_frame_state_is_an_explicit_simulator_failure(field: str) 
     assert result.termination_reason == "invalid_simulator_state"
     assert result.n_ticks == 0
     assert result.decisions_per_tick == []
-
-
-def test_nonbinary_contact_stops_before_adapter_execution() -> None:
-    env = NonBinaryContactEnv()
-    env.reset(seed=0)
-    result = rollout_chunks(
-        env,
-        _push_source(1),
-        A2Adapter(TEST_ROBOT_LIMITS),
-        max_ticks=1,
-    )
-
-    assert result.termination_reason == "invalid_simulator_state"
-    assert result.n_ticks == 0
-    assert result.decisions_per_tick == []
-    assert "exactly 0/1" in result.notes
 
 
 def test_calibrated_first_contact_correction_is_enforced_in_execution() -> None:
