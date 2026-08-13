@@ -325,3 +325,13 @@ A1-A4 data strategy, hybrid simulation pipeline, and articulated-object progress
 
 Verified wiki links, complete index coverage, current-versus-planned wording,
 Markdown whitespace, and unchanged user-owned raw and historical pages.
+
+## 2026-08-13 — update : Frozen B1 benchmark design
+
+Expanded the approved B1 decision with assets, observations, A1-A4 contracts,
+matched data, OOD tiers, success criteria, metrics, release, and implementation order.
+
+## 2026-08-13 — lint : Frozen B1 benchmark design
+
+Verified wiki links, complete index coverage, planned-versus-current wording,
+Markdown whitespace, and unchanged user-owned raw and historical pages.
