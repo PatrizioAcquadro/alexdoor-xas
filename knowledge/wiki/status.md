@@ -5,7 +5,7 @@ Current as of 2026-08-12. Code and deterministic tests are the source of truth f
 ## Maintained capabilities
 
 - Calibrated single-environment Alex V2 runtime with exact canonical D0-D4 scene layers, position-only right-arm IK, and exact-actor raw PhysX contact sensing.
-- Deterministic scripted baseline and matched `phase2.v2`/`v2_pose` A1-A4 episode export with factual termination fields and legacy v0/v1 reads.
+- Deterministic scripted baseline and matched `phase2.v2`/`v2_pose` A1-A4 episode export with factual termination fields and active v1 reads.
 - A2/A3 model datasets, content-grouped splits, retained views, and directly recomputed train-only normalization.
 - A2/A3/A4 adapters and simulator safety controls.
 - State-only ACT and Diffusion training with collision-safe UTC run IDs, immutable resolved configuration, atomic full-state resume checkpoints, compact histories, open-loop summaries, and self-contained best checkpoints.
@@ -51,4 +51,5 @@ Any new dataset, harder benchmark, training-seed study, VLA/A4 learning, hardwar
 
 ## Version Notes
 
+- 2026-08-12 — Removed duplicate recording fields, per-episode sidecars, and unused v0 compatibility while retaining current v1 datasets.
 - 2026-08-12 — Reduced `src/alexdoor_xas/envs` from twelve Python files to five and made force, provenance, robot state, settle evidence, episode counting, and clamp telemetry mandatory in active generation and rollout paths.

@@ -288,13 +288,6 @@ def _build_episode_step(
     return EpisodeStep(
         t=setup.buffer.n_steps * setup.control_dt,
         action=delta_world,
-        obs_ref={
-            "door_angle_rad": snapshot.angle,
-            "door_angular_velocity_rad_s": snapshot.velocity,
-            "ee_pos_x_m": float(snapshot.ee_pos_w[0]),
-            "ee_pos_y_m": float(snapshot.ee_pos_w[1]),
-            "ee_pos_z_m": float(snapshot.ee_pos_w[2]),
-        },
         proprio=proprio,
         object_state={
             "door_angle_rad": snapshot.angle,
@@ -307,13 +300,7 @@ def _build_episode_step(
             "force_n": snapshot.contact_force_n,
             "source": CONTACT_SOURCE_FORCE,
         },
-        safety={
-            "controller_phase": str(command.phase),
-            "pos_clamped": bool(np.any(np.abs(delta_world[:3]) > env.cfg.max_pos_delta_m + 1e-12)),
-            "rot_clamped": bool(
-                np.any(np.abs(delta_world[3:]) > env.cfg.max_rot_delta_rad + 1e-12)
-            ),
-        },
+        safety={"controller_phase": str(command.phase)},
     )
 
 

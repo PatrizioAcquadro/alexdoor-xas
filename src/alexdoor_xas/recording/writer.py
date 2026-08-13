@@ -1,18 +1,4 @@
-"""HDF5 + JSON-sidecar episode container (the Phase 2 storage choice).
-
-Layout per episode (``episode_<id8>.hdf5`` + ``episode_<id8>.meta.json``)::
-
-    /meta               attrs = EpisodeMeta fields
-    /outcome            attrs = EpisodeOutcome fields
-    /steps/t            (N,)
-    /steps/action       (N, 6)         in meta.action_space
-    /steps/<table>/<k>  (N, ...)       for obs_ref / proprio / object_state / contact / safety
-    /extras/<name>      arrays (e.g. per-step door-frame actions, door frame pose)
-    /extras_json        everything non-array (A4 chunk log, variation, ...)
-
-HDF5 + JSON keeps episodes loadable by ACT/robomimic-style dataloaders in
-Phase 3 while staying human-inspectable via the sidecar.
-"""
+"""HDF5 episode serialization."""
 
 from __future__ import annotations
 
@@ -27,13 +13,8 @@ from alexdoor_xas.action.spaces import EE_DELTA_DIM
 from .episode import EpisodeBuffer, EpisodeMeta, EpisodeOutcome, EpisodeStep
 
 SCHEMA_VERSION = "phase2.v2"
-"""phase2.v2 replaces interpreted failure labels with factual termination data."""
-LEGACY_SCHEMA_VERSIONS = ("phase2.v0", "phase2.v1")
-_STEP_TABLES = ("obs_ref", "proprio", "object_state", "contact", "safety")
-
-
-def episode_filename(meta: EpisodeMeta) -> str:
-    return f"episode_{meta.episode_id[:8]}.hdf5"
+LEGACY_SCHEMA_VERSION = "phase2.v1"
+_STEP_TABLES = ("proprio", "object_state", "contact", "safety")
 
 
 def write_episode(buffer: EpisodeBuffer, directory: str | Path) -> Path:
@@ -45,7 +26,7 @@ def write_episode(buffer: EpisodeBuffer, directory: str | Path) -> Path:
 
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
-    h5_path = directory / episode_filename(buffer.meta)
+    h5_path = directory / f"episode_{buffer.meta.episode_id[:8]}.hdf5"
 
     with h5py.File(h5_path, "w") as h5:
         h5.attrs["schema_version"] = SCHEMA_VERSION
@@ -63,7 +44,7 @@ def write_episode(buffer: EpisodeBuffer, directory: str | Path) -> Path:
         )
         steps.create_dataset("action", data=actions)
         for table in _STEP_TABLES:
-            _write_step_table(h5, steps, table, buffer.steps)
+            _write_step_table(steps, table, buffer.steps)
 
         extras = h5.create_group("extras")
         extras_json: dict[str, Any] = {}
@@ -75,27 +56,25 @@ def write_episode(buffer: EpisodeBuffer, directory: str | Path) -> Path:
                 extras_json[name] = value
         h5.create_dataset("extras_json", data=json.dumps(extras_json))
 
-    sidecar = h5_path.with_suffix(".meta.json")
-    sidecar.write_text(
-        json.dumps({"meta": buffer.meta.to_dict(), "outcome": buffer.outcome.to_dict()}, indent=2)
-        + "\n"
-    )
     return h5_path
 
 
 def read_episode(path: str | Path) -> EpisodeBuffer:
-    """Read an episode written by :func:`write_episode` (full round-trip)."""
+    """Read a supported episode."""
     import h5py
 
     with h5py.File(Path(path), "r") as h5:
-        meta = EpisodeMeta(**{k: _from_h5(v) for k, v in h5["meta"].attrs.items()})
         schema_version = str(_from_h5(h5.attrs.get("schema_version", "")))
+        if schema_version not in (LEGACY_SCHEMA_VERSION, SCHEMA_VERSION):
+            raise ValueError(f"unsupported episode schema: {schema_version!r}")
+
+        meta_raw = {k: _from_h5(v) for k, v in h5["meta"].attrs.items()}
+        meta_raw.pop("chunk_len", None)
+        meta = EpisodeMeta(**meta_raw)
         outcome_raw = {k: _from_h5(v) for k, v in h5["outcome"].attrs.items()}
-        # phase2.v0/v1 carried an interpreted failure_label. It is deliberately
-        # ignored rather than exposed through the v2 model-facing API.
         outcome_raw.pop("failure_label", None)
         outcome_raw["success"] = bool(outcome_raw["success"])
-        if schema_version in LEGACY_SCHEMA_VERSIONS:
+        if schema_version == LEGACY_SCHEMA_VERSION:
             outcome_raw.setdefault("termination_reason", "not_recorded")
             outcome_raw.setdefault("environment_terminated", None)
             outcome_raw.setdefault("environment_truncated", None)
@@ -117,11 +96,10 @@ def read_episode(path: str | Path) -> EpisodeBuffer:
             EpisodeStep(
                 t=float(t[i]),
                 action=action[i],
-                obs_ref=tables["obs_ref"][i],
                 proprio=tables["proprio"][i],
                 object_state=tables["object_state"][i],
                 contact=tables["contact"][i],
-                safety=tables["safety"][i],
+                safety={"controller_phase": tables["safety"][i]["controller_phase"]},
             )
             for i in range(len(t))
         ]
@@ -131,11 +109,11 @@ def read_episode(path: str | Path) -> EpisodeBuffer:
             extras[name] = np.asarray(dataset)
 
     buffer = EpisodeBuffer(meta=meta, steps=steps, extras=extras)
-    buffer.outcome = outcome
+    buffer.set_outcome(outcome)
     return buffer
 
 
-def _write_step_table(h5, steps_group, table: str, steps: list[EpisodeStep]) -> None:
+def _write_step_table(steps_group, table: str, steps: list[EpisodeStep]) -> None:
     import h5py
 
     group = steps_group.create_group(table)
@@ -200,12 +178,3 @@ def _optional_bool(value: Any) -> bool | None:
     if value in (None, ""):
         return None
     return bool(value)
-
-
-__all__ = [
-    "LEGACY_SCHEMA_VERSIONS",
-    "SCHEMA_VERSION",
-    "episode_filename",
-    "read_episode",
-    "write_episode",
-]

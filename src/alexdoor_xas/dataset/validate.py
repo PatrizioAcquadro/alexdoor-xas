@@ -13,7 +13,7 @@ from alexdoor_xas.action.spaces import (
 )
 from alexdoor_xas.eval.sanity import SanityResult, check_alex_episode
 from alexdoor_xas.recording import (
-    LEGACY_SCHEMA_VERSIONS,
+    LEGACY_SCHEMA_VERSION,
     LEGACY_TERMINATION_REASON,
     SCHEMA_VERSION,
     TERMINATION_REASONS,
@@ -28,7 +28,7 @@ from .loader import (
     obs_matrix,
 )
 
-_KNOWN_SCHEMA_VERSIONS = (*LEGACY_SCHEMA_VERSIONS, SCHEMA_VERSION)
+_KNOWN_SCHEMA_VERSIONS = (LEGACY_SCHEMA_VERSION, SCHEMA_VERSION)
 REQUIRED_DATASET_META_KEYS = (
     "task",
     "action_space",

@@ -272,3 +272,11 @@ admission gate, retained report and plots, and legacy terminal-sample handling.
 
 Verified all 23 wiki pages, 31 internal links, complete index coverage, source
 references, Markdown whitespace, and unchanged protected raw boundaries.
+
+## 2026-08-12 — update : Minimal recording contract
+
+Documented single-file HDF5 episodes, non-duplicated step state, controller-phase-only safety data, and active `phase2.v1` read compatibility.
+
+## 2026-08-12 — lint : Minimal recording contract
+
+Verified all 23 wiki pages, 31 internal links, source references, Markdown whitespace, deterministic tests, the active v1 dataset gate, unchanged protected raw boundaries, and the scripted-baseline gate on `cuda:0`.

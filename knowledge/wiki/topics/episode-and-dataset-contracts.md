@@ -6,13 +6,13 @@ The data system separates factual physical execution records from the action rep
 
 New episodes use `phase2.v2`. `EpisodeOutcome` stores `success`, `final_door_angle`, `n_steps`, `termination_reason`, `environment_terminated`, `environment_truncated`, and notes. Stop reasons are factual: `controller_done`, `controller_timeout`, `tick_budget`, `environment_terminated`, `environment_truncated`, or `step_error`. The schema does not generate, validate, aggregate, or expose interpreted failure labels.
 
-Readers continue to accept `phase2.v0` and `phase2.v1`, including A4 JSON Lines records. They silently discard the obsolete `failure_label`, expose `termination_reason: not_recorded`, and use unknown environment flags. Existing datasets are not rewritten, so historical scene paths and legacy outcome fields remain provenance rather than current output contracts.
+Readers continue to accept the active `phase2.v1` datasets and legacy A4 JSON Lines records. They discard the obsolete `failure_label`, expose `termination_reason: not_recorded`, and use unknown environment flags. Existing datasets are not rewritten.
 
-`src/alexdoor_xas/recording/episode.py` records observation and contact state before each action, the requested/applied command for that state, and the terminal response to the final action. A1/A2/A3 use HDF5 plus JSON sidecars; A4 uses JSON Lines.
+`src/alexdoor_xas/recording/episode.py` records state before each action, the applied command, controller phase, and terminal response. A1/A2/A3 use one HDF5 file per episode; A4 uses JSON Lines. Duplicate observation references, clamp flags, and per-episode JSON sidecars are not generated.
 
 ## Matched exports
 
-`src/alexdoor_xas/data_engine/export.py` derives matched products from one physical episode. A2 keeps world-frame end-effector deltas, A3 expresses the equivalent command in the static door frame, A4 stores object-centric guarded chunks, and Alex episodes derive A1 joint deltas from recorded targets. New A1 exports require the final applied target; legacy v0/v1 support remains read-only. The active operational version is `v2_pose` under `door_push_alex_v2`.
+`src/alexdoor_xas/data_engine/export.py` derives matched products from one physical episode. A2 keeps world-frame end-effector deltas, A3 expresses the equivalent command in the static door frame, A4 stores object-centric guarded chunks, and Alex episodes derive A1 joint deltas from recorded targets. New A1 exports require the final applied target; `phase2.v1` support remains read-only. The active operational version is `v2_pose` under `door_push_alex_v2`.
 
 `scripts/verify_dataset_interface.py` requires all A1-A4 products, validates the existing split and normalization artifacts without writing, and checks the paired A2/A3 conversion. `--write-artifacts` is the explicit regeneration mode.
 
@@ -28,6 +28,7 @@ The retained `v3_scale_master` contains 550 episodes across D0-D4. Its N50, N100
 
 ## Version Notes
 
+- 2026-08-12 — Removed duplicate observation references, unused clamp fields, per-episode sidecars, and unused v0 compatibility while retaining active v1 reads.
 - 2026-08-12 — Removed unused dataset APIs and A4 numeric encoding, narrowed batch and observation contracts, and made the verifier read committed artifacts by default.
 - 2026-08-12 — Removed retired candidate-generation and paired-publication hooks; current A1 writes require the recorded final target.
 - 2026-08-12 — Introduced `phase2.v2` factual outcomes and legacy v0/v1 reads without failure labels; existing datasets remain unchanged.

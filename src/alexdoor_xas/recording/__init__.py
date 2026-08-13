@@ -1,4 +1,4 @@
-"""Record every trial to the schema in the episode-and-dataset wiki contract."""
+"""Episode recording API."""
 
 from __future__ import annotations
 
@@ -11,15 +11,14 @@ from .episode import (
     EpisodeStep,
 )
 from .writer import (
-    LEGACY_SCHEMA_VERSIONS,
+    LEGACY_SCHEMA_VERSION,
     SCHEMA_VERSION,
-    episode_filename,
     read_episode,
     write_episode,
 )
 
 __all__ = [
-    "LEGACY_SCHEMA_VERSIONS",
+    "LEGACY_SCHEMA_VERSION",
     "LEGACY_TERMINATION_REASON",
     "SCHEMA_VERSION",
     "TERMINATION_REASONS",
@@ -27,7 +26,6 @@ __all__ = [
     "EpisodeMeta",
     "EpisodeOutcome",
     "EpisodeStep",
-    "episode_filename",
     "read_episode",
     "write_episode",
 ]

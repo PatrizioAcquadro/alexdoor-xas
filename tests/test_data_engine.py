@@ -75,7 +75,6 @@ def test_run_episode_succeeds_and_matches_schema() -> None:
         "release",
     ]
     step = episode.steps[0]
-    assert set(step.obs_ref) >= {"door_angle_rad", "ee_pos_x_m"}
     assert set(step.proprio) == {
         "ee_pos_w",
         "ee_quat_w_xyzw",
@@ -301,8 +300,8 @@ def test_run_baseline_same_run_id_is_idempotent(tmp_path) -> None:
     assert {path.name for path in second.exports.values()} == {"v2_pose"}
 
     episode_files = sorted((second.run_dir / "episodes").iterdir())
-    # 2 episodes x (hdf5 + meta.json sidecar): a rerun replaces, never accumulates.
-    assert len(episode_files) == 4
+    assert len(episode_files) == 2
+    assert all(path.suffix == ".hdf5" for path in episode_files)
     metrics = json.loads((second.run_dir / "metrics" / "metrics.json").read_text())
     assert len(metrics["episodes"]) == 2
 

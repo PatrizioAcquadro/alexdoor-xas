@@ -25,7 +25,7 @@ The four exports represent the same physical episodes and share episode IDs.
 - A3 stores equivalent door-frame end-effector deltas in HDF5 and is used by ACT and Diffusion.
 - A4 stores structured object-centric chunks in `episodes.jsonl`; it supports the adapter path but has no learned policy.
 
-A1-A3 contain one `episode_<id8>.hdf5` file and one `episode_<id8>.meta.json` sidecar per episode, plus dataset metadata and train-only `norm_stats.json`. 
+A1-A3 contain one `episode_<id8>.hdf5` file per episode, plus dataset metadata and train-only `norm_stats.json`.
 A4 contains `episodes.jsonl` and dataset metadata.
 
 Model-facing observations use `core`, `core_contact`, or `core_door_pose`.

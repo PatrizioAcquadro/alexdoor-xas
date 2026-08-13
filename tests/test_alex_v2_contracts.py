@@ -357,7 +357,7 @@ def test_checkpoint_runtime_gate_requires_exact_alex_v2_identity() -> None:
         assert_checkpoint_runtime_compatible(other, runtime)
 
 
-def test_episode_meta_is_backward_compatible_but_can_carry_asset_identity() -> None:
+def test_episode_meta_carries_asset_identity() -> None:
     base = dict(
         episode_id="episode",
         task=paths.ALEX_V2_TASK,
@@ -368,10 +368,8 @@ def test_episode_meta_is_backward_compatible_but_can_carry_asset_identity() -> N
         seed=0,
         sim_dt=0.005,
         control_dt=0.02,
-        chunk_len=1,
         created_utc="2026-01-01T00:00:00+00:00",
     )
-    assert EpisodeMeta(**base).robot_asset_id == ""
     enriched = EpisodeMeta(**base, robot_asset_id="v2", robot_asset_sha256="c" * 64)
     assert enriched.to_dict()["robot_asset_sha256"] == "c" * 64
 

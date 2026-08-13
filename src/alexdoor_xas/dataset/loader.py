@@ -15,7 +15,6 @@ from alexdoor_xas.action.spaces import (
 )
 from alexdoor_xas.recording import EpisodeBuffer, read_episode
 
-# ``obs_ref`` duplicates values in these model-facing tables.
 _OBS_TABLES = ("proprio", "object_state", "contact")
 
 _CONTACT_FLAG_KEY = "contact_flag"

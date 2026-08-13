@@ -1,11 +1,4 @@
-"""In-memory buffer matching the episode-and-dataset wiki contract (pure Python/numpy).
-
-One episode is ``meta`` (fixed) + ``steps[]`` (one entry per control tick) +
-``outcome`` (filled at the end). The buffer also carries ``extras`` for
-per-episode payloads the Phase 2 exports need that are not per-step data:
-the (static) door frame pose used for A2 <-> A3 conversion, the A4 chunk log,
-and the sampled variation of randomized rollouts.
-"""
+"""In-memory episode records."""
 
 from __future__ import annotations
 
@@ -42,12 +35,9 @@ class EpisodeMeta:
     seed: int
     sim_dt: float
     control_dt: float
-    chunk_len: int
     created_utc: str
-    # Additive V2 provenance. Empty defaults preserve reads of every existing
-    # phase2.v0/v1 episode; V2 generation/export rejects empty values.
-    robot_asset_id: str = ""
-    robot_asset_sha256: str = ""
+    robot_asset_id: str
+    robot_asset_sha256: str
 
     @classmethod
     def create(
@@ -61,9 +51,8 @@ class EpisodeMeta:
         seed: int,
         sim_dt: float,
         control_dt: float,
-        chunk_len: int = 1,
-        robot_asset_id: str = "",
-        robot_asset_sha256: str = "",
+        robot_asset_id: str,
+        robot_asset_sha256: str,
     ) -> EpisodeMeta:
         return cls(
             episode_id=str(uuid.uuid4()),
@@ -75,7 +64,6 @@ class EpisodeMeta:
             seed=seed,
             sim_dt=sim_dt,
             control_dt=control_dt,
-            chunk_len=chunk_len,
             created_utc=datetime.now(UTC).isoformat(),
             robot_asset_id=robot_asset_id,
             robot_asset_sha256=robot_asset_sha256,
@@ -90,12 +78,11 @@ class EpisodeStep:
     """One control tick (schema `steps[]` table)."""
 
     t: float
-    action: np.ndarray  # (EE_DELTA_DIM,) in meta.action_space
-    obs_ref: dict[str, float]  # inline low-dim state (no image tensors in Phase 2)
-    proprio: dict[str, np.ndarray]  # EE pose plus optional robot joint state
-    object_state: dict[str, float]  # door angle / angular velocity
-    contact: dict[str, Any]  # inferred contact flag + source tag
-    safety: dict[str, Any]  # adapter clamp flags
+    action: np.ndarray
+    proprio: dict[str, np.ndarray]
+    object_state: dict[str, float]
+    contact: dict[str, Any]
+    safety: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -120,7 +107,7 @@ class EpisodeOutcome:
 
 @dataclass
 class EpisodeBuffer:
-    """One recorded trial: meta + steps + outcome (+ Phase 2 extras)."""
+    """One recorded trial."""
 
     meta: EpisodeMeta
     steps: list[EpisodeStep] = field(default_factory=list)
@@ -147,17 +134,6 @@ class EpisodeBuffer:
         return len(self.steps)
 
     def stacked(self, getter) -> np.ndarray:
-        """Stack a per-step quantity (``getter(step) -> array-like``) into (N, ...)."""
         if not self.steps:
             return np.zeros((0,))
         return np.stack([np.asarray(getter(step), dtype=np.float64) for step in self.steps])
-
-
-__all__ = [
-    "LEGACY_TERMINATION_REASON",
-    "TERMINATION_REASONS",
-    "EpisodeBuffer",
-    "EpisodeMeta",
-    "EpisodeOutcome",
-    "EpisodeStep",
-]
