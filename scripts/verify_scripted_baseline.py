@@ -141,8 +141,8 @@ def _assert_artifacts(artifacts) -> None:
     metrics = json.loads(metrics_path.read_text())
     if metrics["aggregate"]["n_episodes"] != len(artifacts.episodes):
         raise RuntimeError(f"metrics.json episode count mismatch: {metrics_path}")
-    if artifacts.sanity is None or artifacts.sanity["n_episodes_with_errors"]:
-        raise RuntimeError("Alex V2 sanity gate is missing or contains errors")
+    if artifacts.sanity["n_episodes_with_errors"]:
+        raise RuntimeError("Alex V2 sanity gate contains errors")
 
 
 def _assert_exports(artifacts, env) -> None:

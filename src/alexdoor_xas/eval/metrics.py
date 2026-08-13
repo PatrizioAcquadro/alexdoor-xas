@@ -1,4 +1,4 @@
-"""Rollout metrics for recorded episodes (pure numpy over the episode schema)."""
+"""Operational metrics for recorded episodes."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from alexdoor_xas.recording import EpisodeBuffer
 
 
 def episode_metrics(episode: EpisodeBuffer) -> dict[str, Any]:
-    """Per-episode scalar metrics; requires a finished episode."""
+    """Compute the scalar metrics used by scripted runs."""
     if episode.outcome is None:
         raise ValueError("episode outcome must be set before computing metrics")
 
@@ -23,8 +23,6 @@ def episode_metrics(episode: EpisodeBuffer) -> dict[str, Any]:
     contact = np.array([bool(step.contact["sensed"]) for step in episode.steps], dtype=bool)
     forces = np.array([float(step.contact["force_n"]) for step in episode.steps], dtype=np.float64)
     sensed_forces = forces[contact]
-    phases = [str(step.safety["controller_phase"]) for step in episode.steps]
-
     success_angle = _success_angle(episode)
     time_to_threshold = None
     if angles.size and success_angle is not None:
@@ -47,45 +45,12 @@ def episode_metrics(episode: EpisodeBuffer) -> dict[str, Any]:
         "duration_s": float(times[-1] + episode.meta.control_dt) if episode.n_steps else 0.0,
         "contact_ticks": int(contact.sum()),
         "mean_contact_force_n": float(sensed_forces.mean()) if sensed_forces.size else None,
-        **_force_metrics(episode, forces, contact, times, phases),
-        "phase_ticks": dict(Counter(phases)),
-    }
-
-
-def _force_metrics(
-    episode: EpisodeBuffer,
-    forces: np.ndarray,
-    contact: np.ndarray,
-    times: np.ndarray,
-    phases: list[str],
-) -> dict[str, Any]:
-    """Force statistics over sensed-contact ticks."""
-    sensed = forces[contact]
-    if not sensed.size:
-        return {
-            "max_contact_force_n": None,
-            "p95_contact_force_n": None,
-            "max_force_t_s": None,
-            "max_force_phase": None,
-            "first_contact_t_s": None,
-            "contact_force_impulse_ns": None,
-        }
-    peak = int(np.argmax(np.where(contact, forces, -np.inf)))
-    first = int(np.nonzero(contact)[0][0])
-    return {
-        "max_contact_force_n": float(sensed.max()),
-        "p95_contact_force_n": float(np.percentile(sensed, 95)),
-        "max_force_t_s": float(times[peak]),
-        "max_force_phase": phases[peak],
-        "first_contact_t_s": float(times[first]),
-        # Sensed force integrated over the episode (N*s): a cheap contact-quality
-        # scalar — sustained gentle pushes and short hard hits separate cleanly.
-        "contact_force_impulse_ns": float(sensed.sum() * episode.meta.control_dt),
+        "max_contact_force_n": float(sensed_forces.max()) if sensed_forces.size else None,
     }
 
 
 def aggregate_metrics(per_episode: list[dict[str, Any]]) -> dict[str, Any]:
-    """Aggregate per-episode metrics into one run summary."""
+    """Aggregate one scripted run."""
     if not per_episode:
         return {"n_episodes": 0}
     finals = np.array([m["final_door_angle_rad"] for m in per_episode], dtype=np.float64)
@@ -107,13 +72,11 @@ def aggregate_metrics(per_episode: list[dict[str, Any]]) -> dict[str, Any]:
         "mean_time_to_threshold_s": float(np.mean(times)) if times else None,
         "termination_reasons": dict(termination_counts),
     }
-    # Force block only for runs with force-sensed episodes.
-    force_eps = [m for m in per_episode if m.get("mean_contact_force_n") is not None]
+    force_eps = [m for m in per_episode if m["mean_contact_force_n"] is not None]
     if force_eps:
         summary["contact_force_n"] = {
             "mean_of_means": float(np.mean([m["mean_contact_force_n"] for m in force_eps])),
             "max": float(np.max([m["max_contact_force_n"] for m in force_eps])),
-            "p95_max": float(np.max([m["p95_contact_force_n"] for m in force_eps])),
             "mean_contact_ticks": float(np.mean([m["contact_ticks"] for m in force_eps])),
         }
     return summary

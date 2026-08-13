@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -19,9 +19,8 @@ from alexdoor_xas.eval.metrics import aggregate_metrics, episode_metrics
 from alexdoor_xas.eval.plots import door_angle_plot, final_angle_plot
 from alexdoor_xas.eval.report import write_run_report
 from alexdoor_xas.eval.sanity import (
-    FORCE_DATASET_LIMIT_N,
     check_alex_episode,
-    contact_force_diagnostics,
+    contact_force_summary,
 )
 from alexdoor_xas.policies.scripted import DoorPushControllerCfg, VariationBounds
 from alexdoor_xas.recording import EpisodeBuffer, write_episode
@@ -31,8 +30,6 @@ VIDEO_FPS = 60
 
 @dataclass
 class RunArtifacts:
-    """Everything one baseline run produced (paths + in-memory results)."""
-
     run_dir: Path
     episodes: list[EpisodeBuffer]
     per_episode_metrics: list[dict[str, Any]]
@@ -41,8 +38,8 @@ class RunArtifacts:
     plots: dict[str, Path]
     videos: dict[str, Any]
     report_path: Path
-    limitations: list[str] = field(default_factory=list)
-    sanity: dict[str, Any] | None = None
+    limitations: list[str]
+    sanity: dict[str, Any]
 
 
 def run_baseline(
@@ -119,12 +116,12 @@ def run_baseline(
 
     sanity = _run_sanity_checks(episodes, metrics_dir)
     limitations = list(engine_cfg.limitations)
-    if sanity is not None and sanity["n_episodes_with_warnings"]:
+    if sanity["n_episodes_with_warnings"]:
         limitations.append(
             f"Sanity warnings on {sanity['n_episodes_with_warnings']} episode(s) "
             f"(see metrics/sanity.json)"
         )
-    if sanity is not None and sanity["n_episodes_with_errors"]:
+    if sanity["n_episodes_with_errors"]:
         failing = [entry["seed"] for entry in sanity["episodes"] if entry["errors"]]
         raise RuntimeError(
             f"sanity checks failed on {sanity['n_episodes_with_errors']} episode(s) "
@@ -165,30 +162,19 @@ def run_baseline(
     )
 
 
-def _run_sanity_checks(episodes: list[EpisodeBuffer], metrics_dir: Path) -> dict[str, Any] | None:
-    """Validate Alex episodes and write their sanity evidence."""
+def _run_sanity_checks(episodes: list[EpisodeBuffer], metrics_dir: Path) -> dict[str, Any]:
     entries: list[dict[str, Any]] = []
     for episode in episodes:
-        is_alex = "joint_pos_limits" in episode.extras or (
-            bool(episode.steps) and "joint_pos" in episode.steps[0].proprio
-        )
-        if not is_alex:
-            continue
-        result = check_alex_episode(episode, force_error_n=FORCE_DATASET_LIMIT_N)
+        result = check_alex_episode(episode)
         entries.append(
             {
                 "episode_id": episode.meta.episode_id,
                 "seed": episode.meta.seed,
                 "errors": list(result.errors),
                 "warnings": list(result.warnings),
-                "force_diagnostics": contact_force_diagnostics(
-                    episode, force_limit_n=FORCE_DATASET_LIMIT_N
-                ),
-                "ik_clamp_telemetry": episode.extras.get("ik_clamp_telemetry"),
+                "force": contact_force_summary(episode),
             }
         )
-    if not entries:
-        return None
     summary = {
         "n_episodes_checked": len(entries),
         "n_episodes_with_errors": sum(1 for entry in entries if entry["errors"]),

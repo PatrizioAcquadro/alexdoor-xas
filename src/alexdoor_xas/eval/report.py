@@ -1,4 +1,4 @@
-"""Per-run Phase 2 report/manifest (markdown) summarizing one baseline run."""
+"""Scripted-run Markdown report."""
 
 from __future__ import annotations
 
@@ -16,12 +16,12 @@ def write_run_report(
     episodes: list[EpisodeBuffer],
     per_episode_metrics: list[dict[str, Any]],
     aggregate: dict[str, Any],
-    exports: dict[str, Path] | None,
-    plots: dict[str, Path] | None,
-    videos: dict[str, Any] | None,
+    exports: dict[str, Path],
+    plots: dict[str, Path],
+    videos: dict[str, Any],
     limitations: list[str],
 ) -> Path:
-    """Write the run manifest; returns the report path."""
+    """Write one scripted-run report."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     meta = episodes[0].meta if episodes else None
@@ -39,14 +39,13 @@ def write_run_report(
             "",
         ]
 
-    has_force = any(m.get("mean_contact_force_n") is not None for m in per_episode_metrics)
     lines += ["## Episodes", ""]
-    header = "| seed | randomized | steps | final angle (deg) | success | termination |"
-    rule = "|------|-----------|-------|-------------------|---------|-------------|"
-    if has_force:
-        header += " contact ticks | mean force (N) | max force (N) |"
-        rule += "---------------|----------------|---------------|"
-    lines += [header, rule]
+    lines += [
+        "| seed | randomized | steps | final angle (deg) | success | termination | "
+        "contact ticks | mean force (N) | max force (N) |",
+        "|------|-----------|-------|-------------------|---------|-------------|"
+        "---------------|----------------|---------------|",
+    ]
     for m in per_episode_metrics:
         final_deg = (
             f"{math.degrees(m['final_door_angle_rad']):.1f}"
@@ -58,41 +57,39 @@ def write_run_report(
             f"| {final_deg} | {'yes' if m['success'] else 'no'} "
             f"| {m['termination_reason']} |"
         )
-        if has_force:
-            row += (
-                f" {m['contact_ticks']} | {_force_cell(m['mean_contact_force_n'])} "
-                f"| {_force_cell(m['max_contact_force_n'])} |"
-            )
+        row += (
+            f" {m['contact_ticks']} | {_force_cell(m['mean_contact_force_n'])} "
+            f"| {_force_cell(m['max_contact_force_n'])} |"
+        )
         lines.append(row)
 
     lines += ["", "## Aggregate metrics", "", "```json", json.dumps(aggregate, indent=2), "```", ""]
 
     lines += ["## Dataset exports", ""]
-    if exports:
-        for action_space, directory in exports.items():
-            lines.append(f"- `{action_space}` → `{directory}`")
-    else:
+    for action_space, directory in exports.items():
+        lines.append(f"- `{action_space}` → `{directory}`")
+    if not exports:
         lines.append("- none")
-    a1_note = _a1_status_note(episodes, exports)
+    a1_note = _a1_status_note(exports)
     if a1_note:
         lines.append(a1_note)
     lines.append("")
 
     lines += ["## Plots", ""]
-    for name, plot_path in (plots or {}).items():
+    for name, plot_path in plots.items():
         lines.append(f"- {name}: `{plot_path}`")
     lines.append("")
 
     lines += ["## Videos", ""]
-    if videos and videos.get("files"):
+    if videos.get("files"):
         for video in videos["files"]:
             lines.append(f"- `{video}`")
     else:
-        reason = (videos or {}).get("status", "not requested")
+        reason = videos.get("status", "not requested")
         lines.append(f"- none ({reason})")
     lines.append("")
 
-    lines += ["## Limitations / placeholders", ""]
+    lines += ["## Limitations", ""]
     lines += [f"- {item}" for item in limitations]
     lines.append("")
 
@@ -100,22 +97,15 @@ def write_run_report(
     return path
 
 
-def _a1_status_note(episodes: list[EpisodeBuffer], exports: dict[str, Path] | None) -> str | None:
-    """A1 status line: nothing when exported, otherwise say why it is missing."""
+def _a1_status_note(exports: dict[str, Path]) -> str | None:
     from alexdoor_xas.action.spaces import A1_JOINT_DELTA
 
-    if exports and A1_JOINT_DELTA in exports:
+    if A1_JOINT_DELTA in exports:
         return None
-    has_joint_targets = bool(
-        episodes and episodes[0].steps and "joint_pos_target" in episodes[0].steps[0].proprio
+    return (
+        f"- `{A1_JOINT_DELTA}`: **not exported in this run** — recorded joint targets "
+        "keep A1 relabelable."
     )
-    if has_joint_targets:
-        return (
-            f"- `{A1_JOINT_DELTA}`: **not exported in this run** — episodes record per-tick "
-            "joint positions/velocities/targets, so A1 is relabelable "
-            "(see knowledge/wiki/topics/action-representations-and-adapters.md)."
-        )
-    return f"- `{A1_JOINT_DELTA}`: **not exported** — joint targets were not recorded."
 
 
 def _force_cell(value: float | None) -> str:

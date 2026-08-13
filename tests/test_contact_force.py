@@ -1,7 +1,8 @@
-"""Raw-contact and terminal-force contracts."""
+"""Raw-contact and force-admission contracts."""
 
 from __future__ import annotations
 
+import dataclasses
 import math
 
 import pytest
@@ -12,7 +13,7 @@ from alexdoor_xas.envs.door_task.contact_force import sum_actor_contact_force
 from alexdoor_xas.eval.sanity import (
     FORCE_DATASET_LIMIT_N,
     check_alex_episode,
-    contact_force_diagnostics,
+    contact_force_summary,
 )
 from conftest import FakeDoorPushEnv, make_test_engine_cfg
 
@@ -33,6 +34,16 @@ def _inputs():
         torch.tensor([10, 99, 20, 99]),
         10,
     )
+
+
+def _episode():
+    return run_episode(FakeDoorPushEnv(), plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
+
+
+def _set_step_force(episode, force_n: float) -> None:
+    contact = dict(episode.steps[3].contact)
+    contact["force_n"] = force_n
+    episode.steps[3] = dataclasses.replace(episode.steps[3], contact=contact)
 
 
 def test_sum_actor_contact_force_selects_exact_actor() -> None:
@@ -63,59 +74,70 @@ def test_sum_actor_contact_force_rejects_invalid_active_data() -> None:
         sum_actor_contact_force(*inputs)
 
 
-def _episode():
-    return run_episode(FakeDoorPushEnv(), plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
-
-
-def test_terminal_contact_recorded_with_alignment() -> None:
+def test_terminal_contact_is_recorded_and_summarized() -> None:
     episode = _episode()
     terminal = episode.extras["terminal_contact"]
+    summary = contact_force_summary(episode)
+
     assert math.isfinite(terminal["force_n"]) and terminal["force_n"] >= 0.0
     assert isinstance(terminal["sensed"], bool)
     assert terminal["t"] == pytest.approx(episode.n_steps * episode.meta.control_dt)
-    assert "response to" in terminal["alignment"]
-    assert "pre-action" in terminal["alignment"]
+    assert set(summary) == {
+        "force_limit_n",
+        "max_force_n",
+        "max_force_tick",
+        "non_finite_ticks",
+        "negative_ticks",
+        "over_limit_ticks",
+        "terminal",
+    }
+    assert summary["terminal"]["within_limit"] is True
+    assert check_alex_episode(episode).ok
 
 
-def test_terminal_force_spike_fails_admission() -> None:
+@pytest.mark.parametrize(
+    ("force_n", "summary_key", "error_text"),
+    [
+        (float("nan"), "non_finite_ticks", "non-finite contact force"),
+        (-2.5, "negative_ticks", "force magnitude is negative"),
+        (FORCE_DATASET_LIMIT_N + 1.0, "over_limit_ticks", "admission limit"),
+    ],
+)
+def test_step_force_gate_rejects_invalid_values(force_n, summary_key, error_text) -> None:
     episode = _episode()
-    episode.extras["terminal_contact"]["force_n"] = FORCE_DATASET_LIMIT_N + 50.0
-    diagnostics = contact_force_diagnostics(episode, force_limit_n=FORCE_DATASET_LIMIT_N)
-    assert diagnostics["terminal"]["within_limit"] is False
-    assert diagnostics["force_admission_passed"] is False
-    result = check_alex_episode(episode, force_error_n=FORCE_DATASET_LIMIT_N)
-    assert any("terminal contact force" in error for error in result.errors)
-    assert diagnostics["ticks_over_limit"] == []
+    _set_step_force(episode, force_n)
+
+    assert contact_force_summary(episode)[summary_key] == [3]
+    assert any(error_text in error for error in check_alex_episode(episode).errors)
 
 
-def test_terminal_force_within_bound_passes() -> None:
+@pytest.mark.parametrize(
+    ("force_n", "error_text"),
+    [
+        (float("nan"), "non-finite"),
+        (-1.0, "magnitude is negative"),
+        (FORCE_DATASET_LIMIT_N + 1.0, "admission limit"),
+    ],
+)
+def test_terminal_force_gate_rejects_invalid_values(force_n, error_text) -> None:
     episode = _episode()
-    diagnostics = contact_force_diagnostics(episode, force_limit_n=FORCE_DATASET_LIMIT_N)
-    assert diagnostics["terminal"]["passed"] is True
-    assert diagnostics["force_admission_passed"] is True
-    assert check_alex_episode(episode, force_error_n=FORCE_DATASET_LIMIT_N).ok
+    episode.extras["terminal_contact"]["force_n"] = force_n
+
+    assert contact_force_summary(episode)["terminal"]["within_limit"] is False
+    assert any(error_text in error for error in check_alex_episode(episode).errors)
 
 
-def test_non_finite_terminal_force_is_an_error() -> None:
+def test_force_limit_is_inclusive() -> None:
     episode = _episode()
-    episode.extras["terminal_contact"]["force_n"] = float("nan")
-    diagnostics = contact_force_diagnostics(episode, force_limit_n=FORCE_DATASET_LIMIT_N)
-    assert diagnostics["terminal"]["finite"] is False
-    assert diagnostics["force_admission_passed"] is False
-    assert any("non-finite" in error for error in check_alex_episode(episode).errors)
+    _set_step_force(episode, FORCE_DATASET_LIMIT_N)
+
+    assert contact_force_summary(episode)["over_limit_ticks"] == []
+    assert check_alex_episode(episode).ok
 
 
-def test_legacy_episode_without_terminal_sample_stays_readable() -> None:
+def test_legacy_episode_without_terminal_contact_remains_valid() -> None:
     episode = _episode()
     del episode.extras["terminal_contact"]
-    diagnostics = contact_force_diagnostics(episode, force_limit_n=FORCE_DATASET_LIMIT_N)
-    assert diagnostics["terminal"] is None
-    assert diagnostics["force_admission_passed"] is True
 
-
-def test_terminal_over_warn_without_error_limit_warns() -> None:
-    episode = _episode()
-    episode.extras["terminal_contact"]["force_n"] = FORCE_DATASET_LIMIT_N + 1.0
-    result = check_alex_episode(episode)
-    assert result.ok
-    assert any("terminal contact force spiked" in warning for warning in result.warnings)
+    assert contact_force_summary(episode)["terminal"] is None
+    assert check_alex_episode(episode).ok

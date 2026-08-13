@@ -100,7 +100,10 @@ def validate_episode(record: EpisodeRecord, expected_space: str | None = None) -
         if not np.isfinite(array).all():
             result.errors.append(f"{label}: non-finite obs {key!r} values")
     _check_timestamps(record.t, control_dt, result, label)
-    _check_contact_semantics(record, result, label)
+    _check_contact_flags(record, result, label)
+    is_alex = "joint_pos" in record.obs
+    if not is_alex:
+        _check_contact_semantics(record, result, label)
     try:
         obs_matrix(record, "core")
     except ValueError as exc:
@@ -108,8 +111,7 @@ def validate_episode(record: EpisodeRecord, expected_space: str | None = None) -
 
     _check_termination_data(record, result, label, legacy=record.schema_version != SCHEMA_VERSION)
 
-    # Alex V2 force-sensing episodes get the full rollout sanity checks.
-    if "joint_pos" in record.obs:
+    if is_alex:
         sanity = check_alex_episode(record.buffer)
         _merge(result, sanity)
 
@@ -316,11 +318,6 @@ def _check_timestamps(
 
 
 def _check_contact_semantics(record: EpisodeRecord, result: SanityResult, label: str) -> None:
-    for key in ("inferred", "sensed"):
-        if key in record.obs:
-            values = np.asarray(record.obs[key])
-            if not np.isin(values, (0.0, 1.0)).all():
-                result.errors.append(f"{label}: contact flag {key!r} must be binary")
     for i, step in enumerate(record.buffer.steps):
         source = step.contact.get("source")
         if source not in EXPECTED_CONTACT_SOURCES:
@@ -352,6 +349,14 @@ def _check_contact_semantics(record: EpisodeRecord, result: SanityResult, label:
                 "force-sensor fields"
             )
             break
+
+
+def _check_contact_flags(record: EpisodeRecord, result: SanityResult, label: str) -> None:
+    for key in ("inferred", "sensed"):
+        if key in record.obs:
+            values = np.asarray(record.obs[key])
+            if not np.isin(values, (0.0, 1.0)).all():
+                result.errors.append(f"{label}: contact flag {key!r} must be binary")
 
 
 def _check_a3_actions(record: EpisodeRecord, result: SanityResult, label: str) -> None:

@@ -412,7 +412,6 @@ def test_run_baseline_writes_sanity_summary_and_respects_no_export(tmp_path) -> 
     )
     assert artifacts.exports == {}
     assert not (tmp_path / "datasets").exists()
-    assert artifacts.sanity is not None
     assert artifacts.sanity["n_episodes_checked"] == 1
     assert artifacts.sanity["n_episodes_with_errors"] == 0
     summary = json.loads((artifacts.run_dir / "metrics" / "sanity.json").read_text())

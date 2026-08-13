@@ -175,13 +175,12 @@ def main() -> int:
                 "[export] skipped (run.export=false); episodes stay in the runtime cache",
                 flush=True,
             )
-        if artifacts.sanity is not None:
-            print(
-                f"[sanity] episodes_checked={artifacts.sanity['n_episodes_checked']} "
-                f"warnings={artifacts.sanity['n_episodes_with_warnings']} "
-                f"errors={artifacts.sanity['n_episodes_with_errors']}",
-                flush=True,
-            )
+        print(
+            f"[sanity] episodes_checked={artifacts.sanity['n_episodes_checked']} "
+            f"warnings={artifacts.sanity['n_episodes_with_warnings']} "
+            f"errors={artifacts.sanity['n_episodes_with_errors']}",
+            flush=True,
+        )
         agg = artifacts.aggregate
         print(
             f"[metrics] episodes={agg['n_episodes']} "

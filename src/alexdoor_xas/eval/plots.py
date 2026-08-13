@@ -1,4 +1,4 @@
-"""Phase 2 plots: door angle vs. time and final-angle summary (matplotlib/Agg)."""
+"""Scripted-run plots."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from alexdoor_xas.recording import EpisodeBuffer
 
 
 def door_angle_plot(episodes: list[EpisodeBuffer], path: str | Path) -> Path:
-    """Overlay door angle vs. time for all episodes, with the success threshold."""
+    """Plot door angle over time."""
     plt = _matplotlib()
     fig, ax = plt.subplots(figsize=(8, 4.5))
 
@@ -32,11 +32,11 @@ def door_angle_plot(episodes: list[EpisodeBuffer], path: str | Path) -> Path:
     ax.set_ylabel("door angle (deg)")
     ax.set_title("Scripted door push: door angle vs. time")
     ax.legend(fontsize=8, loc="lower right")
-    return _save(fig, path)
+    return _save(plt, fig, path)
 
 
 def final_angle_plot(episodes: list[EpisodeBuffer], path: str | Path) -> Path:
-    """Final door angle per episode, colored by success."""
+    """Plot final door angle by episode."""
     plt = _matplotlib()
     fig, ax = plt.subplots(figsize=(8, 4.5))
 
@@ -54,7 +54,7 @@ def final_angle_plot(episodes: list[EpisodeBuffer], path: str | Path) -> Path:
     ax.set_xlabel("episode seed")
     ax.set_ylabel("final door angle (deg)")
     ax.set_title("Scripted door push: final door angle per episode")
-    return _save(fig, path)
+    return _save(plt, fig, path)
 
 
 def _matplotlib():
@@ -66,11 +66,14 @@ def _matplotlib():
     return plt
 
 
-def _save(fig, path: str | Path) -> Path:
+def _save(plt, fig, path: str | Path) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    fig.tight_layout()
-    fig.savefig(path, dpi=150)
+    try:
+        fig.tight_layout()
+        fig.savefig(path, dpi=150)
+    finally:
+        plt.close(fig)
     return path
 
 
