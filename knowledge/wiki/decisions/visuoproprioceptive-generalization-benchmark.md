@@ -203,13 +203,22 @@ claim transfer from pushing directly to handle operation or other objects.
 
 ## Implementation Order
 
-1. Correct and complete the learned A1/A4 action, dataset, and execution
+1. Collect and qualify candidate door assets.
+2. Freeze the 24 accepted assets, 12/4/8 split, sealed test set, and primary
+   success angle.
+3. Build the multi-door environment, cameras, and Replicator path.
+4. Select the visual backbone and train and freeze the door-frame and
+   articulation-state estimator.
+5. Correct and complete the learned A1/A4 action, dataset, and execution
    contracts.
-2. Build the licensed asset registry, qualification procedure, cameras,
-   Replicator path, and frozen perception stack.
-3. Run the train/development pilot and freeze its calibrated values.
-4. Generate the matched B1 dataset and train the 40 ACT/Diffusion checkpoints.
-5. Run the sealed evaluation and report the generalization results.
+6. Run the train/development data-generation pilot.
+7. Freeze the remaining dataset and protocol values and generate the final
+   matched B1 dataset.
+8. Train the 40 ACT/Diffusion checkpoints.
+9. Run ID, GEO, POSE, LIGHT, DYN, and COMPOUND evaluation.
+
+The execution plan and the gate for each step are recorded in
+[[implementation_phases/phase-4-visuoproprioceptive-generalization-benchmark|Phase 4 — Visuoproprioceptive Generalization Benchmark]].
 
 ## Status
 

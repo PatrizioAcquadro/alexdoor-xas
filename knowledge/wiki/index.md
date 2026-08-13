@@ -1,6 +1,6 @@
 # AlexDoor-XAS Technical Wiki
 
-Current pages describe only the maintained repository. Implementation-phase and experiment pages are concise historical records; they do not define active workflows.
+Current topic pages describe only the maintained repository. Implementation-phase pages distinguish planned work from concise historical records; experiment pages retain durable completed results.
 
 ## Project Status
 
@@ -8,11 +8,12 @@ Current pages describe only the maintained repository. Implementation-phase and 
 
 ## Implementation Phases
 
-Historical development records:
+Planned and historical development records:
 
 - [[implementation_phases/phase-1-project-and-simulation-readiness|Phase 1 — Project and Simulation Readiness]] — Initial package, dependency, and simulator foundation.
 - [[implementation_phases/phase-2-scripted-baseline-and-data-engine|Phase 2 — Scripted Baseline and Data Engine]] — Scripted execution, recording, and matched export foundation.
 - [[implementation_phases/phase-3-non-vla-learned-baselines|Phase 3 — Non-VLA Learned Baselines]] — State-only policy, adapter, and evaluation foundation.
+- [[implementation_phases/phase-4-visuoproprioceptive-generalization-benchmark|Phase 4 — Visuoproprioceptive Generalization Benchmark]] — Planned nine-step construction and execution of B1.
 - [[implementation_phases/extra-01-alex-v2-migration|Extra 01 — Alex V2 Migration]] — Migration from provisional assumptions to fixed-base Alex V2.
 - [[implementation_phases/extra-02-local-stabilization|Extra 02 — Local Stabilization]] — Closed-loop and force-semantics stabilization.
 - [[implementation_phases/extra-03-gilbreth-compatibility-pilot|Extra 03 — Gilbreth Compatibility Pilot]] — Completed two-cell A100 compatibility check.

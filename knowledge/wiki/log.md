@@ -335,3 +335,13 @@ matched data, OOD tiers, success criteria, metrics, release, and implementation 
 
 Verified wiki links, complete index coverage, planned-versus-current wording,
 Markdown whitespace, and unchanged user-owned raw and historical pages.
+
+## 2026-08-13 — update : Phase 4 implementation plan
+
+Corrected the B1 implementation order and defined nine gated subphases from
+licensed asset qualification through the sealed generalization evaluation.
+
+## 2026-08-13 — lint : Phase 4 implementation plan
+
+Verified nine-subphase structure, wiki links, index coverage, repository paths,
+planned-versus-current wording, Markdown whitespace, and protected raw boundaries.
