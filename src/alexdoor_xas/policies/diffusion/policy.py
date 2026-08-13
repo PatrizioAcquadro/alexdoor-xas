@@ -12,12 +12,12 @@ from alexdoor_xas.assets.alex_v2_contract import (
     RobotAssetRef,
     assert_checkpoint_runtime_compatible,
 )
-from alexdoor_xas.dataset import DatasetNormStats
+from alexdoor_xas.dataset.normalize import DatasetNormStats
 from alexdoor_xas.policies.common.obs import (
     OBS_CLIP,
-    ROLLOUT_OBS_PRESETS,
     build_rollout_obs,
     read_door_pose_obs,
+    validate_obs_preset,
 )
 from alexdoor_xas.policies.diffusion.checkpoint import load_checkpoint
 from alexdoor_xas.policies.diffusion.data import MinMaxNormalizer
@@ -146,11 +146,7 @@ def diffusion_chunk_source(
     every Ta ticks. ``n_action_steps=None`` executes the whole chunk.
     """
     preset = obs_preset or policy.obs_preset
-    if preset not in ROLLOUT_OBS_PRESETS:
-        raise ValueError(
-            f"obs preset {preset!r} has no closed-loop env reader "
-            f"(supported: {list(ROLLOUT_OBS_PRESETS)})"
-        )
+    validate_obs_preset(preset)
     steps = policy.chunk_size if n_action_steps is None else int(n_action_steps)
     if not 1 <= steps <= policy.chunk_size:
         raise ValueError(f"n_action_steps must be in [1, {policy.chunk_size}], got {steps}")

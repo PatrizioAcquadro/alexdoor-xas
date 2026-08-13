@@ -1,4 +1,4 @@
-"""Pure tests for the Phase 3.0 dataset/model interface (loader -> batches)."""
+"""Tests for A1-A4 loading, validation, normalization, and batching."""
 
 from __future__ import annotations
 
@@ -17,29 +17,25 @@ from alexdoor_xas.action.spaces import (
     A2_EE_DELTA,
     A3_OBJ_REL_EE_DELTA,
     A4_OBJ_CENTRIC_CHUNK,
+    A4_PHASE_VOCAB,
     EE_DELTA_DIM,
 )
 from alexdoor_xas.data_engine import export_datasets, plan_episodes, run_episode
-from alexdoor_xas.dataset import (
-    A4_FEATURE_DIM,
-    A4_PHASE_VOCAB,
-    STD_FLOOR,
-    A4ChunkDataset,
-    BatchIterator,
-    ChunkSampler,
-    EpisodeDataset,
+from alexdoor_xas.dataset.loader import A4ChunkDataset, EpisodeDataset, obs_matrix
+from alexdoor_xas.dataset.normalize import (
     compute_norm_stats,
-    episode_chunk_features,
     load_norm_stats,
     norm_stats_path,
-    obs_matrix,
     save_norm_stats,
-    splits_path,
+    validate_norm_stats,
+)
+from alexdoor_xas.dataset.sampling import BatchIterator, ChunkSampler
+from alexdoor_xas.dataset.splits import splits_path
+from alexdoor_xas.dataset.validate import (
+    validate_a4_dataset,
     validate_dataset,
-    validate_dataset_dir,
     validate_episode,
     validate_matched_action_space_datasets,
-    validate_norm_stats,
 )
 from conftest import FakeDoorPushEnv, FakeForceDoorPushEnv, make_test_engine_cfg
 
@@ -109,9 +105,6 @@ def alex_a2(alex_exports) -> EpisodeDataset:
     return EpisodeDataset(alex_exports[A2_EE_DELTA])
 
 
-# ── loading ───────────────────────────────────────────────────────────────────
-
-
 def test_dataset_loads_records_with_stacked_arrays(synthetic_a2) -> None:
     assert len(synthetic_a2) == N_EPISODES
     assert synthetic_a2.action_space == A2_EE_DELTA
@@ -147,49 +140,23 @@ def test_episode_ids_shared_across_action_spaces(alex_exports) -> None:
     assert a4_ids == reference
 
 
-# ── observation presets ───────────────────────────────────────────────────────
-
-
 def test_core_preset_is_9dim_everywhere(synthetic_a2, alex_a2) -> None:
     for dataset in (synthetic_a2, alex_a2):
-        obs = dataset.obs(0, "core")
+        obs = obs_matrix(dataset[0], "core")
         assert obs.shape == (dataset[0].n_steps, 9)
         assert np.isfinite(obs).all()
 
 
 def test_core_contact_uses_sensed_when_available(synthetic_a2, alex_a2) -> None:
-    assert synthetic_a2.obs(0, "core_contact").shape[1] == 10
-    alex_obs = alex_a2.obs(0, "core_contact")
+    assert obs_matrix(synthetic_a2[0], "core_contact").shape[1] == 10
+    alex_obs = obs_matrix(alex_a2[0], "core_contact")
     assert alex_obs.shape[1] == 10
     np.testing.assert_array_equal(alex_obs[:, -1], alex_a2[0].obs["sensed"])
 
 
-def test_alex_full_preset_requires_force_sensing_episodes(synthetic_a2, alex_a2) -> None:
-    n_joints = FakeForceDoorPushEnv.N_JOINTS
-    assert alex_a2.obs(0, "alex_full").shape[1] == 2 * n_joints + 11
-    with pytest.raises(ValueError, match="alex_full"):
-        synthetic_a2.obs(0, "alex_full")
+def test_unknown_obs_preset_is_rejected(synthetic_a2) -> None:
     with pytest.raises(ValueError, match="unknown obs preset"):
-        synthetic_a2.obs(0, "nope")
-
-
-def test_frozen_presets_stay_bit_compatible() -> None:
-    """The Phase 3.0 preset freeze: key tuples must never change (additive-only)."""
-    from alexdoor_xas.dataset import OBS_PRESETS
-
-    assert OBS_PRESETS["core"] == (
-        "ee_pos_w",
-        "ee_quat_w_xyzw",
-        "door_angle_rad",
-        "door_angular_velocity_rad_s",
-    )
-    assert OBS_PRESETS["core_contact"] == OBS_PRESETS["core"] + ("contact_flag",)
-    assert OBS_PRESETS["alex_full"] == OBS_PRESETS["core"] + (
-        "joint_pos",
-        "joint_vel",
-        "force_n",
-        "sensed",
-    )
+        obs_matrix(synthetic_a2[0], "nope")
 
 
 def test_core_door_pose_preset_is_14dim_and_encodes_yaw(tmp_path) -> None:
@@ -202,11 +169,11 @@ def test_core_door_pose_preset_is_14dim_and_encodes_yaw(tmp_path) -> None:
     )
     exported = export_datasets([episode], tmp_path, version="v0")
     dataset = EpisodeDataset(exported[A2_EE_DELTA])
-    obs = dataset.obs(0, "core_door_pose")
+    obs = obs_matrix(dataset[0], "core_door_pose")
     assert obs.shape == (dataset[0].n_steps, 14)
     assert np.isfinite(obs).all()
     # First 9 dims identical to core; door-pose block is constant per episode.
-    np.testing.assert_array_equal(obs[:, :9], dataset.obs(0, "core"))
+    np.testing.assert_array_equal(obs[:, :9], obs_matrix(dataset[0], "core"))
     np.testing.assert_allclose(obs[:, 9:12], np.tile(origin, (obs.shape[0], 1)), atol=1e-12)
     np.testing.assert_allclose(obs[:, 12], np.sin(yaw), atol=1e-12)
     np.testing.assert_allclose(obs[:, 13], np.cos(yaw), atol=1e-12)
@@ -227,20 +194,12 @@ def test_core_door_pose_preset_fails_clearly_on_old_episodes(alex_a2) -> None:
         obs_matrix(old_record, "core_door_pose")
 
 
-# ── A4 ────────────────────────────────────────────────────────────────────────
-
-
-def test_a4_dataset_parses_chunks_and_encodes_features(alex_exports) -> None:
+def test_a4_dataset_parses_and_validates_chunks(alex_exports) -> None:
     a4 = A4ChunkDataset(alex_exports[A4_OBJ_CENTRIC_CHUNK])
     assert len(a4) == N_EPISODES
     record = a4[0]
     assert record.chunks and all(c.phase in A4_PHASE_VOCAB for c in record.chunks)
-    features = episode_chunk_features(record)
-    assert features.shape == (len(record.chunks), A4_FEATURE_DIM)
-    assert np.isfinite(features).all()
-    # One-hot block sums to 1 per chunk; duration column is positive seconds.
-    np.testing.assert_array_equal(features[:, : len(A4_PHASE_VOCAB)].sum(axis=1), 1.0)
-    assert (features[:, -1] > 0).all()
+    assert validate_a4_dataset(a4).ok
 
 
 def test_a4_validation_fails_closed_on_missing_outcome(alex_exports, tmp_path) -> None:
@@ -250,10 +209,8 @@ def test_a4_validation_fails_closed_on_missing_outcome(alex_exports, tmp_path) -
     records[0]["outcome"] = None
     _write_jsonl_records(jsonl, records)
 
-    result = validate_dataset_dir(a4_dir)
-
-    assert not result.ok
-    assert any("outcome" in error for error in result.errors)
+    with pytest.raises(ValueError, match="outcome"):
+        A4ChunkDataset(a4_dir)
 
 
 def test_a4_validation_rejects_duplicate_ids(alex_exports, tmp_path) -> None:
@@ -263,10 +220,10 @@ def test_a4_validation_rejects_duplicate_ids(alex_exports, tmp_path) -> None:
     records[1]["meta"]["episode_id"] = records[0]["meta"]["episode_id"]
     _write_jsonl_records(jsonl, records)
 
-    result = validate_dataset_dir(a4_dir)
+    result = validate_a4_dataset(A4ChunkDataset(a4_dir))
 
     assert not result.ok
-    assert any("duplicate A4 episode ids" in error for error in result.errors)
+    assert any("duplicate episode ids" in error for error in result.errors)
 
 
 def test_a4_validation_rejects_bad_target_width(alex_exports, tmp_path) -> None:
@@ -276,14 +233,10 @@ def test_a4_validation_rejects_bad_target_width(alex_exports, tmp_path) -> None:
     records[0]["chunks"][0]["contact_target_panel"] = [0.1, 0.2]
     _write_jsonl_records(jsonl, records)
 
-    result = validate_dataset_dir(a4_dir)
+    result = validate_a4_dataset(A4ChunkDataset(a4_dir))
 
     assert not result.ok
     assert any("contact_target_panel" in error for error in result.errors)
-    assert any("A4 feature encoding" in error for error in result.errors)
-
-
-# ── validation ────────────────────────────────────────────────────────────────
 
 
 def test_validate_passes_on_exported_datasets(synthetic_a2, alex_a2, alex_exports) -> None:
@@ -370,7 +323,7 @@ def test_validate_rejects_mislabeled_a3_actions(alex_exports) -> None:
     assert any("action_door_frame" in error for error in result.errors)
 
 
-def test_validate_dataset_dir_reports_malformed_meta_and_action_rank(
+def test_validate_dataset_reports_malformed_meta_and_action_rank(
     synthetic_exports, tmp_path
 ) -> None:
     dataset_dir = _copy_dataset(synthetic_exports[A2_EE_DELTA], tmp_path, "bad_meta")
@@ -379,7 +332,7 @@ def test_validate_dataset_dir_reports_malformed_meta_and_action_rank(
     del meta["action_space"]
     meta_path.write_text(json.dumps(meta) + "\n")
 
-    result = validate_dataset_dir(dataset_dir)
+    result = validate_dataset(EpisodeDataset(dataset_dir))
     assert not result.ok
     assert any("action_space" in error for error in result.errors)
 
@@ -393,7 +346,7 @@ def test_validate_dataset_dir_reports_malformed_meta_and_action_rank(
         del h5["steps/action"]
         h5["steps"].create_dataset("action", data=np.zeros(n_steps))
 
-    result = validate_dataset_dir(rank_dir)
+    result = validate_dataset(EpisodeDataset(rank_dir))
     assert not result.ok
     assert any("rank 2" in error for error in result.errors)
 
@@ -416,17 +369,12 @@ def test_matched_action_space_validation_rejects_same_id_mismatched_content(alex
     assert any("core low-dim observations differ" in error for error in result.errors)
 
 
-# ── normalization ─────────────────────────────────────────────────────────────
-
-
-def test_norm_stats_roundtrip_and_zero_std_guard(synthetic_a2, tmp_path) -> None:
+def test_norm_stats_roundtrip_and_positive_std(synthetic_a2, tmp_path) -> None:
     train_ids = synthetic_a2.episode_ids[:3]
     stats = compute_norm_stats(synthetic_a2, train_ids)
     assert stats.action.dim == EE_DELTA_DIM
     assert stats.obs.dim == 9 and stats.obs_preset == "core"
-    # The synthetic test double never actuates rotations: those dims are constant zero -> floored.
-    assert (stats.action.std[3:] == STD_FLOOR).all()
-    assert (stats.action.std[:3] > STD_FLOOR).any()
+    assert (stats.action.std > 0.0).all()
 
     actions = synthetic_a2[0].actions
     np.testing.assert_allclose(
@@ -475,35 +423,32 @@ def test_norm_stats_validation_rejects_stale_or_wrong_dimension_stats(synthetic_
     )
 
 
-# ── scripts ───────────────────────────────────────────────────────────────────
-
-
-def test_verify_dataset_interface_default_does_not_rewrite_artifacts(
-    alex_exports, tmp_path
-) -> None:
+def test_verify_dataset_interface_default_does_not_rewrite_artifacts(alex_exports) -> None:
     verify = _load_script("scripts/verify_dataset_interface.py")
     root = alex_exports[A2_EE_DELTA].parents[2]
-    split_file = splits_path(root, "door_push", "v0")
-    split_file.parent.mkdir(parents=True, exist_ok=True)
-    split_file.write_text("sentinel split\n")
-    stats_file = norm_stats_path(alex_exports[A2_EE_DELTA])
-    stats_file.write_text("sentinel stats\n")
-
     args = argparse.Namespace(
         datasets_root=root,
         version="v0",
         horizon=20,
         batch_size=8,
         seed=0,
-        write_artifacts=False,
-        artifacts_root=tmp_path / "gate_tmp",
+        write_artifacts=True,
     )
+    assert verify.verify_task(args, "door_push") == []
+
+    artifact_paths = [splits_path(root, "door_push", "v0")]
+    artifact_paths.extend(
+        norm_stats_path(path)
+        for space, path in alex_exports.items()
+        if space != A4_OBJ_CENTRIC_CHUNK
+    )
+    before = {path: path.read_bytes() for path in artifact_paths}
+    args.write_artifacts = False
 
     failures = verify.verify_task(args, "door_push")
 
     assert failures == []
-    assert split_file.read_text() == "sentinel split\n"
-    assert stats_file.read_text() == "sentinel stats\n"
+    assert {path: path.read_bytes() for path in artifact_paths} == before
 
 
 def test_verify_dataset_interface_requires_a4_by_default(alex_exports, tmp_path) -> None:
@@ -519,7 +464,6 @@ def test_verify_dataset_interface_requires_a4_by_default(alex_exports, tmp_path)
         batch_size=8,
         seed=0,
         write_artifacts=False,
-        artifacts_root=tmp_path / "gate_tmp",
     )
 
     failures = verify.verify_task(args, "door_push")
@@ -527,9 +471,6 @@ def test_verify_dataset_interface_requires_a4_by_default(alex_exports, tmp_path)
     assert any(
         "missing required" in failure and A4_OBJ_CENTRIC_CHUNK in failure for failure in failures
     )
-
-
-# ── chunk sampling + batching ─────────────────────────────────────────────────
 
 
 def test_chunk_sampler_windows_and_pads(synthetic_a2) -> None:
@@ -540,24 +481,23 @@ def test_chunk_sampler_windows_and_pads(synthetic_a2) -> None:
 
     record = synthetic_a2[0]
     mid = sampler.sample(5)
-    assert mid.episode_id == record.episode_id and mid.t_index == 5
     np.testing.assert_array_equal(mid.actions, record.actions[5 : 5 + horizon])
     assert not mid.is_pad.any()
     np.testing.assert_array_equal(mid.obs, obs_matrix(record, "core")[5])
 
-    last = sampler.sample(record.n_steps - 1)  # 1 valid action, H-1 padded
-    assert last.t_index == record.n_steps - 1
+    last = sampler.sample(record.n_steps - 1)
     np.testing.assert_array_equal(last.actions[0], record.actions[-1])
     assert not last.is_pad[0] and last.is_pad[1:].all()
     assert (last.actions[1:] == 0.0).all()
 
 
 def test_chunk_sampler_respects_split_restriction(synthetic_a2) -> None:
-    chosen = synthetic_a2.episode_ids[:2]
+    chosen = [synthetic_a2.episode_ids[1]]
     sampler = ChunkSampler(synthetic_a2, horizon=4, episode_ids=chosen)
     assert len(sampler) == sum(synthetic_a2.by_id(e).n_steps for e in chosen)
-    seen = {sampler.sample(i).episode_id for i in range(len(sampler))}
-    assert seen == set(chosen)
+    np.testing.assert_array_equal(
+        sampler.sample(0).actions[0], synthetic_a2.by_id(chosen[0]).actions[0]
+    )
 
 
 def test_batch_iterator_is_seeded_and_shaped(synthetic_a2) -> None:
@@ -569,18 +509,12 @@ def test_batch_iterator_is_seeded_and_shaped(synthetic_a2) -> None:
     for a, b in zip(first_pass, second_pass, strict=True):
         np.testing.assert_array_equal(a["obs"], b["obs"])
         np.testing.assert_array_equal(a["actions"], b["actions"])
-        np.testing.assert_array_equal(a["t"], b["t"])
-        np.testing.assert_array_equal(a["t_index"], b["t_index"])
-        np.testing.assert_array_equal(a["t_s"], b["t_s"])
-        assert a["episode_ids"] == b["episode_ids"]
+        np.testing.assert_array_equal(a["is_pad"], b["is_pad"])
 
     batch = first_pass[0]
+    assert set(batch) == {"obs", "actions", "is_pad"}
     assert batch["obs"].shape == (16, 9)
     assert batch["actions"].shape == (16, 8, EE_DELTA_DIM)
     assert batch["is_pad"].shape == (16, 8) and batch["is_pad"].dtype == bool
-    np.testing.assert_array_equal(batch["t"], batch["t_index"])
-    assert batch["t_s"].shape == (16,)
-    assert batch["action_space"] == A2_EE_DELTA
-
     dropped = list(BatchIterator(sampler, batch_size=100, seed=0, drop_last=True))
     assert all(b["obs"].shape[0] == 100 for b in dropped)

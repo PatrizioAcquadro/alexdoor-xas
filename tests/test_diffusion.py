@@ -22,7 +22,8 @@ from alexdoor_xas.adapters.rollout import (  # noqa: E402
     rollout_chunks,
 )
 from alexdoor_xas.assets.alex_v2_contract import RobotAssetRef  # noqa: E402
-from alexdoor_xas.dataset import DatasetNormStats, EpisodeRecord, NormStats  # noqa: E402
+from alexdoor_xas.dataset.loader import EpisodeRecord  # noqa: E402
+from alexdoor_xas.dataset.normalize import DatasetNormStats, NormStats  # noqa: E402
 from alexdoor_xas.policies.common.inspect import open_loop_report  # noqa: E402
 from alexdoor_xas.policies.diffusion.checkpoint import (  # noqa: E402
     CHECKPOINT_FORMAT,
@@ -778,8 +779,8 @@ def test_diffusion_chunk_source_validates_inputs() -> None:
     env = FakeDoorPushEnv()
     env.reset()
     policy = _rollout_policy()
-    with pytest.raises(ValueError, match="no closed-loop env reader"):
-        diffusion_chunk_source(policy, env, obs_preset="alex_full")
+    with pytest.raises(ValueError, match="unknown obs preset"):
+        diffusion_chunk_source(policy, env, obs_preset="unsupported")
     with pytest.raises(ValueError, match="n_action_steps"):
         diffusion_chunk_source(policy, env, n_action_steps=TINY_MODEL_CFG.horizon + 1)
 

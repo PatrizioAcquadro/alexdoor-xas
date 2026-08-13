@@ -8,16 +8,13 @@ import numpy as np
 import torch
 
 from alexdoor_xas.action.frames import quat_to_rot_matrix
-from alexdoor_xas.dataset import OBS_PRESETS
+from alexdoor_xas.dataset.loader import OBS_PRESETS
 
 if TYPE_CHECKING:
     from alexdoor_xas.adapters.base import StepContext
 
 OBS_CLIP = 10.0
 """Bounds normalized observations when near-constant dimensions have tiny variance."""
-
-ROLLOUT_OBS_PRESETS = ("core", "core_contact", "core_door_pose")
-"""Observation presets with a verified closed-loop representation."""
 
 
 def _numpy(value) -> np.ndarray:
@@ -26,14 +23,9 @@ def _numpy(value) -> np.ndarray:
     return np.asarray(value)
 
 
-def _validate_preset(preset: str) -> None:
+def validate_obs_preset(preset: str) -> None:
     if preset not in OBS_PRESETS:
         raise ValueError(f"unknown obs preset {preset!r} (known: {sorted(OBS_PRESETS)})")
-    if preset not in ROLLOUT_OBS_PRESETS:
-        raise ValueError(
-            f"obs preset {preset!r} has no closed-loop reader "
-            f"(supported: {list(ROLLOUT_OBS_PRESETS)})"
-        )
 
 
 def build_rollout_obs(
@@ -42,7 +34,7 @@ def build_rollout_obs(
     door_pose: np.ndarray | None = None,
 ) -> np.ndarray:
     """Build a dataset-ordered observation from one validated state snapshot."""
-    _validate_preset(preset)
+    validate_obs_preset(preset)
     if ctx.ee_quat_w_xyzw is None:
         raise ValueError("rollout observation requires an end-effector orientation")
     parts = [
@@ -80,7 +72,7 @@ def read_door_pose_obs(env) -> np.ndarray:
 
 __all__ = [
     "OBS_CLIP",
-    "ROLLOUT_OBS_PRESETS",
     "build_rollout_obs",
     "read_door_pose_obs",
+    "validate_obs_preset",
 ]

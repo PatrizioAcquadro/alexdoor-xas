@@ -1,18 +1,6 @@
-"""Episode/dataset validation against the frozen Phase 2 schema (Phase 3.0).
-
-Confirms exported datasets are consumable by learned baselines *before* any
-training code exists: known schema version, action-space/directory agreement,
-action dimensionality, step-count and timestamp consistency, finite values,
-and the frozen ``core`` observation preset. Force-sensing (Alex) episodes are
-additionally passed through the existing rollout sanity checks
-(:func:`alexdoor_xas.eval.sanity.check_alex_episode`) — deep joint/contact
-validation is not duplicated here.
-"""
+"""Validate dataset integrity and matched A1-A4 semantics."""
 
 from __future__ import annotations
-
-from dataclasses import dataclass, field
-from pathlib import Path
 
 import numpy as np
 
@@ -20,22 +8,27 @@ from alexdoor_xas.action.spaces import (
     A1_JOINT_DELTA,
     A2_EE_DELTA,
     A3_OBJ_REL_EE_DELTA,
+    A4_PHASE_VOCAB,
     EE_DELTA_DIM,
 )
-from alexdoor_xas.eval.sanity import check_alex_episode
-from alexdoor_xas.recording import LEGACY_TERMINATION_REASON, TERMINATION_REASONS
+from alexdoor_xas.eval.sanity import SanityResult, check_alex_episode
+from alexdoor_xas.recording import (
+    LEGACY_SCHEMA_VERSIONS,
+    LEGACY_TERMINATION_REASON,
+    SCHEMA_VERSION,
+    TERMINATION_REASONS,
+)
 
 from .loader import (
     A4ChunkDataset,
     A4EpisodeRecord,
     EpisodeDataset,
     EpisodeRecord,
-    expected_action_space,
+    _expected_action_space,
     obs_matrix,
 )
-from .sampling import A4_FEATURE_DIM, A4_PHASE_VOCAB, episode_chunk_features
 
-KNOWN_SCHEMA_VERSIONS = ("phase2.v0", "phase2.v1", "phase2.v2")
+_KNOWN_SCHEMA_VERSIONS = (*LEGACY_SCHEMA_VERSIONS, SCHEMA_VERSION)
 REQUIRED_DATASET_META_KEYS = (
     "task",
     "action_space",
@@ -45,46 +38,19 @@ REQUIRED_DATASET_META_KEYS = (
     "scene",
     "policy",
 )
-REQUIRED_EPISODE_META_KEYS = (
-    "episode_id",
-    "task",
-    "action_space",
-    "robot",
-    "scene",
-    "policy",
-    "seed",
-    "control_dt",
-)
 EXPECTED_CONTACT_SOURCES = ("inferred_geometric", "force_sensor+geometric")
 TIMESTAMP_ATOL_S = 1e-7
 
 
-@dataclass
-class ValidationResult:
-    """Hard failures + soft warnings (same shape as ``eval.sanity.SanityResult``)."""
-
-    errors: list[str] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
-
-    @property
-    def ok(self) -> bool:
-        return not self.errors
-
-    def merge(self, other: ValidationResult) -> None:
-        self.errors.extend(other.errors)
-        self.warnings.extend(other.warnings)
-
-
-def validate_episode(record: EpisodeRecord, expected_space: str | None = None) -> ValidationResult:
+def validate_episode(record: EpisodeRecord, expected_space: str | None = None) -> SanityResult:
     """Validate one loaded episode against the frozen schema contract."""
-    result = ValidationResult()
+    result = SanityResult()
     label = f"episode {record.episode_id[:8]}"
-    _check_required_keys(record.meta, REQUIRED_EPISODE_META_KEYS, label, result)
 
-    if record.schema_version not in KNOWN_SCHEMA_VERSIONS:
+    if record.schema_version not in _KNOWN_SCHEMA_VERSIONS:
         result.errors.append(
             f"{label}: unknown schema_version {record.schema_version!r} "
-            f"(known: {KNOWN_SCHEMA_VERSIONS})"
+            f"(known: {_KNOWN_SCHEMA_VERSIONS})"
         )
     if expected_space is not None and record.action_space != expected_space:
         result.errors.append(
@@ -135,88 +101,48 @@ def validate_episode(record: EpisodeRecord, expected_space: str | None = None) -
             result.errors.append(f"{label}: non-finite obs {key!r} values")
     _check_timestamps(record.t, control_dt, result, label)
     _check_contact_semantics(record, result, label)
-    _check_obs_ref_consistency(record, result, label)
-
     try:
         obs_matrix(record, "core")
     except ValueError as exc:
         result.errors.append(f"{label}: core obs preset failed: {exc}")
 
-    _check_termination_data(record, result, label, legacy=record.schema_version != "phase2.v2")
+    _check_termination_data(record, result, label, legacy=record.schema_version != SCHEMA_VERSION)
 
     # Alex V2 force-sensing episodes get the full rollout sanity checks.
     if "joint_pos" in record.obs:
         sanity = check_alex_episode(record.buffer)
-        result.errors.extend(sanity.errors)
-        result.warnings.extend(sanity.warnings)
+        _merge(result, sanity)
 
     return result
 
 
-def validate_dataset(
-    dataset: EpisodeDataset, expected_space: str | None = None
-) -> ValidationResult:
+def validate_dataset(dataset: EpisodeDataset, expected_space: str | None = None) -> SanityResult:
     """Validate every episode plus dataset-level consistency."""
-    result = ValidationResult()
-    expected_space = expected_space or expected_action_space(dataset.dataset_dir)
-    _check_required_keys(dataset.meta, REQUIRED_DATASET_META_KEYS, "meta.json", result)
-    dataset_space = dataset.meta.get("action_space")
-
-    if expected_space is not None and dataset_space != expected_space:
-        result.errors.append(
-            f"meta.json action_space {dataset_space!r} does not match the "
-            f"directory tag {expected_space!r}"
-        )
-    try:
-        n_declared = int(dataset.meta.get("n_episodes", -1))
-    except (TypeError, ValueError):
-        n_declared = -1
-        result.errors.append("meta.json n_episodes must be an integer")
-    if n_declared != len(dataset):
-        result.errors.append(f"meta.json declares {n_declared} episodes, found {len(dataset)}")
-    ids = dataset.episode_ids
-    if len(set(ids)) != len(ids):
-        result.errors.append("duplicate episode ids in dataset")
+    result = SanityResult()
+    expected_space = expected_space or _expected_action_space(dataset.dataset_dir)
+    _check_dataset_header(dataset, expected_space, result)
 
     dims = {record.action_dim for record in dataset.records if np.asarray(record.actions).ndim == 2}
     if len(dims) > 1:
         result.errors.append(f"episodes disagree on action dim: {sorted(dims)}")
 
     for record in dataset.records:
-        result.merge(validate_episode(record, expected_space))
+        _merge(result, validate_episode(record, expected_space))
     return result
 
 
-def validate_a4_dataset(
-    dataset: A4ChunkDataset, expected_space: str | None = None
-) -> ValidationResult:
+def validate_a4_dataset(dataset: A4ChunkDataset, expected_space: str | None = None) -> SanityResult:
     """Validate an A4 chunk dataset (chunks already parsed at load time)."""
-    result = ValidationResult()
-    expected_space = expected_space or expected_action_space(dataset.dataset_dir)
-    _check_required_keys(dataset.meta, REQUIRED_DATASET_META_KEYS, "meta.json", result)
+    result = SanityResult()
+    expected_space = expected_space or _expected_action_space(dataset.dataset_dir)
     dataset_space = dataset.meta.get("action_space")
-    if expected_space is not None and dataset_space != expected_space:
-        result.errors.append(
-            f"meta.json action_space {dataset_space!r} does not match the "
-            f"directory tag {expected_space!r}"
-        )
-    try:
-        n_declared = int(dataset.meta.get("n_episodes", -1))
-    except (TypeError, ValueError):
-        n_declared = -1
-        result.errors.append("meta.json n_episodes must be an integer")
-    if n_declared != len(dataset):
-        result.errors.append(f"meta.json declares {n_declared} episodes, found {len(dataset)}")
-    ids = dataset.episode_ids
-    duplicates = sorted({episode_id for episode_id in ids if ids.count(episode_id) > 1})
-    if duplicates:
-        result.errors.append(f"duplicate A4 episode ids: {duplicates}")
+    _check_dataset_header(dataset, expected_space, result)
 
     for record in dataset.records:
         label = f"episode {record.episode_id[:8]}"
-        if record.action_space != dataset.action_space:
+        if record.action_space != dataset_space:
             result.errors.append(
-                f"{label}: action_space {record.action_space!r} != dataset {dataset.action_space!r}"
+                f"{label}: action_space {record.action_space!r} != dataset {dataset_space!r}"
             )
         _check_a4_outcome(record, result, label)
         if not record.chunks:
@@ -237,18 +163,6 @@ def validate_a4_dataset(
             values = (*chunk.contact_target_panel, chunk.motion_hinge_delta_rad)
             if not np.isfinite(values).all():
                 result.errors.append(f"{label}: chunk {i} has non-finite values")
-        try:
-            features = episode_chunk_features(record)
-        except ValueError as exc:
-            result.errors.append(f"{label}: A4 feature encoding failed: {exc}")
-        else:
-            if features.ndim != 2 or features.shape[1] != A4_FEATURE_DIM:
-                result.errors.append(
-                    f"{label}: A4 feature encoding shape {features.shape} "
-                    f"!= (chunks, {A4_FEATURE_DIM})"
-                )
-            if not np.isfinite(features).all():
-                result.errors.append(f"{label}: A4 feature encoding has non-finite values")
         duration_ticks = sum(chunk.duration_ticks for chunk in record.chunks)
         if record.success and duration_ticks != record.n_steps:
             result.warnings.append(
@@ -258,32 +172,12 @@ def validate_a4_dataset(
     return result
 
 
-def validate_dataset_dir(dataset_dir: str | Path) -> ValidationResult:
-    """Open + validate one dataset directory with the right loader."""
-    from .loader import open_dataset
-
-    try:
-        dataset = open_dataset(dataset_dir)
-    except (OSError, ValueError, KeyError) as exc:
-        result = ValidationResult()
-        result.errors.append(f"{dataset_dir}: failed to open dataset: {exc}")
-        return result
-    try:
-        if isinstance(dataset, A4ChunkDataset):
-            return validate_a4_dataset(dataset)
-        return validate_dataset(dataset)
-    except (OSError, ValueError, KeyError, IndexError, TypeError) as exc:
-        result = ValidationResult()
-        result.errors.append(f"{dataset_dir}: failed to validate dataset: {exc}")
-        return result
-
-
 def validate_matched_action_space_datasets(
     hdf5_datasets: dict[str, EpisodeDataset],
     a4_dataset: A4ChunkDataset | None = None,
-) -> ValidationResult:
+) -> SanityResult:
     """Validate same-ID episodes are matched in content, not only set membership."""
-    result = ValidationResult()
+    result = SanityResult()
     if not hdf5_datasets:
         result.errors.append("no HDF5 datasets to compare")
         return result
@@ -291,15 +185,17 @@ def validate_matched_action_space_datasets(
     reference_space = next(iter(hdf5_datasets))
     reference = hdf5_datasets[reference_space]
     reference_ids = set(reference.episode_ids)
+    reference_by_id = {record.episode_id: record for record in reference.records}
     for space, dataset in hdf5_datasets.items():
         ids = set(dataset.episode_ids)
         if ids != reference_ids:
             result.errors.append(f"episode ids of {space} differ from {reference_space}")
             continue
+        candidate_by_id = {record.episode_id: record for record in dataset.records}
         for episode_id in sorted(reference_ids):
             _compare_hdf5_records(
-                reference.by_id(episode_id),
-                dataset.by_id(episode_id),
+                reference_by_id[episode_id],
+                candidate_by_id[episode_id],
                 reference_space,
                 space,
                 result,
@@ -309,17 +205,52 @@ def validate_matched_action_space_datasets(
         if ids != reference_ids:
             result.errors.append(f"episode ids of A4 differ from {reference_space}")
         else:
+            a4_by_id = {record.episode_id: record for record in a4_dataset.records}
             for episode_id in sorted(reference_ids):
                 _compare_a4_record(
-                    reference.by_id(episode_id),
-                    a4_dataset.by_id(episode_id),
+                    reference_by_id[episode_id],
+                    a4_by_id[episode_id],
                     reference_space,
                     result,
                 )
     return result
 
 
-def _check_action_dim(record: EpisodeRecord, result: ValidationResult, label: str) -> None:
+def _merge(result: SanityResult, other: SanityResult) -> None:
+    result.errors.extend(other.errors)
+    result.warnings.extend(other.warnings)
+
+
+def _check_dataset_header(
+    dataset: EpisodeDataset | A4ChunkDataset,
+    expected_space: str | None,
+    result: SanityResult,
+) -> None:
+    _check_required_keys(dataset.meta, REQUIRED_DATASET_META_KEYS, "meta.json", result)
+    dataset_space = dataset.meta.get("action_space")
+    if expected_space is not None and dataset_space != expected_space:
+        result.errors.append(
+            f"meta.json action_space {dataset_space!r} does not match "
+            f"directory tag {expected_space!r}"
+        )
+    try:
+        n_declared = int(dataset.meta.get("n_episodes", -1))
+    except (TypeError, ValueError):
+        result.errors.append("meta.json n_episodes must be an integer")
+    else:
+        if n_declared != len(dataset):
+            result.errors.append(f"meta.json declares {n_declared} episodes, found {len(dataset)}")
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for episode_id in dataset.episode_ids:
+        if episode_id in seen:
+            duplicates.add(episode_id)
+        seen.add(episode_id)
+    if duplicates:
+        result.errors.append(f"duplicate episode ids: {sorted(duplicates)}")
+
+
+def _check_action_dim(record: EpisodeRecord, result: SanityResult, label: str) -> None:
     if record.action_space in (A2_EE_DELTA, A3_OBJ_REL_EE_DELTA):
         if record.action_dim != EE_DELTA_DIM:
             result.errors.append(
@@ -340,7 +271,7 @@ def _check_action_dim(record: EpisodeRecord, result: ValidationResult, label: st
 
 
 def _check_required_keys(
-    data: dict[str, object], keys: tuple[str, ...], label: str, result: ValidationResult
+    data: dict[str, object], keys: tuple[str, ...], label: str, result: SanityResult
 ) -> None:
     missing = [key for key in keys if key not in data]
     if missing:
@@ -348,7 +279,7 @@ def _check_required_keys(
 
 
 def _positive_finite_control_dt(
-    meta: dict[str, object], label: str, result: ValidationResult
+    meta: dict[str, object], label: str, result: SanityResult
 ) -> float | None:
     if "control_dt" not in meta:
         return None
@@ -364,7 +295,7 @@ def _positive_finite_control_dt(
 
 
 def _check_timestamps(
-    t: np.ndarray, control_dt: float | None, result: ValidationResult, label: str
+    t: np.ndarray, control_dt: float | None, result: SanityResult, label: str
 ) -> None:
     t = np.asarray(t, dtype=np.float64)
     if not np.isfinite(t).all():
@@ -384,7 +315,7 @@ def _check_timestamps(
             )
 
 
-def _check_contact_semantics(record: EpisodeRecord, result: ValidationResult, label: str) -> None:
+def _check_contact_semantics(record: EpisodeRecord, result: SanityResult, label: str) -> None:
     for key in ("inferred", "sensed"):
         if key in record.obs:
             values = np.asarray(record.obs[key])
@@ -423,33 +354,7 @@ def _check_contact_semantics(record: EpisodeRecord, result: ValidationResult, la
             break
 
 
-def _check_obs_ref_consistency(record: EpisodeRecord, result: ValidationResult, label: str) -> None:
-    if not record.buffer.steps:
-        return
-    comparisons = (
-        ("door_angle_rad", "object_state", "door_angle_rad"),
-        ("door_angular_velocity_rad_s", "object_state", "door_angular_velocity_rad_s"),
-        ("ee_pos_x_m", "proprio", "ee_pos_w", 0),
-        ("ee_pos_y_m", "proprio", "ee_pos_w", 1),
-        ("ee_pos_z_m", "proprio", "ee_pos_w", 2),
-    )
-    for spec in comparisons:
-        obs_ref_key, table, key, *index = spec
-        values = []
-        refs = []
-        for step in record.buffer.steps:
-            if obs_ref_key not in step.obs_ref or key not in getattr(step, table):
-                continue
-            value = getattr(step, table)[key]
-            if index:
-                value = np.asarray(value, dtype=np.float64)[index[0]]
-            values.append(float(value))
-            refs.append(float(step.obs_ref[obs_ref_key]))
-        if values and not np.allclose(values, refs, rtol=1e-6, atol=1e-9):
-            result.errors.append(f"{label}: obs_ref {obs_ref_key!r} disagrees with {table}.{key}")
-
-
-def _check_a3_actions(record: EpisodeRecord, result: ValidationResult, label: str) -> None:
+def _check_a3_actions(record: EpisodeRecord, result: SanityResult, label: str) -> None:
     expected = record.extras.get("action_door_frame")
     if expected is None:
         result.warnings.append(f"{label}: A3 episode has no action_door_frame extra")
@@ -473,7 +378,7 @@ def _check_a3_actions(record: EpisodeRecord, result: ValidationResult, label: st
         result.errors.append(f"{label}: A3 door_frame_quat_w_xyzw must be normalized")
 
 
-def _check_a4_outcome(record: A4EpisodeRecord, result: ValidationResult, label: str) -> None:
+def _check_a4_outcome(record: A4EpisodeRecord, result: SanityResult, label: str) -> None:
     _positive_finite_control_dt(record.meta, label, result)
     if not np.isfinite(record.final_door_angle):
         result.errors.append(f"{label}: final_door_angle must be finite")
@@ -484,7 +389,7 @@ def _check_a4_outcome(record: A4EpisodeRecord, result: ValidationResult, label: 
     )
 
 
-def _check_termination_data(record, result: ValidationResult, label: str, *, legacy: bool) -> None:
+def _check_termination_data(record, result: SanityResult, label: str, *, legacy: bool) -> None:
     allowed = (*TERMINATION_REASONS, LEGACY_TERMINATION_REASON)
     if record.termination_reason not in allowed:
         result.errors.append(f"{label}: unknown termination_reason {record.termination_reason!r}")
@@ -510,7 +415,7 @@ def _compare_hdf5_records(
     candidate: EpisodeRecord,
     reference_space: str,
     candidate_space: str,
-    result: ValidationResult,
+    result: SanityResult,
 ) -> None:
     if reference is candidate or reference_space == candidate_space:
         return
@@ -556,7 +461,7 @@ def _compare_a4_record(
     reference: EpisodeRecord,
     candidate: A4EpisodeRecord,
     reference_space: str,
-    result: ValidationResult,
+    result: SanityResult,
 ) -> None:
     label = f"episode {reference.episode_id[:8]} A4 vs {reference_space}"
     for key in ("seed", "robot", "scene", "policy"):
@@ -583,14 +488,3 @@ def _compare_a4_record(
         candidate.environment_truncated,
     ):
         result.errors.append(f"{label}: factual termination data differs")
-
-
-__all__ = [
-    "KNOWN_SCHEMA_VERSIONS",
-    "ValidationResult",
-    "validate_a4_dataset",
-    "validate_dataset",
-    "validate_dataset_dir",
-    "validate_episode",
-    "validate_matched_action_space_datasets",
-]

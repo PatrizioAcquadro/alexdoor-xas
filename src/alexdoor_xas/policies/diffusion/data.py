@@ -17,7 +17,7 @@ from typing import Any
 
 import numpy as np
 
-from alexdoor_xas.dataset import DatasetNormStats, NormStats
+from alexdoor_xas.dataset.normalize import DatasetNormStats, NormStats
 from alexdoor_xas.policies.common.data import (
     PolicyData,
     load_policy_data,

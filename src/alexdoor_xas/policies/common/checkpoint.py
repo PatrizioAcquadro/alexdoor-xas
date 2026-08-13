@@ -12,7 +12,7 @@ import torch
 
 from alexdoor_xas import paths
 from alexdoor_xas.assets.alex_v2_contract import RobotAssetRef
-from alexdoor_xas.dataset import DatasetNormStats, NormStats
+from alexdoor_xas.dataset.normalize import DatasetNormStats, NormStats
 from alexdoor_xas.policies.common.runs import torch_save_atomic
 
 DATASET_FIELDS = ("task", "space", "version", "obs_preset", "view_id")

@@ -18,7 +18,7 @@ from omegaconf import OmegaConf
 
 from alexdoor_xas import paths
 from alexdoor_xas.action.spaces import A2_EE_DELTA, A3_OBJ_REL_EE_DELTA
-from alexdoor_xas.dataset import OBS_PRESETS
+from alexdoor_xas.dataset.loader import OBS_PRESETS
 
 CONFIG_DIR: Path = paths.REPO_ROOT / "configs"
 CONFIG_NAME = "act"

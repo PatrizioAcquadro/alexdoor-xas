@@ -15,7 +15,7 @@ from typing import Any
 
 import torch
 
-from alexdoor_xas.dataset import collate_torch
+from alexdoor_xas.dataset.sampling import collate_torch
 from alexdoor_xas.policies.act.config import ActModelCfg, ActTrainCfg
 from alexdoor_xas.policies.act.model import ACTModel, act_loss
 from alexdoor_xas.policies.common.runs import capture_rng_states, restore_rng_states

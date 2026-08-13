@@ -12,14 +12,14 @@ from alexdoor_xas.assets.alex_v2_contract import (
     RobotAssetRef,
     assert_checkpoint_runtime_compatible,
 )
-from alexdoor_xas.dataset import DatasetNormStats
+from alexdoor_xas.dataset.normalize import DatasetNormStats
 from alexdoor_xas.policies.act.checkpoint import load_checkpoint
 from alexdoor_xas.policies.act.model import ACTModel
 from alexdoor_xas.policies.common.obs import (
     OBS_CLIP,
-    ROLLOUT_OBS_PRESETS,
     build_rollout_obs,
     read_door_pose_obs,
+    validate_obs_preset,
 )
 
 
@@ -111,11 +111,7 @@ def act_chunk_source(
     policy is queried every tick, per the ACT paper.
     """
     preset = obs_preset or policy.obs_preset
-    if preset not in ROLLOUT_OBS_PRESETS:
-        raise ValueError(
-            f"obs preset {preset!r} has no closed-loop env reader "
-            f"(supported: {list(ROLLOUT_OBS_PRESETS)})"
-        )
+    validate_obs_preset(preset)
     door_pose = read_door_pose_obs(env) if preset == "core_door_pose" else None
 
     if not temporal_ensemble:
@@ -141,7 +137,6 @@ def act_chunk_source(
 
 __all__ = [
     "OBS_CLIP",
-    "ROLLOUT_OBS_PRESETS",
     "ActPolicy",
     "act_chunk_source",
 ]

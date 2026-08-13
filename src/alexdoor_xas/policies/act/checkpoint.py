@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from alexdoor_xas.assets.alex_v2_contract import RobotAssetRef
-from alexdoor_xas.dataset import DatasetNormStats
+from alexdoor_xas.dataset.normalize import DatasetNormStats
 from alexdoor_xas.policies.act.config import ActModelCfg
 from alexdoor_xas.policies.act.model import ACTModel
 from alexdoor_xas.policies.common.checkpoint import (

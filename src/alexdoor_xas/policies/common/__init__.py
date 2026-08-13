@@ -23,15 +23,14 @@ from alexdoor_xas.policies.common.data import (
 from alexdoor_xas.policies.common.inspect import open_loop_report, predict_episode_open_loop
 from alexdoor_xas.policies.common.obs import (
     OBS_CLIP,
-    ROLLOUT_OBS_PRESETS,
     build_rollout_obs,
     read_door_pose_obs,
+    validate_obs_preset,
 )
 
 __all__ = [
     "EPOCH_SEED_STRIDE",
     "OBS_CLIP",
-    "ROLLOUT_OBS_PRESETS",
     "PolicyData",
     "PolicyDataError",
     "aggregate_closed_loop",
@@ -45,4 +44,5 @@ __all__ = [
     "predict_episode_open_loop",
     "protocol_rollouts",
     "read_door_pose_obs",
+    "validate_obs_preset",
 ]

@@ -1,12 +1,4 @@
-"""Chunk sampling and seeded batching for learned baselines (Phase 3.0).
-
-A2/A3/A1 samples follow the ACT convention: the observation at tick ``t`` plus
-the action window ``t .. t+H-1``, zero-padded past the episode end with
-``is_pad`` marking the padded slots. A4 episodes are already chunked
-(symbolic per-phase structs, ~7 per episode — **not** a per-tick tensor
-stream); they are exposed structurally plus an optional fixed-dim numeric
-encoding per chunk (:func:`chunk_features`).
-"""
+"""Sample padded action chunks and deterministic training batches."""
 
 from __future__ import annotations
 
@@ -15,13 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from alexdoor_xas.action.spaces import A4_PHASE_VOCAB, ObjectCentricChunk
-
-from .loader import DEFAULT_OBS_PRESET, A4EpisodeRecord, EpisodeDataset, obs_matrix
-
-A4_FEATURE_DIM = len(A4_PHASE_VOCAB) + 5
-"""Per-chunk numeric encoding: phase one-hot + contact_target_panel (3) +
-motion_hinge_delta_rad + duration_s."""
+from .loader import DEFAULT_OBS_PRESET, EpisodeDataset, obs_matrix
 
 
 @dataclass(frozen=True)
@@ -31,9 +17,6 @@ class ChunkSample:
     obs: np.ndarray  # (obs_dim,)
     actions: np.ndarray  # (H, D), zero-padded past the episode end
     is_pad: np.ndarray  # (H,) bool, True where the action is padding
-    episode_id: str
-    t_index: int
-    t_s: float
 
 
 class ChunkSampler:
@@ -85,20 +68,11 @@ class ChunkSampler:
             obs=self._obs[rec_idx][t],
             actions=actions,
             is_pad=is_pad,
-            episode_id=record.episode_id,
-            t_index=t,
-            t_s=float(record.t[t]),
         )
 
 
 class BatchIterator:
-    """Seeded single-pass batch iterator over a :class:`ChunkSampler`.
-
-    Yields dict batches: ``obs (B, obs_dim)``, ``actions (B, H, D)``,
-    ``is_pad (B, H)``, ``t (B,)``, ``episode_ids`` (list of str), and the
-    dataset's ``action_space`` tag. Iterating twice with the same seed yields
-    identical batches.
-    """
+    """Seeded single-pass batches of ``obs``, ``actions``, and ``is_pad``."""
 
     def __init__(
         self,
@@ -125,11 +99,6 @@ class BatchIterator:
                 "obs": np.stack([s.obs for s in samples]),
                 "actions": np.stack([s.actions for s in samples]),
                 "is_pad": np.stack([s.is_pad for s in samples]),
-                "t_index": np.array([s.t_index for s in samples], dtype=np.int64),
-                "t": np.array([s.t_index for s in samples], dtype=np.int64),
-                "t_s": np.array([s.t_s for s in samples], dtype=np.float64),
-                "episode_ids": [s.episode_id for s in samples],
-                "action_space": self.sampler.dataset.action_space,
             }
 
     def __len__(self) -> int:
@@ -137,29 +106,7 @@ class BatchIterator:
         return n_batches if (self.drop_last or remainder == 0) else n_batches + 1
 
 
-def chunk_features(chunk: ObjectCentricChunk, control_dt: float) -> np.ndarray:
-    """Fixed-dim numeric encoding of one A4 chunk (:data:`A4_FEATURE_DIM`,)."""
-    if chunk.phase not in A4_PHASE_VOCAB:
-        raise ValueError(f"unknown A4 phase {chunk.phase!r} (vocabulary: {A4_PHASE_VOCAB})")
-    one_hot = np.zeros(len(A4_PHASE_VOCAB), dtype=np.float64)
-    one_hot[A4_PHASE_VOCAB.index(chunk.phase)] = 1.0
-    return np.concatenate(
-        [
-            one_hot,
-            np.asarray(chunk.contact_target_panel, dtype=np.float64),
-            [chunk.motion_hinge_delta_rad, chunk.duration_ticks * control_dt],
-        ]
-    )
-
-
-def episode_chunk_features(record: A4EpisodeRecord) -> np.ndarray:
-    """Encode one A4 episode's chunk log as a ``(C, A4_FEATURE_DIM)`` matrix."""
-    if not record.chunks:
-        return np.zeros((0, A4_FEATURE_DIM), dtype=np.float64)
-    return np.stack([chunk_features(chunk, record.control_dt) for chunk in record.chunks])
-
-
-def collate_torch(batch: dict[str, Any]):  # pragma: no cover - exercised by the gate
+def collate_torch(batch: dict[str, Any]):
     """Convert a numpy batch to float32 torch tensors (torch is optional)."""
     import torch
 
@@ -169,15 +116,3 @@ def collate_torch(batch: dict[str, Any]):  # pragma: no cover - exercised by the
         else (torch.as_tensor(value) if isinstance(value, np.ndarray) else value)
         for key, value in batch.items()
     }
-
-
-__all__ = [
-    "A4_FEATURE_DIM",
-    "A4_PHASE_VOCAB",
-    "BatchIterator",
-    "ChunkSample",
-    "ChunkSampler",
-    "chunk_features",
-    "collate_torch",
-    "episode_chunk_features",
-]

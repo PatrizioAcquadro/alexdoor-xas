@@ -29,6 +29,7 @@ Deterministic tests cover data validation, normalization, checkpoint v2 loading 
 
 ## Version Notes
 
+- 2026-08-12 — Reduced the dataset layer to current A1-A4 validation and the three observation presets supported by ACT/Diffusion rollout.
 - 2026-08-12 — Made checkpoint loading Alex V2-only: older formats, unfingerprinted checkpoints, and cross-model transfer are rejected.
 - 2026-08-12 — Added canonical learned runs, complete resume state, compact output schemas, frozen multi-pose evaluation, and protocol-aware evaluation-only siblings.
 - 2026-08-11 — Removed Phase 3 provenance orchestration and introduced compact checkpoint v2.

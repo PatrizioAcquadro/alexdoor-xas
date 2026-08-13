@@ -238,3 +238,13 @@ plus the current-only A1 export requirement for the recorded final target.
 
 Verified wiki structure and links, source references, Markdown whitespace,
 protected raw boundaries, and removal of retired data-engine interfaces.
+
+## 2026-08-12 — update : Dataset pipeline simplification
+
+Documented the current A1-A4 readers, three supported observation presets,
+minimal batch contract, and read-only default dataset gate.
+
+## 2026-08-12 — lint : Dataset pipeline simplification
+
+Verified wiki structure and links, source references, Markdown whitespace,
+protected raw boundaries, and removal of retired dataset interfaces.

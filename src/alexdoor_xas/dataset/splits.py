@@ -1,50 +1,20 @@
-"""Deterministic train/val/test splits, shared across action spaces (Phase 3.0).
-
-Episode ids are identical across every action-space export of one generation
-pass (``data_engine/export.py`` relabels the same episodes in place), so splits
-are computed **once per task/version** and shared by A1–A4 — matched-condition
-action-space comparisons require it. The split file lives at
-``datasets/<task>/splits/<version>.json``; a re-export mints fresh episode ids,
-so re-exporting a version means regenerating its splits (same command, same
-result for the same seed).
-
-Split contract (post-Phase 3.3 review):
-
-- Episodes are grouped by **trajectory content** (:func:`episode_content_key`):
-  fixed-seed replicas of one deterministic rollout are numerically identical,
-  and a content-equivalent group must never cross a split boundary (train/test
-  leakage). Equivalence is exact byte equality of the recorded trajectory
-  arrays — provenance-only fields (episode id, seed, file path, timestamps)
-  are excluded, so near-but-not-identical trajectories never collapse.
-- Splits are **pose-stratified**: every door pose in the dataset must appear
-  in validation and test (and train) whenever it has enough independent
-  groups; otherwise split generation fails loudly.
-- Fractions are honored as closely as grouping and pose coverage allow; the
-  saved metadata records the requested vs. achieved sizes and the grouping so
-  the split is auditable after the fact.
-"""
+"""Create and load deterministic, leakage-safe dataset splits and views."""
 
 from __future__ import annotations
 
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-SPLIT_NAMES = ("train", "val", "test")
-DEFAULT_FRACTIONS = (0.75, 0.125, 0.125)
-DEFAULT_POSE_ID = "default"
-"""Pose stratum for episodes recorded without an explicit ``door_pose_id``."""
-
-GROUPING_STRATEGY = "content_sha256"
-"""Equivalence identity: sha256 over the episode's recorded trajectory content
-(step times, actions, every numeric per-step observation table, outcome).
-Episode ids, seeds, file paths, creation times, and split labels are excluded
-by construction."""
+_SPLIT_NAMES = ("train", "val", "test")
+_DEFAULT_FRACTIONS = (0.75, 0.125, 0.125)
+_DEFAULT_POSE_ID = "default"
+_GROUPING_STRATEGY = "content_sha256"
+_VIEW_SCHEMA = "alexdoor_xas.dataset_view.v1"
 
 
 @dataclass(frozen=True)
@@ -53,7 +23,7 @@ class SplitEntry:
 
     episode_id: str
     group_key: str
-    pose_id: str = DEFAULT_POSE_ID
+    pose_id: str = _DEFAULT_POSE_ID
 
 
 def episode_content_key(record) -> str:
@@ -86,7 +56,7 @@ def split_entries(dataset) -> list[SplitEntry]:
             SplitEntry(
                 episode_id=record.episode_id,
                 group_key=episode_content_key(record),
-                pose_id=str(pose) if pose else DEFAULT_POSE_ID,
+                pose_id=str(pose) if pose else _DEFAULT_POSE_ID,
             )
         )
     return entries
@@ -94,19 +64,10 @@ def split_entries(dataset) -> list[SplitEntry]:
 
 def make_grouped_splits(
     entries: list[SplitEntry],
-    fractions: tuple[float, float, float] = DEFAULT_FRACTIONS,
+    fractions: tuple[float, float, float] = _DEFAULT_FRACTIONS,
     seed: int = 0,
 ) -> tuple[dict[str, list[str]], dict[str, Any]]:
-    """Grouped, pose-stratified, deterministic splits.
-
-    Returns ``(splits, metadata)``. Invariants (all enforced, fail loudly):
-
-    - a content-equivalence group never crosses a split boundary;
-    - every pose contributes at least one group to each of train/val/test
-      (requires >= 3 groups per pose);
-    - splits are disjoint and exhaustive over the entries;
-    - the same entries + seed always produce the same result.
-    """
+    """Assign content groups to pose-stratified train/val/test splits."""
     _check_fractions(fractions)
     ids = [entry.episode_id for entry in entries]
     if len(set(ids)) != len(ids):
@@ -138,19 +99,19 @@ def make_grouped_splits(
     if n - n_val_target - n_test_target < 1:
         raise ValueError(f"fractions {fractions} leave no training episodes for n={n}")
 
-    short = {pose: len(keys) for pose, keys in pose_groups.items() if len(keys) < len(SPLIT_NAMES)}
+    short = {pose: len(keys) for pose, keys in pose_groups.items() if len(keys) < len(_SPLIT_NAMES)}
     if short:
         raise ValueError(
             "cannot stratify splits by pose: pose(s) "
             + ", ".join(f"{pose!r} ({count} independent groups)" for pose, count in short.items())
-            + f" need at least {len(SPLIT_NAMES)} content-equivalence groups each "
+            + f" need at least {len(_SPLIT_NAMES)} content-equivalence groups each "
             "(one per split); collect more independent episodes for these poses "
             "or drop them from the dataset"
         )
 
     rng = np.random.default_rng(seed)
     assigned: dict[str, str] = {}
-    counts = {name: 0 for name in SPLIT_NAMES}
+    counts = {name: 0 for name in _SPLIT_NAMES}
 
     def assign(key: str, split: str) -> None:
         assigned[key] = split
@@ -193,12 +154,12 @@ def make_grouped_splits(
             if split == name
             for member in groups[key]
         )
-        for name in SPLIT_NAMES
+        for name in _SPLIT_NAMES
     }
 
     per_pose: dict[str, Any] = {}
     for pose in sorted(pose_groups):
-        pose_counts = {name: 0 for name in SPLIT_NAMES}
+        pose_counts = {name: 0 for name in _SPLIT_NAMES}
         for key in pose_groups[pose]:
             pose_counts[assigned[key]] += len(groups[key])
         per_pose[pose] = {
@@ -208,7 +169,7 @@ def make_grouped_splits(
         }
     metadata = {
         "strategy": "grouped_pose_stratified",
-        "grouping": GROUPING_STRATEGY,
+        "grouping": _GROUPING_STRATEGY,
         "seed": seed,
         "fractions": list(fractions),
         "n_episodes": n,
@@ -218,7 +179,7 @@ def make_grouped_splits(
             "val": n_val_target,
             "test": n_test_target,
         },
-        "actual_sizes": {name: counts[name] for name in SPLIT_NAMES},
+        "actual_sizes": {name: counts[name] for name in _SPLIT_NAMES},
         "size_deviation": {
             "val": counts["val"] - n_val_target,
             "test": counts["test"] - n_test_target,
@@ -236,26 +197,6 @@ def make_grouped_splits(
     return splits, metadata
 
 
-def make_splits(
-    episode_ids: list[str],
-    fractions: tuple[float, float, float] = DEFAULT_FRACTIONS,
-    seed: int = 0,
-) -> dict[str, list[str]]:
-    """Id-only splits (every episode its own group, single pose stratum).
-
-    Only valid when every episode is known to be content-distinct — official
-    dataset splits must go through :func:`make_grouped_splits` with entries
-    from :func:`split_entries`, which enforces content grouping.
-    """
-    _check_fractions(fractions)
-    entries = [
-        SplitEntry(episode_id=str(episode_id), group_key=f"id:{episode_id}")
-        for episode_id in episode_ids
-    ]
-    splits, _ = make_grouped_splits(entries, fractions=fractions, seed=seed)
-    return splits
-
-
 def _check_fractions(fractions: tuple[float, float, float]) -> None:
     if len(fractions) != 3 or any(f <= 0 for f in fractions):
         raise ValueError(f"fractions must be 3 positive values, got {fractions}")
@@ -267,7 +208,7 @@ def assert_no_cross_split_duplicates(
     entries: list[SplitEntry], splits: dict[str, list[str]]
 ) -> None:
     """Fail if any content-equivalence group spans more than one split."""
-    membership = {eid: name for name in SPLIT_NAMES for eid in splits[name]}
+    membership = {eid: name for name in _SPLIT_NAMES for eid in splits[name]}
     group_splits: dict[str, set[str]] = {}
     for entry in entries:
         if entry.episode_id not in membership:
@@ -290,7 +231,7 @@ def save_splits(
     path: str | Path,
     splits: dict[str, list[str]],
     *,
-    fractions: tuple[float, float, float] = DEFAULT_FRACTIONS,
+    fractions: tuple[float, float, float] = _DEFAULT_FRACTIONS,
     seed: int = 0,
     metadata: dict[str, Any] | None = None,
 ) -> Path:
@@ -300,8 +241,7 @@ def save_splits(
         "fractions": list(fractions),
         "seed": seed,
         "n_episodes": sum(len(ids) for ids in splits.values()),
-        "splits": {name: splits[name] for name in SPLIT_NAMES},
-        "created_utc": datetime.now(UTC).isoformat(),
+        "splits": {name: splits[name] for name in _SPLIT_NAMES},
     }
     if metadata is not None:
         payload["metadata"] = metadata
@@ -311,38 +251,67 @@ def save_splits(
 
 def load_splits(path: str | Path, episode_ids: list[str] | None = None) -> dict[str, list[str]]:
     """Load a split file; if ``episode_ids`` is given, reject a stale file."""
-    payload = load_split_payload(path)
-    splits = {name: list(payload["splits"][name]) for name in SPLIT_NAMES}
+    target = Path(path)
+    splits = _parse_splits(json.loads(target.read_text()), target, "split file")
 
     all_ids = [eid for ids in splits.values() for eid in ids]
     if len(set(all_ids)) != len(all_ids):
-        raise ValueError(f"split file {path} has overlapping splits")
+        raise ValueError(f"split file {target} has overlapping splits")
     if episode_ids is not None and set(all_ids) != set(episode_ids):
         raise ValueError(
-            f"split file {path} does not match the dataset episodes — the dataset "
+            f"split file {target} does not match the dataset episodes — the dataset "
             "was re-exported; regenerate the splits"
         )
     return splits
 
 
-def load_split_payload(path: str | Path) -> dict[str, Any]:
-    """Raw split-file payload (splits + fingerprint + grouping metadata)."""
-    return json.loads(Path(path).read_text())
+def load_view_splits(
+    path: str | Path,
+    *,
+    view_id: str,
+    master_version: str,
+    episode_ids: list[str],
+) -> dict[str, list[str]]:
+    """Load one retained view and validate its master-dataset membership."""
+    target = Path(path)
+    payload = json.loads(target.read_text())
+    if not isinstance(payload, dict) or payload.get("schema") != _VIEW_SCHEMA:
+        raise ValueError(f"invalid dataset view schema: {target}")
+    if payload.get("view_id") != view_id:
+        raise ValueError("dataset view ID does not match its path")
+    if payload.get("master_version") != master_version:
+        raise ValueError("dataset view master version does not match dataset.version")
+    splits = _parse_splits(payload, target, "dataset view")
+    selected_ids = [episode_id for ids in splits.values() for episode_id in ids]
+    if len(selected_ids) != len(set(selected_ids)):
+        raise ValueError("dataset view has overlapping split memberships")
+    if not set(selected_ids).issubset(episode_ids):
+        raise ValueError("dataset view references episodes absent from the master")
+    return splits
 
 
-__all__ = [
-    "DEFAULT_FRACTIONS",
-    "DEFAULT_POSE_ID",
-    "GROUPING_STRATEGY",
-    "SPLIT_NAMES",
-    "SplitEntry",
-    "assert_no_cross_split_duplicates",
-    "episode_content_key",
-    "load_split_payload",
-    "load_splits",
-    "make_grouped_splits",
-    "make_splits",
-    "save_splits",
-    "split_entries",
-    "splits_path",
-]
+def _parse_splits(payload: Any, path: Path, label: str) -> dict[str, list[str]]:
+    try:
+        values = payload["splits"]
+        if not isinstance(values, dict):
+            raise TypeError
+        splits = {name: values[name] for name in _SPLIT_NAMES}
+        if not all(isinstance(ids, list) for ids in splits.values()):
+            raise TypeError
+    except (KeyError, TypeError) as error:
+        raise ValueError(f"{label} has invalid splits: {path}") from error
+    if not all(
+        isinstance(episode_id, str) and episode_id for ids in splits.values() for episode_id in ids
+    ):
+        raise ValueError(f"{label} split members must be non-empty episode IDs")
+    return splits
+
+
+def _safe_view_id(view_id: str) -> str:
+    if not isinstance(view_id, str) or not view_id or "/" in view_id or ".." in view_id:
+        raise ValueError("view_id must be a safe single path component")
+    return view_id
+
+
+def view_path(datasets_root: str | Path, task: str, view_id: str) -> Path:
+    return Path(datasets_root) / task / "splits" / f"{_safe_view_id(view_id)}.json"

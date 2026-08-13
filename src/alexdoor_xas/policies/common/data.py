@@ -17,25 +17,21 @@ from typing import Any
 
 from alexdoor_xas import paths
 from alexdoor_xas.assets.alex_v2_contract import AlexV2ContractError, RobotAssetRef
-from alexdoor_xas.dataset import (
-    BatchIterator,
-    ChunkSampler,
+from alexdoor_xas.dataset.loader import EpisodeDataset
+from alexdoor_xas.dataset.normalize import (
     DatasetNormStats,
-    EpisodeDataset,
     compute_norm_stats,
     load_norm_stats,
-    load_splits,
-    load_view_payload,
     norm_stats_path,
-    splits_path,
     validate_norm_stats,
     view_norm_stats_path,
-    view_path,
 )
 from alexdoor_xas.dataset.robot_asset import (
     load_dataset_robot_asset,
     validate_dataset_episode_robot_asset,
 )
+from alexdoor_xas.dataset.sampling import BatchIterator, ChunkSampler
+from alexdoor_xas.dataset.splits import load_splits, load_view_splits, splits_path, view_path
 
 EPOCH_SEED_STRIDE = 10_000
 """Per-epoch shuffle seed = ``train_seed * stride + epoch`` (fresh order every
@@ -108,17 +104,12 @@ def load_policy_data(cfg, datasets_root: str | Path = paths.DATASETS_DIR) -> Pol
         if selected_view is None:
             splits = load_splits(split_file, episode_ids=dataset.episode_ids)
         else:
-            view_payload = load_view_payload(split_file)
-            if view_payload.get("view_id") != selected_view:
-                raise ValueError("dataset view ID does not match its path")
-            if view_payload.get("master_version") != cfg.version:
-                raise ValueError("dataset view master version does not match dataset.version")
-            splits = {name: list(view_payload["splits"][name]) for name in ("train", "val", "test")}
-            selected_ids = [episode_id for ids in splits.values() for episode_id in ids]
-            if len(selected_ids) != len(set(selected_ids)):
-                raise ValueError("dataset view has overlapping split memberships")
-            if not set(selected_ids).issubset(dataset.episode_ids):
-                raise ValueError("dataset view references episodes absent from the master")
+            splits = load_view_splits(
+                split_file,
+                view_id=selected_view,
+                master_version=cfg.version,
+                episode_ids=dataset.episode_ids,
+            )
     except (OSError, KeyError, TypeError, ValueError) as error:
         raise PolicyDataError(f"stale or invalid splits file {split_file}: {error}") from error
     train_ids = list(splits["train"])

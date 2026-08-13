@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -15,22 +15,16 @@ from alexdoor_xas.assets.alex_v2_contract import (
 )
 
 
-def dataset_robot_asset_payload(episodes: Iterable[Any]) -> dict[str, Any] | None:
-    """Validate episode provenance and build the dataset-level payload.
-
-    An Alex V2 export must carry one identical reference on every episode and the
-    complete generated manifest in ``episode.extras['robot_asset_manifest']``.
-    Synthetic non-Alex test exports may omit the robot-asset payload.
-    """
-    values = list(episodes)
-    if not values:
+def dataset_robot_asset_payload(episodes: list[Any]) -> dict[str, Any] | None:
+    """Build one consistent dataset-level robot-asset payload."""
+    if not episodes:
         raise AlexV2ContractError("cannot derive robot provenance from no episodes")
-    tasks = {str(item.meta.task) for item in values}
+    tasks = {str(item.meta.task) for item in episodes}
     if len(tasks) != 1:
         raise AlexV2ContractError(f"dataset export cannot mix episode tasks: {sorted(tasks)}")
-    is_v2 = any(str(item.meta.task) == paths.ALEX_V2_TASK for item in values)
+    is_v2 = next(iter(tasks)) == paths.ALEX_V2_TASK
     raw_refs = {
-        (str(item.meta.robot_asset_id), str(item.meta.robot_asset_sha256)) for item in values
+        (str(item.meta.robot_asset_id), str(item.meta.robot_asset_sha256)) for item in episodes
     }
     if len(raw_refs) != 1:
         raise AlexV2ContractError("episodes do not share one robot asset id and fingerprint")
@@ -43,7 +37,7 @@ def dataset_robot_asset_payload(episodes: Iterable[Any]) -> dict[str, Any] | Non
         raise AlexV2ContractError("robot asset id and sha256 must be set together")
     ref = RobotAssetRef(asset_id=asset_id, sha256=sha256)
 
-    manifests = [item.extras.get("robot_asset_manifest") for item in values]
+    manifests = [item.extras.get("robot_asset_manifest") for item in episodes]
     present = [value for value in manifests if value is not None]
     if not present:
         if is_v2:
@@ -52,7 +46,7 @@ def dataset_robot_asset_payload(episodes: Iterable[Any]) -> dict[str, Any] | Non
     first = present[0]
     if not isinstance(first, Mapping):
         raise AlexV2ContractError("robot_asset_manifest must be a mapping")
-    if len(present) != len(values) or any(value != first for value in present[1:]):
+    if len(present) != len(episodes) or any(value != first for value in present[1:]):
         raise AlexV2ContractError("episodes do not carry one identical robot asset manifest")
     manifest = dict(first)
     validated = validate_alex_v2_manifest(manifest)
@@ -111,10 +105,3 @@ def validate_dataset_episode_robot_asset(dataset: Any, ref: RobotAssetRef) -> No
             raise AlexV2ContractError(
                 f"episode {record.episode_id} robot asset identity differs from meta.json"
             )
-
-
-__all__ = [
-    "dataset_robot_asset_payload",
-    "load_dataset_robot_asset",
-    "validate_dataset_episode_robot_asset",
-]

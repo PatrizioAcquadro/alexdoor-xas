@@ -1,4 +1,4 @@
-"""Regression tests for directly loaded retained dataset views."""
+"""Tests for retained dataset views and their train-only normalization."""
 
 from __future__ import annotations
 
@@ -9,16 +9,12 @@ from types import SimpleNamespace
 import pytest
 
 from alexdoor_xas.data_engine import export_datasets, plan_episodes, run_episode
-from alexdoor_xas.dataset import (
-    EpisodeDataset,
+from alexdoor_xas.dataset.loader import EpisodeDataset
+from alexdoor_xas.dataset.normalize import (
     compute_norm_stats,
-    load_view_payload,
     save_norm_stats,
     view_norm_stats_path,
 )
-from alexdoor_xas.policies.act.checkpoint import CHECKPOINT_FORMAT, load_checkpoint, save_checkpoint
-from alexdoor_xas.policies.act.config import ActModelCfg
-from alexdoor_xas.policies.act.model import ACTModel
 from alexdoor_xas.policies.common.data import PolicyDataError, load_policy_data
 from conftest import FakeForceDoorPushEnv, make_test_engine_cfg
 
@@ -55,10 +51,7 @@ def _write_view(root: Path, dataset: EpisodeDataset, *, overlap: bool = False) -
         )
     )
     stats = compute_norm_stats(dataset, train, obs_preset="core_door_pose", view_id="view_n2")
-    save_norm_stats(
-        view_norm_stats_path(dataset.dataset_dir, "view_n2"),
-        stats,
-    )
+    save_norm_stats(view_norm_stats_path(dataset.dataset_dir, "view_n2"), stats)
 
 
 def _cfg() -> SimpleNamespace:
@@ -71,31 +64,13 @@ def _cfg() -> SimpleNamespace:
     )
 
 
-def test_view_loader_tolerates_legacy_extra_fields(tmp_path) -> None:
-    path = tmp_path / "view.json"
-    path.write_text(
-        json.dumps(
-            {
-                "schema": "alexdoor_xas.dataset_view.v1",
-                "view_id": "view_n2",
-                "master_version": "master",
-                "splits": {"train": ["a"], "val": ["b"], "test": ["c"]},
-                "obsolete_fingerprint": "ignored",
-            }
-        )
-    )
-    assert load_view_payload(path)["splits"]["train"] == ["a"]
-
-
-def test_policy_data_resolves_view_split_and_recomputes_stats(tmp_path) -> None:
+def test_policy_data_loads_a_valid_view(tmp_path) -> None:
     root, dataset = _dataset(tmp_path)
     _write_view(root, dataset)
 
     data = load_policy_data(_cfg(), root)
 
-    assert len(data.train_ids) == 2
-    assert len(data.val_ids) == 1
-    assert len(data.test_ids) == 1
+    assert tuple(map(len, (data.train_ids, data.val_ids, data.test_ids))) == (2, 1, 1)
     assert data.stats.view_id == "view_n2"
     assert data.stats_source == "official"
 
@@ -113,36 +88,3 @@ def test_policy_data_rejects_overlap_and_stale_stats(tmp_path) -> None:
     stats_path.write_text(json.dumps(payload))
     with pytest.raises(PolicyDataError, match="recomputed action mean"):
         load_policy_data(_cfg(), root)
-
-
-def test_view_checkpoint_v2_round_trip_needs_no_split_provenance(tmp_path) -> None:
-    root, dataset = _dataset(tmp_path)
-    _write_view(root, dataset)
-    data = load_policy_data(_cfg(), root)
-    model = ACTModel(
-        obs_dim=data.obs_dim,
-        action_dim=data.action_dim,
-        cfg=ActModelCfg(
-            chunk_size=2,
-            d_model=16,
-            n_heads=2,
-            dim_feedforward=32,
-            z_dim=4,
-            cvae_encoder_layers=1,
-            encoder_layers=1,
-            decoder_layers=1,
-            dropout=0.0,
-        ),
-    )
-    path = save_checkpoint(
-        tmp_path / "best.pt",
-        model,
-        {"dataset": vars(_cfg())},
-        data.stats,
-    )
-
-    loaded = load_checkpoint(path)
-
-    assert loaded.checkpoint_format == CHECKPOINT_FORMAT
-    assert loaded.config == {"dataset": vars(_cfg())}
-    assert loaded.stats.view_id == "view_n2"

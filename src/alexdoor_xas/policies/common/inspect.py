@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 
-from alexdoor_xas.dataset import EpisodeRecord, obs_matrix
+from alexdoor_xas.dataset.loader import EpisodeRecord, obs_matrix
 
 TRANSLATION_LABELS = ("dx", "dy", "dz")
 

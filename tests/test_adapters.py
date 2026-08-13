@@ -408,10 +408,7 @@ def test_geometric_contact_pins_controller_inference():
         assert geo.geometric_contact(rot_z(angle).T @ ee_door) == expected
 
 
-def test_a4_phase_contract_is_shared_across_actions_dataset_and_controller():
-    from alexdoor_xas.dataset import A4_PHASE_VOCAB as dataset_vocab
-
-    assert dataset_vocab is A4_PHASE_VOCAB
+def test_a4_phase_contract_is_shared_by_actions_and_controller():
     assert A4_PHASE_VOCAB == tuple(str(phase) for phase in PHASE_ORDER)
     assert str(DoorPushPhase.DONE) not in A4_PHASE_VOCAB
 

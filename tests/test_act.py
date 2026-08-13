@@ -13,7 +13,8 @@ import torch
 from alexdoor_xas.adapters.a2 import A2Adapter
 from alexdoor_xas.adapters.rollout import read_door_frame, read_step_context, rollout_chunks
 from alexdoor_xas.assets.alex_v2_contract import RobotAssetRef
-from alexdoor_xas.dataset import DatasetNormStats, EpisodeRecord, NormStats
+from alexdoor_xas.dataset.loader import EpisodeRecord
+from alexdoor_xas.dataset.normalize import DatasetNormStats, NormStats
 from alexdoor_xas.policies.act.checkpoint import (
     CHECKPOINT_FORMAT,
     load_checkpoint,
@@ -528,17 +529,16 @@ def test_build_rollout_obs_core_contact_needs_force_sensing() -> None:
     assert obs[-1] in (0.0, 1.0)
 
 
-def test_build_rollout_obs_rejects_unsupported_presets() -> None:
+def test_build_rollout_obs_rejects_unknown_presets() -> None:
     env = FakeForceDoorPushEnv()
     env.reset()
-    with pytest.raises(ValueError, match="no closed-loop reader"):
-        build_rollout_obs(_step_context(env), "alex_full")
+    with pytest.raises(ValueError, match="unknown obs preset"):
+        build_rollout_obs(_step_context(env), "unsupported")
 
 
 def test_build_rollout_obs_core_door_pose_matches_dataset_ordering() -> None:
     from alexdoor_xas.data_engine import plan_episodes, run_episode
-    from alexdoor_xas.dataset import obs_matrix
-    from alexdoor_xas.dataset.loader import EpisodeRecord
+    from alexdoor_xas.dataset.loader import EpisodeRecord, obs_matrix
 
     yaw = 0.45
     origin = (0.8, -1.5, 0.4)
@@ -629,12 +629,12 @@ def test_act_chunk_source_drives_a2_adapter_rollout() -> None:
     assert np.abs(chunk[:, :3]).max() < 0.04
 
 
-def test_act_chunk_source_rejects_presets_without_live_reader() -> None:
+def test_act_chunk_source_rejects_unknown_presets() -> None:
     env = FakeDoorPushEnv()
     env.reset()
     policy = _rollout_policy()
-    with pytest.raises(ValueError, match="no closed-loop env reader"):
-        act_chunk_source(policy, env, obs_preset="alex_full")
+    with pytest.raises(ValueError, match="unknown obs preset"):
+        act_chunk_source(policy, env, obs_preset="unsupported")
 
 
 class _QueuePolicy:

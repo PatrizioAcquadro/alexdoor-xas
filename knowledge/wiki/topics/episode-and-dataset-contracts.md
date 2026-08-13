@@ -14,11 +14,11 @@ Readers continue to accept `phase2.v0` and `phase2.v1`, including A4 JSON Lines 
 
 `src/alexdoor_xas/data_engine/export.py` derives matched products from one physical episode. A2 keeps world-frame end-effector deltas, A3 expresses the equivalent command in the static door frame, A4 stores object-centric guarded chunks, and Alex episodes derive A1 joint deltas from recorded targets. New A1 exports require the final applied target; legacy v0/v1 support remains read-only. The active operational version is `v2_pose` under `door_push_alex_v2`.
 
-`scripts/verify_dataset_interface.py` requires all A1-A4 products and includes the paired A2/A3 gate: D0 commands are identical, yawed canonical poses are numerically distinct, and every pair satisfies the exact door-frame rotation within tolerance.
+`scripts/verify_dataset_interface.py` requires all A1-A4 products, validates the existing split and normalization artifacts without writing, and checks the paired A2/A3 conversion. `--write-artifacts` is the explicit regeneration mode.
 
 ## Model-facing access
 
-`EpisodeDataset` and `A4ChunkDataset` are the supported readers. `ChunkSampler` pairs observation at time t with the following action horizon and padding mask. Model code does not interpret raw storage keys directly.
+`EpisodeDataset` and `A4ChunkDataset` are the supported readers. A4 remains structured and has no unused numeric feature encoding. `ChunkSampler` pairs observation at time t with the following action horizon; batches contain only `obs`, `actions`, and `is_pad`. Supported observations are `core`, `core_contact`, and `core_door_pose`.
 
 ## Splits, views, and normalization
 
@@ -28,6 +28,7 @@ The retained `v3_scale_master` contains 550 episodes across D0-D4. Its N50, N100
 
 ## Version Notes
 
+- 2026-08-12 — Removed unused dataset APIs and A4 numeric encoding, narrowed batch and observation contracts, and made the verifier read committed artifacts by default.
 - 2026-08-12 — Removed retired candidate-generation and paired-publication hooks; current A1 writes require the recorded final target.
 - 2026-08-12 — Introduced `phase2.v2` factual outcomes and legacy v0/v1 reads without failure labels; existing datasets remain unchanged.
 - 2026-08-12 — Made `door_push_alex_v2/v2_pose` the verifier default and folded the A2/A3 posed-door distinction check into the dataset interface gate.

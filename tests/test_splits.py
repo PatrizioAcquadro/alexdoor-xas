@@ -1,30 +1,25 @@
-"""Pure tests for the grouped, pose-stratified split contract (post-3.3 review).
-
-No Isaac, no h5py: :func:`episode_content_key` and :func:`split_entries` are
-duck-typed over loaded episode records, so synthetic records exercise the
-exact production code path.
-"""
+"""Tests for grouped, pose-stratified dataset splits."""
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 import pytest
 
-from alexdoor_xas.dataset import (
-    SPLIT_NAMES,
+from alexdoor_xas.dataset.splits import (
     SplitEntry,
     assert_no_cross_split_duplicates,
     episode_content_key,
-    load_split_payload,
     load_splits,
     make_grouped_splits,
-    make_splits,
     save_splits,
     split_entries,
 )
+
+SPLIT_NAMES = ("train", "val", "test")
 
 
 @dataclass
@@ -73,9 +68,6 @@ def _five_pose_entries(groups_per_pose: int = 9) -> list[SplitEntry]:
     return entries
 
 
-# ── content keys ─────────────────────────────────────────────────────────────
-
-
 def test_content_key_ignores_provenance_fields() -> None:
     a = _record("id-a", seed=3)
     b = _record("id-b", seed=3)  # same content, different episode id
@@ -107,9 +99,6 @@ def test_split_entries_reads_pose_and_defaults() -> None:
     assert entries[0].pose_id == "D1"
     assert entries[1].pose_id == "default"
     assert entries[0].episode_id == "a"
-
-
-# ── grouped splits ───────────────────────────────────────────────────────────
 
 
 def test_duplicates_never_cross_splits() -> None:
@@ -200,25 +189,11 @@ def test_assert_no_cross_split_duplicates_detects_leak() -> None:
     assert_no_cross_split_duplicates(entries, clean)
 
 
-# ── id-only compatibility path + persistence ─────────────────────────────────
-
-
-def test_make_splits_id_only_still_disjoint_exhaustive_deterministic() -> None:
-    ids = [f"ep-{i}" for i in range(16)]
-    splits = make_splits(ids, seed=3)
-    assert make_splits(ids, seed=3) == splits
-    all_ids = [eid for name in SPLIT_NAMES for eid in splits[name]]
-    assert sorted(all_ids) == sorted(ids)
-    assert len(splits["val"]) >= 1 and len(splits["test"]) >= 1
-    with pytest.raises(ValueError):
-        make_splits(ids[:2])
-
-
 def test_save_splits_round_trips_metadata(tmp_path) -> None:
     entries = _five_pose_entries()
     splits, meta = make_grouped_splits(entries, seed=0)
     path = save_splits(tmp_path / "splits" / "v2_pose.json", splits, seed=0, metadata=meta)
-    payload = load_split_payload(path)
+    payload = json.loads(path.read_text())
     assert "split_fingerprint_sha256" not in payload
     assert payload["metadata"]["n_groups"] == meta["n_groups"]
     reloaded = load_splits(path, episode_ids=[e.episode_id for e in entries])

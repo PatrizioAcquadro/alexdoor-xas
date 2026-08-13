@@ -11,10 +11,10 @@ from typing import Any
 import numpy as np
 
 from .loader import DEFAULT_OBS_PRESET, EpisodeDataset, obs_matrix
+from .splits import _safe_view_id
 
-STD_FLOOR = 1e-8
-NORM_STATS_FILENAME = "norm_stats.json"
-NORM_STATS_SCHEMA = "alexdoor_xas.norm_stats.v2"
+_STD_FLOOR = 1e-8
+_NORM_STATS_FILENAME = "norm_stats.json"
 
 
 @dataclass(frozen=True)
@@ -41,7 +41,7 @@ class NormStats:
         stacked = np.concatenate(rows)
         return cls(
             mean=stacked.mean(axis=0),
-            std=np.maximum(stacked.std(axis=0), STD_FLOOR),
+            std=np.maximum(stacked.std(axis=0), _STD_FLOOR),
             min=stacked.min(axis=0),
             max=stacked.max(axis=0),
             count=int(stacked.shape[0]),
@@ -113,13 +113,11 @@ def compute_norm_stats(
 
 
 def norm_stats_path(dataset_dir: str | Path) -> Path:
-    return Path(dataset_dir) / NORM_STATS_FILENAME
+    return Path(dataset_dir) / _NORM_STATS_FILENAME
 
 
 def view_norm_stats_path(dataset_dir: str | Path, view_id: str) -> Path:
-    if not isinstance(view_id, str) or not view_id or "/" in view_id or ".." in view_id:
-        raise ValueError("view_id must be a safe single path component")
-    return Path(dataset_dir) / "views" / view_id / NORM_STATS_FILENAME
+    return Path(dataset_dir) / "views" / _safe_view_id(view_id) / _NORM_STATS_FILENAME
 
 
 def save_norm_stats(path: str | Path, stats: DatasetNormStats) -> Path:
@@ -188,8 +186,8 @@ def validate_norm_stats(
             np.isfinite(value).all() for value in (block.mean, block.std, block.min, block.max)
         ):
             errors.append(f"norm stats {name} arrays must be finite")
-        if (block.std < STD_FLOOR).any():
-            errors.append(f"norm stats {name} std is below STD_FLOOR")
+        if (block.std < _STD_FLOOR).any():
+            errors.append(f"norm stats {name} std is below {_STD_FLOOR}")
         if (block.min > block.max).any():
             errors.append(f"norm stats {name} min exceeds max")
         if block.count <= 0:
@@ -212,7 +210,6 @@ def validate_norm_stats(
 
 def _stats_payload(stats: DatasetNormStats) -> dict[str, Any]:
     return {
-        "schema_version": NORM_STATS_SCHEMA,
         "action": stats.action.to_dict(),
         "obs": stats.obs.to_dict(),
         "obs_preset": stats.obs_preset,
@@ -220,18 +217,3 @@ def _stats_payload(stats: DatasetNormStats) -> dict[str, Any]:
         "action_space": stats.action_space,
         "view_id": stats.view_id,
     }
-
-
-__all__ = [
-    "NORM_STATS_FILENAME",
-    "NORM_STATS_SCHEMA",
-    "STD_FLOOR",
-    "DatasetNormStats",
-    "NormStats",
-    "compute_norm_stats",
-    "load_norm_stats",
-    "norm_stats_path",
-    "save_norm_stats",
-    "validate_norm_stats",
-    "view_norm_stats_path",
-]

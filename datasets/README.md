@@ -28,6 +28,9 @@ The four exports represent the same physical episodes and share episode IDs.
 A1-A3 contain one `episode_<id8>.hdf5` file and one `episode_<id8>.meta.json` sidecar per episode, plus dataset metadata and train-only `norm_stats.json`. 
 A4 contains `episodes.jsonl` and dataset metadata.
 
+Model-facing observations use `core`, `core_contact`, or `core_door_pose`.
+Training batches contain only `obs`, `actions`, and `is_pad`.
+
 A dataset version is one generation pass. Re-exporting creates new episode IDs, so its split and normalization artifacts must be regenerated together.
 
 ## Generate and verify
@@ -39,11 +42,13 @@ PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p \
   scripts/run_scripted_baseline.py --viz none --device cuda:0
 ```
 
-Verify the dataset interface without rewriting official artifacts:
+Verify the datasets and existing split/normalization artifacts without writing:
 
 ```bash
 PYTHONPATH=$PWD /home/pacquadr/IsaacLab/isaaclab.sh -p \
   scripts/verify_dataset_interface.py
 ```
+
+Pass `--write-artifacts` only when the split and normalization files must be regenerated.
 
 See [Episode and Dataset Contracts](../knowledge/wiki/topics/episode-and-dataset-contracts.md) for the complete contract.

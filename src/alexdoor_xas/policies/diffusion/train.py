@@ -20,7 +20,7 @@ from typing import Any
 
 import torch
 
-from alexdoor_xas.dataset import collate_torch
+from alexdoor_xas.dataset.sampling import collate_torch
 from alexdoor_xas.policies.common.runs import capture_rng_states, restore_rng_states
 from alexdoor_xas.policies.diffusion.config import DiffusionModelCfg, DiffusionTrainCfg
 from alexdoor_xas.policies.diffusion.model import DiffusionTransformer, diffusion_loss
