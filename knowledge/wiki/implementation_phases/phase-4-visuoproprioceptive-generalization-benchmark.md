@@ -13,34 +13,54 @@ A1-A4 x ACT/Diffusion on geometrically unseen push doors without retraining.
 
 #### Implementation
 
-Find public articulated-door USD assets, normalize viable candidates, and test
-each with the privileged fixed-base expert. Run 20 expert trials per candidate
-and record its maximum opening angle, including whether that angle is sustained
-for 0.5 seconds.
+Execute the following bounded acquisition and qualification loop:
+
+0. Freeze the admission, normalization, and qualification criteria below.
+1. Implement only the local scripts required to check, normalize, and test candidates.
+2. Use an online-search agent to find 24 candidates, applying every inexpensive remote check available before download and preferring USD-family sources.
+3. Download the candidates, run checks that require local files, and replace failures through another targeted online search until 24 remain.
+4. Normalize the 24 candidates to the common door contract.
+5. Run static and physics tests, replacing failures by repeating Steps 2-4 until 24 pass.
+6. Run one nominal expert rollout per door to verify that it opens.
+7. Reset and repeat the identical rollout. Compare outcome, angle curve, maximum sustained angle, and errors. If the pair is outside tolerance, run three additional identical rollouts and diagnose the source of variation.
+8. Produce the candidate manifest and qualification report, recommend the common Subphase 4.2 rollout count from the observed repeatability, and update the canonical documentation.
+
+The online gate checks the per-asset license, source, available format, archive size, reported triangle count, visible frame/panel separability, dimensions when stated, and duplicates before download. Values unavailable or unreliable online are checked locally. Search and replacement continue only until 24 assets pass; no unused reserve set is collected.
 
 #### Key Decisions
 
-- Accept only CC0, CC BY, or explicitly equivalent licenses.
-- Record source, license, attribution, modifications, identifier, and checksum.
-- Reject unusable articulation, geometry, collision, or fixed-base reachability.
+- Accept only CC0 or CC BY 4.0 covering the model and every redistributed dependency. Record source URL, author, retrieval date, license evidence, attribution, modifications, identifier, and checksums. Reject unclear, custom, royalty-free, NC, ND, and SA terms.
+- Use realistic full-size single-leaf interior, exterior, or industrial push doors. Exclude gates, double or sliding doors, cabinet doors, and fantasy doors. A non-actuated handle may remain rigidly attached to the panel.
+- Require a separable frame and panel, one vertical revolute hinge, no latch operation, and a plausible panel size: `0.65-1.20 m` wide, `1.80-2.40 m` high, and `0.025-0.10 m` thick.
+- Qualify exactly 12 left-hinged and 12 right-hinged doors. Recolors, mirrors, or variants of one base mesh are not separate identities. There is no per-author or per-pack quota.
+- Prefer USD/USDZ, followed by GLB/glTF, Blend/FBX, and OBJ. A non-USD source is admissible only when it can be converted without substantial remodeling.
+- Permit format conversion, uniform scaling, simple frame/panel separation, pivot correction, materials, colliders, and articulation. Do not deform or substantially remodel source geometry.
+- Limit normalized assets to 250,000 visual triangles and 4K textures. Reject candidates that require major decimation.
+- Normalize every asset to meters, Z-up, closed angle `0`, positive opening direction, canonical frame/panel semantics, local redistributable dependencies, and one common nominal physics template. Mass, hinge damping, friction, joint limits, and collision policy are shared; inertia is derived consistently from each normalized geometry.
+- Static tests verify a loadable dependency-complete USD, canonical units and prims, dimensions and complexity, one valid vertical hinge, local textures, colliders, and positive mass properties. Physics tests verify a fixed frame, one stable door degree of freedom, closed reset, no passive drift, interpenetration, NaN, or simulation explosion, and unobstructed mechanical opening.
+- A nominal expert rollout passes when it reaches at least 45 degrees for 0.5 seconds without runtime errors, invalid physics, or a force-admission violation.
+- Reset repeatability passes when the two identical rollouts have the same outcome and termination, maximum sustained angles within 2 degrees, and a maximum time-aligned angle-curve error of 3 degrees. A failure triggers three additional diagnostic repeats rather than immediate rejection.
+- Asset-specific physical instability causes replacement. Otherwise, the bounded variation observed across the 24 accepted assets determines one common `n_qual` for Subphase 4.2; 20 is not fixed in advance.
 
 #### Problems / Limitations
 
-This subphase is complete only when at least 24 technically and legally eligible
-doors pass qualification. Candidate assets are not yet benchmark members.
+This subphase is complete only when exactly 24 legally eligible, normalized, technically valid, nominally openable assets pass the repeatability gate and the Subphase 4.2 qualification protocol has been calibrated. These assets remain provisional: a later reliable-angle failure reopens Subphase 4.1 and replaces that asset.
 
 ## Subphase 4.2 — Benchmark and Split Freeze
 
 #### Implementation
 
-Select the final 24 doors, assign 12 train, 4 development, and 8 sealed test
-identities, and freeze the asset manifest. Compute each door's reliable angle as
-the 10th percentile of its 20 expert trials and set the common primary threshold
-to the minimum reliable angle minus 5 degrees, rounded down to 5 degrees.
+Run the frozen common `n_qual` expert trials on the 24 provisional doors. Compute
+each door's reliable angle as the 10th percentile of its maximum sustained angle,
+replace any failure through Subphase 4.1, then assign 12 train, 4 development,
+and 8 sealed test identities and freeze the asset manifest. Set the common
+primary threshold to the minimum reliable angle minus 5 degrees, rounded down to
+5 degrees.
 
 #### Key Decisions
 
 - Replace any door whose margin-adjusted reliable angle is below 45 degrees.
+- Freeze one common `n_qual` before official qualification; do not adapt the count per door.
 - Test qualification data prove feasibility only and never train a learned component.
 - Freeze the split and primary threshold before learned-system development.
 

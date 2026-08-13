@@ -46,9 +46,9 @@ the robot, within an expert-qualified reachable region.
 
 Each door identity is a complete articulated asset, not another pose, material,
 or randomization of a training door. Assets must be suitable for a future public
-release and are accepted only under CC0, CC BY, or an explicitly equivalent
-license. Assets with unclear, non-commercial, no-derivatives, or share-alike
-terms are excluded.
+release and are accepted only under CC0 or CC BY 4.0. Assets with unclear,
+non-commercial, no-derivatives, share-alike, royalty-free, or other custom terms
+are excluded.
 
 Candidate assets are first normalized and qualified with the privileged expert.
 Only then are the 12/4/8 identities and all benchmark parameters frozen. Every
@@ -115,9 +115,11 @@ sampling rule. Test doors produce evaluation rollouts only, never demonstrations
 ## Door Qualification and Success
 
 The fixed-base setup must not impose an arbitrary success angle that some doors
-cannot reach. For every candidate door, the privileged expert runs 20 trials.
+cannot reach. Subphase 4.1 measures reset repeatability and uses the observed
+variation to select one common qualification rollout count `n_qual` for all
+doors. This count is frozen before Subphase 4.2 begins; it is not fixed at 20.
 For door `d`, `q_d` is the 10th percentile of the maximum opening angle sustained
-for at least 0.5 seconds.
+for at least 0.5 seconds across its `n_qual` trials.
 
 The primary angle is frozen before learned-policy training:
 

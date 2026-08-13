@@ -345,3 +345,13 @@ licensed asset qualification through the sealed generalization evaluation.
 
 Verified nine-subphase structure, wiki links, index coverage, repository paths,
 planned-versus-current wording, Markdown whitespace, and protected raw boundaries.
+
+## 2026-08-13 — update : Phase 4.1 qualification contract
+
+Fixed the lean 24-asset acquisition loop, admission and normalization criteria,
+minimal tests, reset-repeatability gate, and adaptive Phase 4.2 rollout count.
+
+## 2026-08-13 — lint : Phase 4.1 qualification contract
+
+Verified the 0-8 workflow, adaptive qualification count, wiki links, index
+coverage, Markdown whitespace, and unchanged user-owned raw material.
