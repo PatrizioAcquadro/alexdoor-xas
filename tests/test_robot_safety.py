@@ -6,7 +6,7 @@ import pytest
 
 from alexdoor_xas.data_engine import apply_start_offset
 from alexdoor_xas.kinematics.settle import StartPoseError, validate_start_pose_settle
-from alexdoor_xas.policies.scripted import DoorPushVariation
+from alexdoor_xas.policies.scripted.door_push import DoorPushVariation
 from conftest import FakeDoorPushEnv
 
 

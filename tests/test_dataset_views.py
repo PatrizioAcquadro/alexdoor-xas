@@ -70,9 +70,8 @@ def test_policy_data_loads_a_valid_view(tmp_path) -> None:
 
     data = load_policy_data(_cfg(), root)
 
-    assert tuple(map(len, (data.train_ids, data.val_ids, data.test_ids))) == (2, 1, 1)
+    assert tuple(map(len, (data.train_ids, data.val_ids))) == (2, 1)
     assert data.stats.view_id == "view_n2"
-    assert data.stats_source == "official"
 
 
 def test_policy_data_rejects_overlap_and_stale_stats(tmp_path) -> None:

@@ -1,10 +1,4 @@
-"""Supervised ACT training loop (torch only; no Isaac imports, no file I/O).
-
-The loop consumes *batch factories* — callables producing an iterable of
-numpy batch dicts in the Phase 3.0 ``BatchIterator`` layout (``obs``,
-``actions``, ``is_pad``), already normalized — so it is unit-testable with
-hand-built batches and the script layer owns dataset/paths/tracking concerns.
-"""
+"""Supervised ACT training and deterministic resume."""
 
 from __future__ import annotations
 
@@ -21,7 +15,6 @@ from alexdoor_xas.policies.act.model import ACTModel, act_loss
 from alexdoor_xas.policies.common.runs import capture_rng_states, restore_rng_states
 
 TrainBatchFactory = Callable[[int], Iterable[dict]]
-"""``epoch -> iterable of normalized numpy batch dicts`` (fresh shuffle per epoch)."""
 ValBatchFactory = Callable[[], Iterable[dict]]
 
 
@@ -116,13 +109,7 @@ def train_act(
     resume_state: dict[str, Any] | None = None,
     on_checkpoint: Callable[[dict[str, Any]], None] | None = None,
 ) -> TrainHistory:
-    """Train ``model`` in place; returns the loss history.
-
-    ``on_epoch(stats, is_best)`` fires after every epoch; ``is_best`` is True
-    when this epoch produced a new best validation L1 (evaluated every
-    ``cfg.val_every`` epochs and on the final epoch; without a validation
-    factory the train loss stands in).
-    """
+    """Train in place and return resumable epoch history."""
     if resume_state is None:
         torch.manual_seed(cfg.seed)
     device = torch.device(cfg.device)
@@ -239,6 +226,3 @@ def _to_device(batch: dict, device: torch.device) -> dict:
         key: value.to(device) if isinstance(value, torch.Tensor) else value
         for key, value in batch.items()
     }
-
-
-__all__ = ["EpochStats", "TrainHistory", "evaluate_l1", "make_seeded_model", "train_act"]

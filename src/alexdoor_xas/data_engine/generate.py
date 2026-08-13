@@ -12,7 +12,7 @@ import torch
 from alexdoor_xas.action.frames import ObjectFrame, door_frame_from_body_pose, frame_delta_to_world
 from alexdoor_xas.action.spaces import A2_EE_DELTA
 from alexdoor_xas.assets.door_task import DEFAULT_DOOR_POSE_ID, canonical_door_pose
-from alexdoor_xas.policies.scripted import (
+from alexdoor_xas.policies.scripted.door_push import (
     DoorPushController,
     DoorPushControllerCfg,
     DoorPushObservation,
@@ -225,7 +225,6 @@ def _record_episode_ticks(
             DoorPushObservation(
                 door_frame=setup.door_frame,
                 hinge_angle_rad=snapshot.angle,
-                hinge_velocity_rad_s=snapshot.velocity,
                 ee_pos_w=snapshot.ee_pos_w,
                 contact_sensed=snapshot.contact_sensed,
             )

@@ -112,7 +112,9 @@ from alexdoor_xas.policies.diffusion.policy import (  # noqa: E402
     DiffusionPolicy,
     diffusion_chunk_source,
 )
-from alexdoor_xas.policies.scripted import alex_v2_variation_bounds  # noqa: E402
+from alexdoor_xas.policies.scripted.door_push_alex_v2 import (  # noqa: E402
+    alex_v2_variation_bounds,
+)
 
 
 def _run() -> int:

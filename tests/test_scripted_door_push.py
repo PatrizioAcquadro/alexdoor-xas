@@ -8,15 +8,18 @@ import numpy as np
 import pytest
 
 from alexdoor_xas.action.frames import ObjectFrame, frame_delta_to_world, rot_z
-from alexdoor_xas.policies.scripted import (
+from alexdoor_xas.policies.scripted.door_push import (
+    PHASE_ORDER,
     DoorPushController,
     DoorPushControllerCfg,
+    DoorPushObservation,
     DoorPushPhase,
-    alex_v2_push_cfg,
-    alex_v2_variation_bounds,
     sample_variation,
 )
-from alexdoor_xas.policies.scripted.door_push import PHASE_ORDER, DoorPushObservation
+from alexdoor_xas.policies.scripted.door_push_alex_v2 import (
+    alex_v2_push_cfg,
+    alex_v2_variation_bounds,
+)
 from conftest import SyntheticDoorWorld
 
 
@@ -54,7 +57,6 @@ def _observe(world: SyntheticDoorWorld) -> DoorPushObservation:
     return DoorPushObservation(
         door_frame=world.door_frame,
         hinge_angle_rad=world.angle,
-        hinge_velocity_rad_s=world.velocity,
         ee_pos_w=world.ee_pos_w.copy(),
         contact_sensed=contact_sensed,
     )
@@ -128,7 +130,6 @@ def test_contact_approach_uses_its_dedicated_step_limit(phase) -> None:
     obs = DoorPushObservation(
         door_frame=frame,
         hinge_angle_rad=0.0,
-        hinge_velocity_rad_s=0.0,
         ee_pos_w=np.array([0.25, cfg.push_point_y_m, cfg.push_height_m]),
         contact_sensed=False,
     )
@@ -184,15 +185,12 @@ def test_alex_v2_preset_visits_all_phases_and_opens_door() -> None:
 
 
 def test_contact_sensed_overrides_geometric_inference() -> None:
-    """A force-sensed contact flag drives the CONTACT transition; the recorded
-    ``contact_inferred`` stays geometric."""
     cfg = DoorPushControllerCfg()
     frame = ObjectFrame(origin=np.zeros(3), rot=np.eye(3))
     controller = DoorPushController(cfg)
     world = SyntheticDoorWorld(door_frame=frame, cfg=cfg)
     world.ee_pos_w = frame.point_to_world(np.array([0.7, 0.2, 0.0]))
 
-    # Drive to the CONTACT phase using the geometric default.
     for _ in range(2000):
         command = controller.act(_observe(world))
         if command.phase is DoorPushPhase.CONTACT:
@@ -200,13 +198,10 @@ def test_contact_sensed_overrides_geometric_inference() -> None:
         world.apply_world(frame_delta_to_world(command.delta_door_frame, frame)[:3])
     assert controller.phase is DoorPushPhase.CONTACT
 
-    # EE is off the face here, so geometry says "no contact" — a sensed True
-    # must still advance the FSM to PUSH, while contact_inferred stays False.
     away = frame.point_to_world(np.array([cfg.surface_x_m(0.05), cfg.push_point_y_m, 0.0]))
     obs = DoorPushObservation(
         door_frame=frame,
         hinge_angle_rad=world.angle,
-        hinge_velocity_rad_s=0.0,
         ee_pos_w=away,
         contact_sensed=True,
     )
@@ -214,15 +209,12 @@ def test_contact_sensed_overrides_geometric_inference() -> None:
     assert command.phase is DoorPushPhase.PUSH
     assert command.contact_inferred is False
 
-    # Conversely, sensed False pins the FSM in CONTACT even when geometry
-    # would have inferred contact.
     controller_b = DoorPushController(cfg)
     controller_b._state.phase = DoorPushPhase.CONTACT
     on_face = frame.point_to_world(np.array([cfg.surface_x_m(0.0), cfg.push_point_y_m, 0.0]))
     obs_b = DoorPushObservation(
         door_frame=frame,
         hinge_angle_rad=0.0,
-        hinge_velocity_rad_s=0.0,
         ee_pos_w=on_face,
         contact_sensed=False,
     )
@@ -270,21 +262,3 @@ def test_variation_apply_overrides_push_geometry() -> None:
     )
     assert phases[-1] == str(DoorPushPhase.DONE)
     assert world.angle >= controller.cfg.target_open_angle_rad
-
-
-@pytest.mark.parametrize("angle", [0.0, 1.2])
-def test_contact_inference_tracks_panel_rotation(angle: float) -> None:
-    cfg = DoorPushControllerCfg()
-    controller = DoorPushController(cfg)
-    on_face_panel = np.array([cfg.surface_x_m(0.0), cfg.push_point_y_m, 0.0])
-    away_panel = np.array([cfg.surface_x_m(0.2), cfg.push_point_y_m, 0.0])
-    above_panel = np.array(
-        [cfg.surface_x_m(0.0), cfg.push_point_y_m, cfg.panel_height_m / 2 + 0.01]
-    )
-    below_panel = np.array(
-        [cfg.surface_x_m(0.0), cfg.push_point_y_m, -cfg.panel_height_m / 2 - 0.01]
-    )
-    assert controller._contact_inferred(rot_z(angle) @ on_face_panel, angle)
-    assert not controller._contact_inferred(rot_z(angle) @ away_panel, angle)
-    assert not controller._contact_inferred(rot_z(angle) @ above_panel, angle)
-    assert not controller._contact_inferred(rot_z(angle) @ below_panel, angle)

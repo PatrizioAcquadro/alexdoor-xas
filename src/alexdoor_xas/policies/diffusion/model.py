@@ -1,34 +1,12 @@
-"""State-only time-series diffusion transformer (Chi et al. 2023, section 3.1).
-
-The noise-prediction network eps_theta(A_t^k, k, O_t): noisy action tokens go
-through a causally masked transformer decoder whose cross-attention memory
-holds the diffusion-timestep embedding and the projected state observation
-(To = 1 — matching the frozen ``ChunkSampler``; the paper reports state-based
-insensitivity to the observation horizon). The transformer backbone was chosen
-over the paper's CNN default because the project is moving toward
-transformer-based VLA policies. No Isaac imports; torch only.
-"""
+"""Causal state-conditioned diffusion transformer over action chunks."""
 
 from __future__ import annotations
-
-import math
 
 import torch
 from torch import nn
 
+from alexdoor_xas.policies.common.model import sinusoidal_table
 from alexdoor_xas.policies.diffusion.config import DiffusionModelCfg
-
-
-def sinusoidal_table(n_positions: int, d_model: int) -> torch.Tensor:
-    """Fixed sinusoidal position embeddings, shape ``(n_positions, d_model)``."""
-    position = torch.arange(n_positions, dtype=torch.float32).unsqueeze(1)
-    div_term = torch.exp(
-        torch.arange(0, d_model, 2, dtype=torch.float32) * (-math.log(10000.0) / d_model)
-    )
-    table = torch.zeros(n_positions, d_model)
-    table[:, 0::2] = torch.sin(position * div_term)
-    table[:, 1::2] = torch.cos(position * div_term[: d_model // 2])
-    return table
 
 
 class DiffusionTransformer(nn.Module):
@@ -45,7 +23,6 @@ class DiffusionTransformer(nn.Module):
         d = cfg.d_model
         self.action_proj = nn.Linear(action_dim, d)
         self.obs_mlp = nn.Sequential(nn.Linear(obs_dim, d), nn.Mish(), nn.Linear(d, d))
-        # Timestep k is an integer in [0, T): a fixed sinusoidal lookup + MLP.
         self.register_buffer(
             "timestep_table", sinusoidal_table(cfg.num_train_timesteps, d), persistent=False
         )
@@ -103,13 +80,7 @@ def diffusion_loss(
     is_pad: torch.Tensor,
     generator: torch.Generator | None = None,
 ) -> dict[str, torch.Tensor]:
-    """Masked epsilon-prediction MSE over one normalized batch.
-
-    Samples ``t ~ U[0, T)`` and Gaussian noise, corrupts the actions with the
-    training schedule, and regresses the model output onto the drawn noise.
-    Padded chunk steps are masked out of the loss exactly like ``act_loss``
-    masks its L1 (they are never executed at rollout).
-    """
+    """Masked epsilon-prediction MSE over normalized actions."""
     valid = ~is_pad.to(torch.bool)
     n_valid = valid.sum()
     if int(n_valid) == 0:
@@ -133,6 +104,3 @@ def diffusion_loss(
     per_step_mse = (eps_hat - noise).pow(2).mean(dim=-1)
     mse = (per_step_mse * valid).sum() / n_valid
     return {"mse": mse, "loss": mse}
-
-
-__all__ = ["DiffusionTransformer", "diffusion_loss", "sinusoidal_table"]

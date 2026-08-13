@@ -19,7 +19,6 @@ from alexdoor_xas.policies.common.closed_loop import (
     publish_closed_loop,
     rollout_key,
     validate_evaluation_protocol,
-    write_selected_media,
     write_selected_traces,
 )
 from alexdoor_xas.policies.common.runs import (
@@ -251,11 +250,4 @@ def test_optional_directories_are_not_created_empty(tmp_path) -> None:
     result = _result(success=True, forces=[10.0])
     row, _ = _row("D0", 100, "fixed", result)
     assert write_selected_traces(tmp_path, [row], {row["rollout_key"]: {}}) == []
-    assert write_selected_media(tmp_path, None) == []
     assert not (tmp_path / "traces").exists()
-    assert not (tmp_path / "media").exists()
-
-    source = tmp_path / "selected.mp4"
-    source.write_bytes(b"media")
-    retained = write_selected_media(tmp_path, {"D0_seed100_fixed": source})
-    assert retained == ["media/D0_seed100_fixed.mp4"]

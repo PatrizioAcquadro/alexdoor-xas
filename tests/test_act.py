@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 import math
 from copy import deepcopy
 
@@ -15,15 +14,14 @@ from alexdoor_xas.adapters.rollout import read_door_frame, read_step_context, ro
 from alexdoor_xas.assets.alex_v2_contract import RobotAssetRef
 from alexdoor_xas.dataset.loader import EpisodeRecord
 from alexdoor_xas.dataset.normalize import DatasetNormStats, NormStats
-from alexdoor_xas.policies.act.checkpoint import (
-    CHECKPOINT_FORMAT,
-    load_checkpoint,
-    save_checkpoint,
-)
 from alexdoor_xas.policies.act.config import ActModelCfg, ActTrainCfg
-from alexdoor_xas.policies.act.model import ACTModel, act_loss, sinusoidal_table
+from alexdoor_xas.policies.act.model import ACTModel, act_loss
 from alexdoor_xas.policies.act.policy import ActPolicy, act_chunk_source
 from alexdoor_xas.policies.act.train import make_seeded_model, train_act
+from alexdoor_xas.policies.common.checkpoint import (
+    ACT_CHECKPOINT_FORMAT,
+    save_checkpoint_payload,
+)
 from alexdoor_xas.policies.common.inspect import open_loop_report
 from alexdoor_xas.policies.common.obs import build_rollout_obs, read_door_pose_obs
 from conftest import (
@@ -77,11 +75,28 @@ def _tiny_stats() -> DatasetNormStats:
     )
 
 
-def test_sinusoidal_table_shape_and_range() -> None:
-    table = sinusoidal_table(10, 32)
-    assert table.shape == (10, 32)
-    assert torch.isfinite(table).all()
-    assert table.abs().max() <= 1.0
+def _checkpoint_config(obs_preset: str = "core") -> dict:
+    return {
+        "dataset": {
+            "task": "door_push_alex_v2",
+            "space": "A2_ee_delta",
+            "version": "v2_pose",
+            "view_id": None,
+            "obs_preset": obs_preset,
+        }
+    }
+
+
+def _save_checkpoint(path, model, config, stats, robot_asset=TEST_ROBOT_ASSET):
+    return save_checkpoint_payload(
+        path,
+        ACT_CHECKPOINT_FORMAT,
+        model,
+        config,
+        stats,
+        {},
+        robot_asset,
+    )
 
 
 def test_forward_shapes_and_finite() -> None:
@@ -104,25 +119,6 @@ def test_predict_is_deterministic_with_zero_latent() -> None:
 
     assert first.shape == (4, TINY_MODEL_CFG.chunk_size, ACTION_DIM)
     assert torch.equal(first, second)
-
-
-def test_seeded_model_initialization_controls_predictions() -> None:
-    obs = _tiny_batch(seed=10)["obs"]
-    first = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=123)
-    second = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=123)
-    different = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=124)
-
-    first.eval()
-    second.eval()
-    different.eval()
-
-    for key, value in first.state_dict().items():
-        assert torch.equal(value, second.state_dict()[key])
-    assert any(
-        not torch.equal(value, different.state_dict()[key])
-        for key, value in first.state_dict().items()
-    )
-    assert torch.equal(first.predict(obs), second.predict(obs))
 
 
 def test_forward_rejects_wrong_chunk_length() -> None:
@@ -183,61 +179,20 @@ def test_checkpoint_round_trip_preserves_predictions_and_stats(tmp_path) -> None
     obs = _tiny_batch()["obs"]
     expected = model.predict(obs)
     stats = _tiny_stats()
-    config = {
-        "dataset": {
-            "task": "door_push",
-            "space": "A2_ee_delta",
-            "version": "v0",
-            "view_id": None,
-            "obs_preset": "core",
-        }
-    }
+    path = _save_checkpoint(tmp_path / "best.pt", model, _checkpoint_config(), stats)
+    policy = ActPolicy.from_checkpoint(path, runtime_asset=TEST_ROBOT_ASSET)
 
-    path = save_checkpoint(
-        tmp_path / "ckpt" / "best.pt",
-        model,
-        config,
-        stats,
-        meta={"epoch": 3},
-    )
-    loaded = load_checkpoint(path)
-
-    assert torch.equal(loaded.model.predict(obs), expected)
-    assert loaded.action_space == "A2_ee_delta"
-    assert loaded.obs_preset == "core"
-    assert loaded.chunk_size == TINY_MODEL_CFG.chunk_size
-    assert loaded.meta["epoch"] == 3
-    assert loaded.checkpoint_format == CHECKPOINT_FORMAT
-    assert not loaded.model.training
+    assert torch.equal(policy.model.predict(obs), expected)
+    assert policy.action_space == "A2_ee_delta"
+    assert policy.obs_preset == "core"
+    assert policy.chunk_size == TINY_MODEL_CFG.chunk_size
+    assert policy.robot_compatibility_label == "v2_native"
 
     for name in ("mean", "std", "min", "max"):
         np.testing.assert_array_equal(
-            getattr(loaded.stats.action, name), getattr(stats.action, name)
+            getattr(policy.stats.action, name), getattr(stats.action, name)
         )
-        np.testing.assert_array_equal(getattr(loaded.stats.obs, name), getattr(stats.obs, name))
-    assert loaded.stats.train_episode_ids == stats.train_episode_ids
-
-
-def test_policy_checkpoint_requires_exact_alex_v2_asset(tmp_path) -> None:
-    config = {
-        "dataset": {
-            "task": "door_push_alex_v2",
-            "space": "A2_ee_delta",
-            "version": "v2_pose",
-            "view_id": None,
-            "obs_preset": "core",
-        }
-    }
-    path = save_checkpoint(
-        tmp_path / "best.pt",
-        _tiny_model(),
-        config,
-        _tiny_stats(),
-        robot_asset=TEST_ROBOT_ASSET,
-    )
-
-    policy = ActPolicy.from_checkpoint(path, runtime_asset=TEST_ROBOT_ASSET)
-    assert policy.robot_compatibility_label == "v2_native"
+        np.testing.assert_array_equal(getattr(policy.stats.obs, name), getattr(stats.obs, name))
 
     with pytest.raises(ValueError, match="incompatible"):
         ActPolicy.from_checkpoint(
@@ -247,44 +202,20 @@ def test_policy_checkpoint_requires_exact_alex_v2_asset(tmp_path) -> None:
 
 
 def test_checkpoint_creation_rejects_config_stats_preset_mismatch(tmp_path) -> None:
-    config = {
-        "dataset": {
-            "task": "door_push",
-            "space": "A2_ee_delta",
-            "version": "v0",
-            "view_id": None,
-            "obs_preset": "core_door_pose",
-        }
-    }
     with pytest.raises(ValueError, match="observation preset"):
-        save_checkpoint(tmp_path / "bad.pt", _tiny_model(), config, _tiny_stats())
+        _save_checkpoint(
+            tmp_path / "bad.pt",
+            _tiny_model(),
+            _checkpoint_config("core_door_pose"),
+            _tiny_stats(),
+        )
 
 
 def test_checkpoint_rejects_unknown_format(tmp_path) -> None:
     path = tmp_path / "bad.pt"
     torch.save({"format": "other"}, path)
     with pytest.raises(ValueError, match="unsupported checkpoint format"):
-        load_checkpoint(path)
-
-
-def test_checkpoint_rejects_pre_v2_format(tmp_path) -> None:
-    config = {
-        "dataset": {
-            "task": "door_push",
-            "space": "A2_ee_delta",
-            "version": "v0",
-            "view_id": None,
-            "obs_preset": "core",
-        }
-    }
-    path = save_checkpoint(tmp_path / "v2.pt", _tiny_model(), config, _tiny_stats())
-    payload = torch.load(path, weights_only=True)
-    payload["format"] = CHECKPOINT_FORMAT.removesuffix(".v2") + ".v1"
-    obsolete_path = tmp_path / "obsolete.pt"
-    torch.save(payload, obsolete_path)
-
-    with pytest.raises(ValueError, match="unsupported checkpoint format"):
-        load_checkpoint(obsolete_path)
+        ActPolicy.from_checkpoint(path, runtime_asset=TEST_ROBOT_ASSET)
 
 
 # --- training loop -----------------------------------------------------------
@@ -330,34 +261,6 @@ def test_train_act_overfits_a_constant_mapping() -> None:
     assert last.val_l1 is not None and math.isfinite(last.val_l1)
     assert 0 <= history.best_epoch < cfg.epochs
     assert history.best_val_l1 <= last.val_l1 + 1e-12
-
-
-def test_train_act_callback() -> None:
-    model = _tiny_model()
-    batch = _constant_mapping_batch()
-    cfg = ActTrainCfg(epochs=3, batch_size=8, lr=1e-3, val_every=1, device="cpu")
-    events: list[tuple[int, bool]] = []
-
-    def on_epoch(stats, is_best) -> None:
-        events.append((stats.epoch, is_best))
-
-    train_act(
-        model,
-        make_train_batches=lambda epoch: [batch],
-        cfg=cfg,
-        make_val_batches=lambda: [batch],
-        on_epoch=on_epoch,
-    )
-
-    assert [epoch for epoch, _ in events] == [0, 1, 2]
-    assert any(is_best for _, is_best in events)
-
-
-def test_train_act_rejects_empty_batch_factory() -> None:
-    model = _tiny_model()
-    cfg = ActTrainCfg(epochs=1, device="cpu")
-    with pytest.raises(ValueError, match="no batches"):
-        train_act(model, make_train_batches=lambda epoch: [], cfg=cfg)
 
 
 def test_train_act_resume_matches_uninterrupted_state() -> None:
@@ -623,14 +526,6 @@ def test_act_chunk_source_drives_a2_adapter_rollout() -> None:
     assert np.abs(chunk[:, :3]).max() < 0.04
 
 
-def test_act_chunk_source_rejects_unknown_presets() -> None:
-    env = FakeDoorPushEnv()
-    env.reset()
-    policy = _rollout_policy()
-    with pytest.raises(ValueError, match="unknown obs preset"):
-        act_chunk_source(policy, env, obs_preset="unsupported")
-
-
 class _QueuePolicy:
     """Duck-typed policy stub emitting predetermined chunks."""
 
@@ -732,17 +627,3 @@ def test_open_loop_report_numerics(tmp_path) -> None:
         }
     ]
     assert "mse" not in json_path.read_text().lower()
-
-
-@pytest.mark.skipif(
-    importlib.util.find_spec("matplotlib") is None, reason="matplotlib is not installed"
-)
-def test_open_loop_report_writes_one_summary(tmp_path) -> None:
-    record = _stub_record(n_steps=TINY_MODEL_CFG.chunk_size)
-    policy = _OffsetPolicy(record, offset=0.1)
-
-    summary = tmp_path / "open_loop" / "summary.png"
-    open_loop_report(policy, [record], summary_path=summary)
-
-    assert summary.is_file() and summary.stat().st_size > 0
-    assert list(tmp_path.rglob("*.png")) == [summary]

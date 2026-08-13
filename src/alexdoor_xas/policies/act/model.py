@@ -1,32 +1,12 @@
-"""State-only ACT model: a CVAE action-chunk transformer (Zhao et al. 2023).
-
-Phase 2 episodes carry no images, so the paper's ResNet feature sequence is
-replaced by a single projected observation token; everything else follows the
-ACT recipe — CVAE encoder over (obs, action chunk) -> style variable z,
-transformer encoder/decoder policy with fixed sinusoidal chunk queries, z = 0
-at inference. No Isaac imports; torch only.
-"""
+"""State-only ACT CVAE over action chunks."""
 
 from __future__ import annotations
-
-import math
 
 import torch
 from torch import nn
 
 from alexdoor_xas.policies.act.config import ActModelCfg
-
-
-def sinusoidal_table(n_positions: int, d_model: int) -> torch.Tensor:
-    """Fixed sinusoidal position embeddings, shape ``(n_positions, d_model)``."""
-    position = torch.arange(n_positions, dtype=torch.float32).unsqueeze(1)
-    div_term = torch.exp(
-        torch.arange(0, d_model, 2, dtype=torch.float32) * (-math.log(10000.0) / d_model)
-    )
-    table = torch.zeros(n_positions, d_model)
-    table[:, 0::2] = torch.sin(position * div_term)
-    table[:, 1::2] = torch.cos(position * div_term[: d_model // 2])
-    return table
+from alexdoor_xas.policies.common.model import sinusoidal_table
 
 
 class ACTModel(nn.Module):
@@ -44,7 +24,6 @@ class ACTModel(nn.Module):
         self.obs_proj = nn.Linear(obs_dim, d)
         self.action_proj = nn.Linear(action_dim, d)
 
-        # CVAE encoder (training only): [CLS, obs, a_1..a_H] -> z mean/logvar.
         self.cls_token = nn.Parameter(torch.zeros(1, 1, d))
         self.register_buffer("cvae_pos", sinusoidal_table(cfg.chunk_size + 2, d), persistent=False)
         self.cvae_encoder = nn.TransformerEncoder(
@@ -52,7 +31,6 @@ class ACTModel(nn.Module):
         )
         self.latent_head = nn.Linear(d, 2 * cfg.z_dim)
 
-        # Policy decoder: memory [obs, z] -> chunk queries -> (H, action_dim).
         self.z_proj = nn.Linear(cfg.z_dim, d)
         self.memory_pos = nn.Parameter(torch.zeros(2, d))
         self.encoder = nn.TransformerEncoder(
@@ -147,6 +125,3 @@ def act_loss(
     l1 = (per_step_l1 * valid).sum() / n_valid
     kl = (-0.5 * (1.0 + logvar - mu.pow(2) - logvar.exp())).sum(dim=-1).mean()
     return {"l1": l1, "kl": kl, "loss": l1 + kl_weight * kl}
-
-
-__all__ = ["ACTModel", "act_loss", "sinusoidal_table"]

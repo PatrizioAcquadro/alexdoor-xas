@@ -1,14 +1,4 @@
-"""Diffusion-specific normalization on top of the shared dataset plumbing.
-
-Torch-free. The one behavioral difference from ACT is the action
-normalization: DDPM sampling clips to [-1, 1] every step
-(``clip_sample=True``), so actions are min-max scaled into [-1, 1] (Diffusion
-Policy paper, appendix A.1) instead of z-scored — z-scoring would leave parts
-of the action range unreachable after clipping. Observations stay z-scored
-like ACT. Constant action dims (the recorded-but-never-actuated A2/A3
-rotation deltas) use the paper's guard: shift to zero without scaling, so
-they normalize and denormalize to exactly 0.
-"""
+"""Z-score observations and scale Diffusion actions to [-1, 1]."""
 
 from __future__ import annotations
 
@@ -31,7 +21,6 @@ from alexdoor_xas.policies.common.data import (
 from alexdoor_xas.policies.common.types import PolicyDatasetCfg
 
 RANGE_EPS = 1e-8
-"""A dimension whose train-split range is below this is treated as constant."""
 
 
 @dataclass(frozen=True)
@@ -114,13 +103,3 @@ def make_eval_factory(
         episode_ids=episode_ids,
         normalize=make_diffusion_normalizer(data.stats),
     )
-
-
-__all__ = [
-    "RANGE_EPS",
-    "MinMaxNormalizer",
-    "load_diffusion_data",
-    "make_diffusion_normalizer",
-    "make_eval_factory",
-    "make_train_factory",
-]

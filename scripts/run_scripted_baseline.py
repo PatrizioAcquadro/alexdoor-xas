@@ -111,7 +111,7 @@ from alexdoor_xas.envs.door_task.door_push_alex_v2_env_cfg import (  # noqa: E40
     ALEX_V2_LIMITATIONS,
     DoorPushAlexV2EnvCfg,
 )
-from alexdoor_xas.policies.scripted import (  # noqa: E402
+from alexdoor_xas.policies.scripted.door_push_alex_v2 import (  # noqa: E402
     alex_v2_push_cfg,
     alex_v2_variation_bounds,
 )

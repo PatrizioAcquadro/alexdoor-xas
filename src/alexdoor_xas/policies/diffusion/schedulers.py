@@ -1,9 +1,4 @@
-"""Noise-scheduler factories and the shared sampling loop (diffusers-backed).
-
-This is the only place the ``diffusers`` schedulers are constructed, so the
-train/inference schedules and the checkpoint payload cannot drift apart. The
-model is duck-typed as ``model(noisy_actions, timesteps, obs) -> eps_hat``.
-"""
+"""Diffusers schedulers and reverse sampling."""
 
 from __future__ import annotations
 
@@ -13,23 +8,13 @@ from diffusers import DDIMScheduler, DDPMScheduler
 from alexdoor_xas.policies.diffusion.config import DiffusionConfigError, DiffusionModelCfg
 
 
-def scheduler_config_payload(cfg: DiffusionModelCfg) -> dict:
-    """The plain-dict schedule contract embedded in checkpoints."""
-    return {
-        "num_train_timesteps": cfg.num_train_timesteps,
-        "beta_schedule": cfg.beta_schedule,
-        "prediction_type": cfg.prediction_type,
-        "clip_sample": True,
-    }
-
-
 def make_train_scheduler(cfg: DiffusionModelCfg) -> DDPMScheduler:
     """The DDPM schedule used both to corrupt training targets and to sample."""
     return DDPMScheduler(
         num_train_timesteps=cfg.num_train_timesteps,
         beta_schedule=cfg.beta_schedule,
         prediction_type=cfg.prediction_type,
-        clip_sample=True,  # actions are min-max normalized to [-1, 1]
+        clip_sample=True,
     )
 
 
@@ -66,14 +51,7 @@ def sample_actions(
     action_dim: int,
     generator: torch.Generator | None = None,
 ) -> torch.Tensor:
-    """Reverse-diffuse one normalized action chunk per obs row: ``(B, H, A)``.
-
-    ``scheduler`` must already have its timesteps set
-    (:func:`make_inference_scheduler`). DDIM runs with its default eta=0, so a
-    fixed ``generator`` (which also seeds the initial noise) makes the sample
-    fully deterministic; DDPM additionally draws its per-step noise from the
-    same generator.
-    """
+    """Reverse-diffuse normalized chunks with configured scheduler timesteps."""
     device = obs.device
     x = torch.randn(
         (obs.shape[0], horizon, action_dim),
@@ -86,11 +64,3 @@ def sample_actions(
         eps_hat = model(x, t_batch, obs)
         x = scheduler.step(eps_hat, t, x, generator=generator).prev_sample
     return x
-
-
-__all__ = [
-    "make_inference_scheduler",
-    "make_train_scheduler",
-    "sample_actions",
-    "scheduler_config_payload",
-]

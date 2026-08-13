@@ -22,7 +22,7 @@ from alexdoor_xas.eval.sanity import (
     check_alex_episode,
     contact_force_summary,
 )
-from alexdoor_xas.policies.scripted import DoorPushControllerCfg, VariationBounds
+from alexdoor_xas.policies.scripted.door_push import DoorPushControllerCfg, VariationBounds
 from alexdoor_xas.recording import EpisodeBuffer, write_episode
 
 VIDEO_FPS = 60

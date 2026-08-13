@@ -19,7 +19,7 @@ from alexdoor_xas.adapters.limits import RobotLimitsCfg  # noqa: E402
 from alexdoor_xas.assets.alex_v2_contract import build_alex_v2_runtime_manifest  # noqa: E402
 from alexdoor_xas.data_engine import DataEngineCfg  # noqa: E402
 from alexdoor_xas.kinematics.settle import validate_start_pose_settle  # noqa: E402
-from alexdoor_xas.policies.scripted import DoorPushControllerCfg  # noqa: E402
+from alexdoor_xas.policies.scripted.door_push import DoorPushControllerCfg  # noqa: E402
 
 TEST_ROBOT_LIMITS = RobotLimitsCfg()
 TEST_ROBOT_MANIFEST, TEST_ROBOT_REF = build_alex_v2_runtime_manifest()

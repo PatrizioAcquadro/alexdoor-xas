@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
@@ -404,26 +403,6 @@ def write_selected_traces(
     return retained
 
 
-def write_selected_media(
-    run_dir: str | Path, selected_media: dict[str, str | Path] | None
-) -> list[str]:
-    """Copy explicitly selected media without creating an empty directory."""
-    if not selected_media:
-        return []
-    sources = {name: Path(value) for name, value in selected_media.items()}
-    missing = [str(source) for source in sources.values() if not source.is_file()]
-    if missing:
-        raise FileNotFoundError(f"selected media does not exist: {missing}")
-    media_dir = Path(run_dir) / "media"
-    media_dir.mkdir(parents=True, exist_ok=False)
-    retained: list[str] = []
-    for name, source in sorted(sources.items()):
-        target = media_dir / f"{name}{source.suffix}"
-        shutil.copy2(source, target)
-        retained.append(str(target.relative_to(run_dir)))
-    return retained
-
-
 def evaluation_preflight(
     *,
     source_checkpoint: str | Path,
@@ -578,21 +557,3 @@ def publish_closed_loop(
         retained_optional_artifacts=retained,
     )
     return metrics
-
-
-__all__ = [
-    "aggregate_closed_loop",
-    "closed_loop_trace_payload",
-    "evaluation_preflight",
-    "factual_rollout_row",
-    "prepare_evaluation_run",
-    "protocol_rollouts",
-    "publish_closed_loop",
-    "rollout_key",
-    "trace_required",
-    "validate_evaluation_protocol",
-    "warning_family_counts",
-    "write_closed_loop_summary",
-    "write_selected_media",
-    "write_selected_traces",
-]

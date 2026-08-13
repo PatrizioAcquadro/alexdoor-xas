@@ -13,7 +13,7 @@ import pytest
 from alexdoor_xas.data_engine import plan_episodes, run_episode
 from alexdoor_xas.eval.metrics import aggregate_metrics, episode_metrics
 from alexdoor_xas.eval.sanity import check_alex_episode
-from alexdoor_xas.policies.scripted import DoorPushControllerCfg
+from alexdoor_xas.policies.scripted.door_push import DoorPushControllerCfg
 from conftest import FakeDoorPushEnv, make_test_engine_cfg
 
 _EPISODE_METRIC_KEYS = {

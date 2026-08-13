@@ -13,13 +13,17 @@ from alexdoor_xas.assets.alex_v2_contract import (
     assert_checkpoint_runtime_compatible,
 )
 from alexdoor_xas.dataset.normalize import DatasetNormStats
+from alexdoor_xas.policies.common.checkpoint import (
+    DIFFUSION_CHECKPOINT_FORMAT,
+    load_checkpoint_payload,
+)
 from alexdoor_xas.policies.common.obs import (
     OBS_CLIP,
     build_rollout_obs,
     read_door_pose_obs,
     validate_obs_preset,
 )
-from alexdoor_xas.policies.diffusion.checkpoint import load_checkpoint
+from alexdoor_xas.policies.diffusion.config import DiffusionModelCfg
 from alexdoor_xas.policies.diffusion.data import MinMaxNormalizer
 from alexdoor_xas.policies.diffusion.model import DiffusionTransformer
 from alexdoor_xas.policies.diffusion.schedulers import make_inference_scheduler, sample_actions
@@ -55,10 +59,6 @@ class DiffusionPolicy:
         self.num_inference_steps = num_inference_steps
         self.device = torch.device(device)
         self.obs_clip = obs_clip
-        self.checkpoint_config: dict | None = None
-        self.checkpoint_meta: dict | None = None
-        self.checkpoint_format: str | None = None
-        self.robot_asset: RobotAssetRef | None = None
         self.robot_compatibility_label: str | None = None
         self._action_minmax = MinMaxNormalizer.from_norm_stats(stats.action)
         self._scheduler = make_inference_scheduler(model.cfg, sampler, num_inference_steps)
@@ -76,18 +76,22 @@ class DiffusionPolicy:
         *,
         runtime_asset: RobotAssetRef,
     ) -> DiffusionPolicy:
-        loaded = load_checkpoint(path, map_location=device)
+        loaded = load_checkpoint_payload(
+            path, DIFFUSION_CHECKPOINT_FORMAT, "Diffusion", device
+        )
+        try:
+            model_cfg = DiffusionModelCfg(**loaded.model_cfg)
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"invalid Diffusion checkpoint {path}: {error}") from error
+        model = DiffusionTransformer(loaded.obs_dim, loaded.action_dim, model_cfg)
+        model.load_state_dict(loaded.state_dict)
         policy = cls(
-            loaded.model,
+            model,
             loaded.stats,
             sampler=sampler,
             num_inference_steps=num_inference_steps,
             device=device,
         )
-        policy.checkpoint_config = loaded.config
-        policy.checkpoint_meta = loaded.meta
-        policy.checkpoint_format = loaded.checkpoint_format
-        policy.robot_asset = loaded.robot_asset
         policy.robot_compatibility_label = assert_checkpoint_runtime_compatible(
             loaded.robot_asset,
             runtime_asset,
@@ -156,6 +160,3 @@ def diffusion_chunk_source(
         return policy.predict(build_rollout_obs(ctx, preset, door_pose))[:steps]
 
     return source
-
-
-__all__ = ["DiffusionPolicy", "diffusion_chunk_source"]

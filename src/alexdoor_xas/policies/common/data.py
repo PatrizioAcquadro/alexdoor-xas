@@ -1,12 +1,4 @@
-"""Dataset plumbing shared by chunk-policy trainers: splits, stats, factories.
-
-Pure numpy on top of the frozen Phase 3.0 dataset interface (torch-free, so
-gates and training scripts share one code path that can run before any
-torch/Isaac initialization). Episodes are consumed only through
-``EpisodeDataset`` / ``ChunkSampler`` / ``BatchIterator``. The dataset config
-is duck-typed: anything with ``task`` / ``space`` / ``version`` /
-``obs_preset`` fields works (ACT and Diffusion cfgs both do).
-"""
+"""Dataset loading, validation, normalization, and batch factories."""
 
 from __future__ import annotations
 
@@ -34,30 +26,23 @@ from alexdoor_xas.dataset.sampling import BatchIterator, ChunkSampler
 from alexdoor_xas.dataset.splits import load_splits, load_view_splits, splits_path, view_path
 
 EPOCH_SEED_STRIDE = 10_000
-"""Per-epoch shuffle seed = ``train_seed * stride + epoch`` (fresh order every
-epoch, reproducible across runs)."""
 
 BatchNormalizer = Callable[[dict[str, Any], DatasetNormStats], dict[str, Any]]
-"""Maps a raw ``BatchIterator`` batch to a normalized one. ACT uses the
-default z-score ``normalize_batch``; Diffusion swaps in min-max actions."""
 
 
 class PolicyDataError(ValueError):
-    """Raised when the dataset/splits/stats triple is missing or stale."""
+    """Invalid dataset, split, or normalization contract."""
 
 
 @dataclass(frozen=True)
 class PolicyData:
-    """One dataset export plus its shared splits and normalization stats."""
+    """Validated dataset inputs for policy training."""
 
     dataset: EpisodeDataset
     train_ids: tuple[str, ...]
     val_ids: tuple[str, ...]
-    test_ids: tuple[str, ...]
     stats: DatasetNormStats
-    stats_source: str  # "official" (norm_stats.json) | "computed" (non-default preset)
     robot_asset: RobotAssetRef | None
-    view_id: str | None = None
 
     @property
     def obs_dim(self) -> int:
@@ -69,12 +54,7 @@ class PolicyData:
 
 
 def load_policy_data(cfg, datasets_root: str | Path = paths.DATASETS_DIR) -> PolicyData:
-    """Load the export named by ``cfg`` and validate its active contracts.
-
-    Splits are the shared per-task file (rejects a stale pass via episode-id
-    comparison). The selected ``norm_stats.json`` is checked against schema,
-    dimensions, finite values, split membership, and direct recomputation.
-    """
+    """Load and validate dataset, splits, robot identity, and statistics."""
     dataset_dir = Path(datasets_root) / cfg.task / cfg.space / cfg.version
     try:
         dataset = EpisodeDataset(dataset_dir)
@@ -137,7 +117,7 @@ def load_policy_data(cfg, datasets_root: str | Path = paths.DATASETS_DIR) -> Pol
             f"norm stats {stats_file} do not match the dataset: " + "; ".join(official_errors)
         )
     if official.obs_preset == cfg.obs_preset:
-        stats, stats_source = official, "official"
+        stats = official
     elif selected_view is not None:
         raise PolicyDataError(
             f"view normalization {stats_file} uses {official.obs_preset!r}, not "
@@ -145,25 +125,19 @@ def load_policy_data(cfg, datasets_root: str | Path = paths.DATASETS_DIR) -> Pol
             "train-only normalization artifact"
         )
     else:
-        # Same train split, same code path as the official file — only the obs
-        # preset differs, so the recomputed stats are equally deterministic.
         stats = compute_norm_stats(dataset, train_ids, obs_preset=cfg.obs_preset)
-        stats_source = "computed"
 
     return PolicyData(
         dataset=dataset,
         train_ids=tuple(train_ids),
         val_ids=tuple(splits["val"]),
-        test_ids=tuple(splits["test"]),
         stats=stats,
-        stats_source=stats_source,
         robot_asset=robot_asset,
-        view_id=selected_view,
     )
 
 
 def normalize_batch(batch: dict[str, Any], stats: DatasetNormStats) -> dict[str, Any]:
-    """Z-score a ``BatchIterator`` batch's obs/actions (other keys pass through)."""
+    """Z-score observations and actions."""
     normalized = dict(batch)
     normalized["obs"] = stats.obs.normalize(batch["obs"])
     normalized["actions"] = stats.action.normalize(batch["actions"])
@@ -183,7 +157,7 @@ def make_train_factory(
     sampler = ChunkSampler(
         data.dataset, chunk_size, obs_preset=data.stats.obs_preset, episode_ids=ids
     )
-    drop_last = len(sampler) >= batch_size  # keep tiny overfit subsets trainable
+    drop_last = len(sampler) >= batch_size
 
     def factory(epoch: int):
         iterator = BatchIterator(
@@ -215,15 +189,3 @@ def make_eval_factory(
         return (normalize(batch, data.stats) for batch in iterator)
 
     return factory
-
-
-__all__ = [
-    "EPOCH_SEED_STRIDE",
-    "BatchNormalizer",
-    "PolicyData",
-    "PolicyDataError",
-    "load_policy_data",
-    "make_eval_factory",
-    "make_train_factory",
-    "normalize_batch",
-]

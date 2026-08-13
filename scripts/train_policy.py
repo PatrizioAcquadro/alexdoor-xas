@@ -104,12 +104,16 @@ def main() -> int:
 
     import torch
 
-    from alexdoor_xas.policies.act.checkpoint import save_checkpoint as save_act_checkpoint
     from alexdoor_xas.policies.act.policy import ActPolicy
     from alexdoor_xas.policies.act.train import (
         make_seeded_model as make_seeded_act_model,
     )
     from alexdoor_xas.policies.act.train import train_act
+    from alexdoor_xas.policies.common.checkpoint import (
+        ACT_CHECKPOINT_FORMAT,
+        DIFFUSION_CHECKPOINT_FORMAT,
+        save_checkpoint_payload,
+    )
     from alexdoor_xas.policies.common.data import (
         PolicyDataError,
         load_policy_data,
@@ -119,9 +123,6 @@ def main() -> int:
     )
     from alexdoor_xas.policies.common.data import make_train_factory as make_act_train_factory
     from alexdoor_xas.policies.common.inspect import open_loop_report
-    from alexdoor_xas.policies.diffusion.checkpoint import (
-        save_checkpoint as save_diffusion_checkpoint,
-    )
     from alexdoor_xas.policies.diffusion.data import (
         load_diffusion_data,
     )
@@ -177,6 +178,9 @@ def main() -> int:
     checkpoint_dir = run_dir / "checkpoints"
     best_path = checkpoint_dir / "best.pt"
     last_path = checkpoint_dir / "last.pt"
+    checkpoint_format = (
+        ACT_CHECKPOINT_FORMAT if policy_name == "act" else DIFFUSION_CHECKPOINT_FORMAT
+    )
     train_ids = data.train_ids
     if cfg.train.overfit_episodes is not None:
         train_ids = train_ids[: cfg.train.overfit_episodes]
@@ -244,6 +248,17 @@ def main() -> int:
             },
         )
 
+    def save_best(model_to_save, meta) -> None:
+        save_checkpoint_payload(
+            best_path,
+            checkpoint_format,
+            model_to_save,
+            resolved["config"],
+            data.stats,
+            meta,
+            data.robot_asset,
+        )
+
     try:
         tracking = nullcontext(None)
         if os.environ.get("WANDB_MODE", "disabled").strip().lower() != "disabled":
@@ -273,24 +288,7 @@ def main() -> int:
                     run.log({"epoch": stats.epoch, **_epoch_metrics(policy_name, stats)})
                 if is_best:
                     meta = _best_checkpoint_meta(policy_name, stats, run_id, ema is not None)
-                    if policy_name == "act":
-                        save_act_checkpoint(
-                            best_path,
-                            model,
-                            resolved["config"],
-                            data.stats,
-                            meta=meta,
-                            robot_asset=data.robot_asset,
-                        )
-                    else:
-                        save_diffusion_checkpoint(
-                            best_path,
-                            eval_model(),
-                            resolved["config"],
-                            data.stats,
-                            meta=meta,
-                            robot_asset=data.robot_asset,
-                        )
+                    save_best(model if policy_name == "act" else eval_model(), meta)
 
             if policy_name == "act":
                 history = train_act(
@@ -317,25 +315,9 @@ def main() -> int:
 
             if not best_path.is_file():
                 meta = {"run_id": run_id}
-                if policy_name == "act":
-                    save_act_checkpoint(
-                        best_path,
-                        model,
-                        resolved["config"],
-                        data.stats,
-                        meta=meta,
-                        robot_asset=data.robot_asset,
-                    )
-                else:
+                if policy_name == "diffusion":
                     meta["ema"] = ema is not None
-                    save_diffusion_checkpoint(
-                        best_path,
-                        eval_model(),
-                        resolved["config"],
-                        data.stats,
-                        meta=meta,
-                        robot_asset=data.robot_asset,
-                    )
+                save_best(model if policy_name == "act" else eval_model(), meta)
 
             history_payload = history.to_dict()
             write_json_atomic(run_dir / "training" / "history.json", history_payload)

@@ -1,13 +1,4 @@
-"""Denoising training loop (torch only; no Isaac imports, no file I/O).
-
-Mirrors the ACT trainer: the loop consumes *batch factories* producing
-normalized numpy batch dicts (``obs``, ``actions``, ``is_pad``), so it is
-unit-testable with hand-built batches and the script layer owns
-dataset/paths/tracking concerns. Two diffusion-specific pieces: an EMA shadow
-of the weights (the deployed policy, per the paper) and a sampled-chunk L1
-validation metric — the denoising MSE alone is a noisy selector and is not
-the quantity that matters closed-loop.
-"""
+"""Diffusion training with EMA, sampled validation, and deterministic resume."""
 
 from __future__ import annotations
 
@@ -30,12 +21,9 @@ from alexdoor_xas.policies.diffusion.schedulers import (
 )
 
 TrainBatchFactory = Callable[[int], Iterable[dict]]
-"""``epoch -> iterable of normalized numpy batch dicts`` (fresh shuffle per epoch)."""
 ValBatchFactory = Callable[[], Iterable[dict]]
 
 VAL_SAMPLING_SEED = 12345
-"""Fixed generator seed for the sampled validation metric, so best-checkpoint
-selection compares epochs on identical noise draws."""
 
 
 def make_seeded_model(
@@ -52,11 +40,7 @@ def make_seeded_model(
 
 
 class EmaModel:
-    """Exponential moving average of the model weights (paper standard).
-
-    ``decay`` is warmed up as ``min(decay, (1 + n) / (10 + n))`` so early
-    updates track the fast-moving weights instead of the random init.
-    """
+    """EMA with early-update decay warmup."""
 
     def __init__(self, model: DiffusionTransformer, decay: float) -> None:
         if not 0.0 < decay < 1.0:
@@ -167,16 +151,7 @@ def train_diffusion(
     resume_state: dict[str, Any] | None = None,
     on_checkpoint: Callable[[dict[str, Any]], None] | None = None,
 ) -> TrainHistory:
-    """Train ``model`` in place; returns the loss history.
-
-    ``scheduler`` is the training DDPM schedule (``make_train_scheduler``).
-    ``ema``, when given, is updated after every optimizer step and is the
-    model the validation metric evaluates — the caller owns it and checkpoints
-    ``ema.module``. ``on_epoch(stats, is_best)`` fires after every epoch;
-    ``is_best`` is True when this epoch produced a new best sampled val L1
-    (evaluated every ``cfg.val_every`` epochs and on the final epoch; without
-    a validation factory the train MSE stands in).
-    """
+    """Train in place and return resumable epoch history."""
     if resume_state is None:
         torch.manual_seed(cfg.seed)
     device = torch.device(cfg.device)
@@ -185,8 +160,6 @@ def train_diffusion(
         ema.module.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
 
-    # One probe pass to size the cosine schedule (batch factories are cheap
-    # numpy generators; the probe does not consume training randomness).
     steps_per_epoch = sum(1 for _ in make_train_batches(0))
     if steps_per_epoch == 0:
         raise ValueError("train batch factory yielded no batches at epoch 0")
@@ -373,14 +346,3 @@ def _to_device(batch: dict, device: torch.device) -> dict:
         key: value.to(device) if isinstance(value, torch.Tensor) else value
         for key, value in batch.items()
     }
-
-
-__all__ = [
-    "VAL_SAMPLING_SEED",
-    "EmaModel",
-    "EpochStats",
-    "TrainHistory",
-    "evaluate_sampled_l1",
-    "make_seeded_model",
-    "train_diffusion",
-]

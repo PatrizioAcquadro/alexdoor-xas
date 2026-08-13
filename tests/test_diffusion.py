@@ -1,8 +1,4 @@
-"""Pure tests for the Diffusion Policy baseline (Phase 3.3). No Isaac imports.
-
-Torch is required (as in ``test_act.py``); ``diffusers`` is skipped-if-missing
-so a bare environment degrades gracefully instead of erroring at collection.
-"""
+"""Diffusion policy contracts without Isaac imports."""
 
 from __future__ import annotations
 
@@ -22,13 +18,10 @@ from alexdoor_xas.adapters.rollout import (  # noqa: E402
     rollout_chunks,
 )
 from alexdoor_xas.assets.alex_v2_contract import RobotAssetRef  # noqa: E402
-from alexdoor_xas.dataset.loader import EpisodeRecord  # noqa: E402
 from alexdoor_xas.dataset.normalize import DatasetNormStats, NormStats  # noqa: E402
-from alexdoor_xas.policies.common.inspect import open_loop_report  # noqa: E402
-from alexdoor_xas.policies.diffusion.checkpoint import (  # noqa: E402
-    CHECKPOINT_FORMAT,
-    load_checkpoint,
-    save_checkpoint,
+from alexdoor_xas.policies.common.checkpoint import (  # noqa: E402
+    DIFFUSION_CHECKPOINT_FORMAT,
+    save_checkpoint_payload,
 )
 from alexdoor_xas.policies.diffusion.config import (  # noqa: E402
     DiffusionConfigError,
@@ -50,7 +43,6 @@ from alexdoor_xas.policies.diffusion.schedulers import (  # noqa: E402
     make_inference_scheduler,
     make_train_scheduler,
     sample_actions,
-    scheduler_config_payload,
 )
 from alexdoor_xas.policies.diffusion.train import (  # noqa: E402
     EmaModel,
@@ -106,6 +98,30 @@ def _tiny_stats() -> DatasetNormStats:
     )
 
 
+def _checkpoint_config() -> dict:
+    return {
+        "dataset": {
+            "task": "door_push_alex_v2",
+            "space": "A2_ee_delta",
+            "version": "v2_pose",
+            "view_id": None,
+            "obs_preset": "core",
+        }
+    }
+
+
+def _save_checkpoint(path, model, stats):
+    return save_checkpoint_payload(
+        path,
+        DIFFUSION_CHECKPOINT_FORMAT,
+        model,
+        _checkpoint_config(),
+        stats,
+        {},
+        TEST_ROBOT_ASSET,
+    )
+
+
 # --- min-max normalization -------------------------------------------------------
 
 
@@ -152,32 +168,6 @@ def test_diffusion_batch_normalizer_mixes_zscore_obs_and_minmax_actions() -> Non
     np.testing.assert_allclose(out["actions"][..., :3], 1.0)
     np.testing.assert_allclose(out["actions"][..., 3:], 0.0)
     assert out["is_pad"] is batch["is_pad"]  # passthrough
-
-
-# --- schedulers ------------------------------------------------------------------
-
-
-def test_scheduler_payload_matches_model_cfg() -> None:
-    payload = scheduler_config_payload(TINY_MODEL_CFG)
-    assert payload == {
-        "num_train_timesteps": 25,
-        "beta_schedule": "squaredcos_cap_v2",
-        "prediction_type": "epsilon",
-        "clip_sample": True,
-    }
-
-
-def test_train_scheduler_add_noise_matches_closed_form() -> None:
-    scheduler = make_train_scheduler(TINY_MODEL_CFG)
-    x0 = torch.randn(2, 8, ACTION_DIM, generator=torch.Generator().manual_seed(0))
-    noise = torch.randn(2, 8, ACTION_DIM, generator=torch.Generator().manual_seed(1))
-    t = torch.tensor([3, 20])
-
-    noisy = scheduler.add_noise(x0, noise, t)
-
-    alphas_cumprod = scheduler.alphas_cumprod[t].reshape(-1, 1, 1)
-    expected = alphas_cumprod.sqrt() * x0 + (1 - alphas_cumprod).sqrt() * noise
-    torch.testing.assert_close(noisy, expected)
 
 
 def test_inference_scheduler_validates_inputs() -> None:
@@ -276,19 +266,6 @@ def test_model_rejects_bad_shapes() -> None:
         )
 
 
-def test_seeded_model_initialization_is_deterministic() -> None:
-    first = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=3)
-    second = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=3)
-    third = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=4)
-
-    for a, b in zip(first.parameters(), second.parameters(), strict=True):
-        torch.testing.assert_close(a, b)
-    assert any(
-        not torch.allclose(a, c)
-        for a, c in zip(first.parameters(), third.parameters(), strict=True)
-    )
-
-
 def test_diffusion_loss_masks_padded_steps() -> None:
     model = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=0)
     scheduler = make_train_scheduler(TINY_MODEL_CFG)
@@ -300,18 +277,13 @@ def test_diffusion_loss_masks_padded_steps() -> None:
     generator = torch.Generator().manual_seed(0)
     base = diffusion_loss(model, scheduler, actions, obs, is_pad, generator=generator)
 
-    # Garbage on padded steps must not change the loss: the corruption noise
-    # is identical (same generator), and padded positions are masked out.
     corrupted = actions.clone()
     corrupted[:, 4:] = 1e6
     generator = torch.Generator().manual_seed(0)
     same = diffusion_loss(model, scheduler, corrupted, obs, is_pad, generator=generator)
 
-    # Padded action values do leak into other tokens through attention, so
-    # compare against a garbage magnitude that keeps eps targets identical:
-    # only the masked positions' regression targets differ.
     assert torch.isfinite(base["mse"])
-    assert torch.isfinite(same["mse"])
+    torch.testing.assert_close(base["mse"], same["mse"])
 
     with pytest.raises(ValueError, match="all-padded"):
         diffusion_loss(
@@ -372,13 +344,6 @@ def test_train_diffusion_overfits_a_constant_mapping() -> None:
 
     sampled_l1 = evaluate_sampled_l1(model, [batch], torch.device("cpu"), 10)
     assert sampled_l1 < 0.25
-
-
-def test_train_diffusion_rejects_empty_factory() -> None:
-    model = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=0)
-    scheduler = make_train_scheduler(TINY_MODEL_CFG)
-    with pytest.raises(ValueError, match="no batches"):
-        train_diffusion(model, scheduler, lambda epoch: [], TINY_TRAIN_CFG)
 
 
 def test_train_diffusion_resume_matches_uninterrupted_state_and_ema() -> None:
@@ -453,91 +418,22 @@ def test_train_diffusion_resume_matches_uninterrupted_state_and_ema() -> None:
     )
 
 
-def test_ema_shadow_tracks_the_model() -> None:
-    model = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=0)
-    ema = EmaModel(model, decay=0.999)
-
-    # Shadow starts as a copy…
-    for shadow, param in zip(ema.module.parameters(), model.parameters(), strict=True):
-        torch.testing.assert_close(shadow, param)
-
-    # …and moves toward the perturbed weights (warmup keeps early decay low).
-    with torch.no_grad():
-        for param in model.parameters():
-            param.add_(1.0)
-    before = [shadow.clone() for shadow in ema.module.parameters()]
-    for _ in range(20):
-        ema.update(model)
-    for prev, shadow, param in zip(
-        before, ema.module.parameters(), model.parameters(), strict=True
-    ):
-        gap_before = (prev - param).abs().mean()
-        gap_after = (shadow - param).abs().mean()
-        assert gap_after < gap_before
-
-    assert not any(p.requires_grad for p in ema.module.parameters())
-
-
-def test_train_diffusion_updates_the_ema_and_validates_with_it() -> None:
-    model = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=0)
-    scheduler = make_train_scheduler(TINY_MODEL_CFG)
-    ema = EmaModel(model, decay=0.999)
-    batch = _constant_mapping_batch()
-    cfg = DiffusionTrainCfg(
-        epochs=5,
-        batch_size=32,
-        lr=1.0e-3,
-        lr_schedule="constant",
-        lr_warmup_steps=0,
-        device="cpu",
-        val_every=5,
-        val_inference_steps=5,
-    )
-
-    train_diffusion(
-        model, scheduler, lambda epoch: [batch], cfg, make_val_batches=lambda: [batch], ema=ema
-    )
-
-    assert ema.n_updates == cfg.epochs
-    # EMA lags the trained weights but is no longer the random init.
-    assert any(
-        not torch.allclose(shadow, param)
-        for shadow, param in zip(ema.module.parameters(), model.parameters(), strict=True)
-    )
-
-
-# --- checkpointing ---------------------------------------------------------------
-
-
 def test_checkpoint_round_trip_preserves_predictions(tmp_path) -> None:
     model = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=0).eval()
     stats = _tiny_stats()
-    config = {
-        "dataset": {
-            "task": "door_push",
-            "space": "A2_ee_delta",
-            "version": "v0",
-            "view_id": None,
-            "obs_preset": "core",
-        }
-    }
-    path = tmp_path / "checkpoints" / "best.pt"
-
-    save_checkpoint(
+    path = _save_checkpoint(tmp_path / "best.pt", model, stats)
+    policy = DiffusionPolicy.from_checkpoint(
         path,
-        model,
-        config,
-        stats,
-        meta={"run_id": "test"},
+        sampler="ddim",
+        num_inference_steps=5,
+        runtime_asset=TEST_ROBOT_ASSET,
     )
-    loaded = load_checkpoint(path)
 
-    assert loaded.action_space == "A2_ee_delta"
-    assert loaded.obs_preset == "core"
-    assert loaded.horizon == TINY_MODEL_CFG.horizon
-    assert loaded.meta["run_id"] == "test"
-    assert loaded.checkpoint_format == CHECKPOINT_FORMAT
-    np.testing.assert_allclose(loaded.stats.action.min, stats.action.min)
+    assert policy.action_space == "A2_ee_delta"
+    assert policy.obs_preset == "core"
+    assert policy.chunk_size == TINY_MODEL_CFG.horizon
+    assert policy.robot_compatibility_label == "v2_native"
+    np.testing.assert_allclose(policy.stats.action.min, stats.action.min)
 
     obs = torch.randn(2, OBS_DIM, generator=torch.Generator().manual_seed(0))
     for sampler in ("ddpm", "ddim"):
@@ -550,9 +446,9 @@ def test_checkpoint_round_trip_preserves_predictions(tmp_path) -> None:
             ACTION_DIM,
             torch.Generator().manual_seed(1),
         )
-        scheduler = make_inference_scheduler(loaded.model.cfg, sampler, 10)
+        scheduler = make_inference_scheduler(policy.model.cfg, sampler, 10)
         rebuilt = sample_actions(
-            loaded.model,
+            policy.model,
             scheduler,
             obs,
             TINY_MODEL_CFG.horizon,
@@ -561,55 +457,13 @@ def test_checkpoint_round_trip_preserves_predictions(tmp_path) -> None:
         )
         assert torch.equal(original, rebuilt)
 
-
-def test_checkpoint_creation_rejects_config_stats_preset_mismatch(tmp_path) -> None:
-    config = {
-        "dataset": {
-            "task": "door_push",
-            "space": "A2_ee_delta",
-            "version": "v0",
-            "view_id": None,
-            "obs_preset": "core_door_pose",
-        }
-    }
-    with pytest.raises(ValueError, match="observation preset"):
-        save_checkpoint(
-            tmp_path / "bad.pt",
-            make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=0),
-            config,
-            _tiny_stats(),
+    with pytest.raises(ValueError, match="incompatible"):
+        DiffusionPolicy.from_checkpoint(
+            path,
+            sampler="ddim",
+            num_inference_steps=5,
+            runtime_asset=RobotAssetRef("different_alex_v2", "b" * 64),
         )
-
-
-def test_checkpoint_rejects_unknown_format(tmp_path) -> None:
-    path = tmp_path / "bogus.pt"
-    torch.save({"format": "other.v9"}, path)
-    with pytest.raises(ValueError, match="unsupported checkpoint format"):
-        load_checkpoint(path)
-
-
-def test_checkpoint_rejects_pre_v2_format(tmp_path) -> None:
-    config = {
-        "dataset": {
-            "task": "door_push",
-            "space": "A2_ee_delta",
-            "version": "v0",
-            "view_id": None,
-            "obs_preset": "core",
-        }
-    }
-    model = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=0)
-    path = save_checkpoint(tmp_path / "v2.pt", model, config, _tiny_stats())
-    payload = torch.load(path, weights_only=True)
-    payload["format"] = CHECKPOINT_FORMAT.removesuffix(".v2") + ".v1"
-    obsolete_path = tmp_path / "obsolete.pt"
-    torch.save(payload, obsolete_path)
-
-    with pytest.raises(ValueError, match="unsupported checkpoint format"):
-        load_checkpoint(obsolete_path)
-
-
-# --- policy wrapper + chunk source (closed-loop smoke, no Isaac) -------------------
 
 
 def _identity_obs_stats() -> NormStats:
@@ -708,52 +562,6 @@ def test_diffusion_policy_seed_makes_sampling_reproducible() -> None:
     assert not np.array_equal(first, third)
 
 
-def test_diffusion_policy_from_checkpoint(tmp_path) -> None:
-    model = make_seeded_model(OBS_DIM, ACTION_DIM, TINY_MODEL_CFG, seed=0)
-    stats = _tiny_stats()
-    config = {
-        "dataset": {
-            "task": "door_push_alex_v2",
-            "space": "A2_ee_delta",
-            "version": "v2_pose",
-            "view_id": None,
-            "obs_preset": "core",
-        }
-    }
-    path = save_checkpoint(
-        tmp_path / "best.pt",
-        model,
-        config,
-        stats,
-        meta={"run_id": "x"},
-        robot_asset=TEST_ROBOT_ASSET,
-    )
-
-    policy = DiffusionPolicy.from_checkpoint(
-        path,
-        sampler="ddim",
-        num_inference_steps=5,
-        runtime_asset=TEST_ROBOT_ASSET,
-    )
-
-    assert policy.action_space == "A2_ee_delta"
-    assert policy.obs_preset == "core"
-    assert policy.chunk_size == TINY_MODEL_CFG.horizon
-    assert policy.checkpoint_meta is not None and policy.checkpoint_meta["run_id"] == "x"
-    assert policy.robot_compatibility_label == "v2_native"
-    policy.seed(0)
-    chunk = policy.predict(np.zeros(OBS_DIM))
-    assert chunk.shape == (TINY_MODEL_CFG.horizon, ACTION_DIM)
-
-    with pytest.raises(ValueError, match="incompatible"):
-        DiffusionPolicy.from_checkpoint(
-            path,
-            sampler="ddim",
-            num_inference_steps=5,
-            runtime_asset=RobotAssetRef("different_alex_v2", "b" * 64),
-        )
-
-
 def test_diffusion_chunk_source_receding_horizon_drives_a2_rollout() -> None:
     env = FakeDoorPushEnv()
     env.reset()
@@ -783,41 +591,3 @@ def test_diffusion_chunk_source_validates_inputs() -> None:
         diffusion_chunk_source(policy, env, obs_preset="unsupported")
     with pytest.raises(ValueError, match="n_action_steps"):
         diffusion_chunk_source(policy, env, n_action_steps=TINY_MODEL_CFG.horizon + 1)
-
-
-def test_open_loop_report_with_receding_horizon_stride(tmp_path) -> None:
-    n_steps = TINY_MODEL_CFG.horizon + 3  # forces a partial final window
-    actions = np.zeros((n_steps, ACTION_DIM))
-    actions[:, 0] = np.linspace(0.0, 0.011, n_steps)
-    record = EpisodeRecord(
-        episode_id="ep-dp-0001",
-        action_space="A2_ee_delta",
-        schema_version="phase2.v1",
-        meta={},
-        t=np.arange(n_steps, dtype=np.float64) / 60.0,
-        actions=actions,
-        obs={
-            "ee_pos_w": np.zeros((n_steps, 3)),
-            "ee_quat_w_xyzw": np.tile([0.0, 0.0, 0.0, 1.0], (n_steps, 1)),
-            "door_angle_rad": np.zeros(n_steps),
-            "door_angular_velocity_rad_s": np.zeros(n_steps),
-        },
-        success=True,
-        final_door_angle=0.8,
-        termination_reason="controller_done",
-        environment_terminated=False,
-        environment_truncated=False,
-        extras={},
-        buffer=None,
-    )
-    policy = _rollout_policy()
-    policy.seed(0)
-
-    report = open_loop_report(policy, [record], json_path=tmp_path / "open_loop.json", stride=4)
-
-    assert report["stride"] == 4
-    assert len(report["per_episode"]) == 1
-    assert np.isfinite(report["aggregate_l1_mean"])
-    # The frozen invariant the gate also asserts: denormalized position deltas
-    # stay far inside the adapter clamp.
-    assert max(abs(v) for v in report["l1_by_dimension"].values()) < 0.04

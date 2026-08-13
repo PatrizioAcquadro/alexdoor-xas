@@ -121,6 +121,3 @@ def _open_loop_summary(
     fig.savefig(path, dpi=150)
     plt.close(fig)
     return path
-
-
-__all__ = ["open_loop_report", "predict_episode_open_loop"]

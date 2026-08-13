@@ -16,24 +16,23 @@ from alexdoor_xas.dataset.normalize import DatasetNormStats, NormStats
 from alexdoor_xas.policies.common.runs import torch_save_atomic
 
 DATASET_FIELDS = ("task", "space", "version", "obs_preset", "view_id")
+ACT_CHECKPOINT_FORMAT = "alexdoor_xas.act.v2"
+DIFFUSION_CHECKPOINT_FORMAT = "alexdoor_xas.diffusion.v2"
 
 
 @dataclass(frozen=True)
 class CheckpointPayload:
-    """Validated model-neutral fields from one learned-policy checkpoint."""
+    """Fields required to reconstruct a policy."""
 
     state_dict: Mapping[str, Any]
     obs_dim: int
     action_dim: int
     model_cfg: dict[str, Any]
-    dataset: dict[str, Any]
     stats: DatasetNormStats
-    meta: dict[str, Any]
-    checkpoint_format: str
     robot_asset: RobotAssetRef | None
 
 
-def dataset_descriptor(config: Mapping[str, Any]) -> dict[str, Any]:
+def _dataset_descriptor(config: Mapping[str, Any]) -> dict[str, Any]:
     source = config.get("dataset")
     if not isinstance(source, Mapping):
         raise ValueError("checkpoint config requires a dataset mapping")
@@ -47,7 +46,7 @@ def dataset_descriptor(config: Mapping[str, Any]) -> dict[str, Any]:
     return descriptor
 
 
-def stats_payload(stats: DatasetNormStats) -> dict[str, Any]:
+def _stats_payload(stats: DatasetNormStats) -> dict[str, Any]:
     return {
         "action": stats.action.to_dict(),
         "obs": stats.obs.to_dict(),
@@ -58,7 +57,7 @@ def stats_payload(stats: DatasetNormStats) -> dict[str, Any]:
     }
 
 
-def stats_from_payload(payload: Mapping[str, Any]) -> DatasetNormStats:
+def _stats_from_payload(payload: Mapping[str, Any]) -> DatasetNormStats:
     try:
         view_id = payload.get("view_id")
         return DatasetNormStats(
@@ -73,7 +72,7 @@ def stats_from_payload(payload: Mapping[str, Any]) -> DatasetNormStats:
         raise ValueError(f"invalid checkpoint normalization stats: {error}") from error
 
 
-def validate_checkpoint_contract(
+def _validate_checkpoint_contract(
     *,
     dataset: Mapping[str, Any],
     stats: DatasetNormStats,
@@ -115,7 +114,7 @@ def validate_checkpoint_contract(
         raise ValueError("Alex V2 checkpoints require robot identity")
 
 
-def robot_asset_from_payload(payload: Any) -> RobotAssetRef | None:
+def _robot_asset_from_payload(payload: Any) -> RobotAssetRef | None:
     if payload is None:
         return None
     try:
@@ -135,9 +134,9 @@ def save_checkpoint_payload(
     robot_asset: RobotAssetRef | None = None,
 ) -> Path:
     """Validate and atomically write the shared v2 checkpoint payload."""
-    dataset = dataset_descriptor(config)
+    dataset = _dataset_descriptor(config)
     state_dict = model.state_dict()
-    validate_checkpoint_contract(
+    _validate_checkpoint_contract(
         dataset=dataset,
         stats=stats,
         obs_dim=model.obs_dim,
@@ -156,7 +155,7 @@ def save_checkpoint_payload(
             "action_dim": model.action_dim,
             "model_cfg": asdict(model.cfg),
             "dataset": dataset,
-            "norm_stats": stats_payload(stats),
+            "norm_stats": _stats_payload(stats),
             "robot_asset": robot_asset.to_dict() if robot_asset is not None else None,
             "meta": dict(meta or {}),
         },
@@ -185,12 +184,12 @@ def load_checkpoint_payload(
             raise TypeError("model_cfg must be a mapping")
         model_cfg = dict(raw_model_cfg)
         state_dict = payload["state_dict"]
-        dataset = dataset_descriptor({"dataset": payload["dataset"]})
-        stats = stats_from_payload(payload["norm_stats"])
-        robot_asset = robot_asset_from_payload(payload.get("robot_asset"))
+        dataset = _dataset_descriptor({"dataset": payload["dataset"]})
+        stats = _stats_from_payload(payload["norm_stats"])
+        robot_asset = _robot_asset_from_payload(payload.get("robot_asset"))
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError(f"invalid {checkpoint_label} checkpoint {path}: {error}") from error
-    validate_checkpoint_contract(
+    _validate_checkpoint_contract(
         dataset=dataset,
         stats=stats,
         obs_dim=obs_dim,
@@ -198,29 +197,11 @@ def load_checkpoint_payload(
         state_dict=state_dict,
         robot_asset=robot_asset,
     )
-    meta = payload.get("meta") or {}
-    if not isinstance(meta, dict):
-        raise ValueError("checkpoint meta must be a mapping")
     return CheckpointPayload(
         state_dict=state_dict,
         obs_dim=obs_dim,
         action_dim=action_dim,
         model_cfg=model_cfg,
-        dataset=dataset,
         stats=stats,
-        meta=dict(meta),
-        checkpoint_format=str(checkpoint_format),
         robot_asset=robot_asset,
     )
-
-
-__all__ = [
-    "CheckpointPayload",
-    "dataset_descriptor",
-    "load_checkpoint_payload",
-    "robot_asset_from_payload",
-    "save_checkpoint_payload",
-    "stats_from_payload",
-    "stats_payload",
-    "validate_checkpoint_contract",
-]

@@ -1,16 +1,4 @@
-"""Deterministic scripted door-push controller (Phase 2 baseline).
-
-A small finite-state machine that drives the Alex right-gripper EE through::
-
-    APPROACH -> ALIGN -> PRE_CONTACT -> CONTACT -> PUSH -> HOLD -> RELEASE
-
-Everything is expressed **door-relative**: waypoints live in the panel frame
-(they move with the door), the emitted per-tick command is a 6-dim EE delta in
-the hinge-anchored *door frame* (the A3 representation), and the controller
-never sees world coordinates except through the door frame it is given. It is
-pure Python/numpy — no Isaac imports — so the FSM is unit-testable against
-synthetic door kinematics.
-"""
+"""Deterministic door-frame FSM emitting A3 EE deltas and A4 chunks."""
 
 from __future__ import annotations
 
@@ -48,49 +36,32 @@ PHASE_ORDER: tuple[DoorPushPhase, ...] = (
 
 @dataclass(frozen=True)
 class DoorPushControllerCfg:
-    """Door-relative geometry and per-phase budgets for the scripted push.
-
-    Distances are meters, angles radians. The panel occupies
-    ``x in [0, panel_thickness_m]``, ``y in [0, panel_width_m]``, and
-    ``z in [-panel_height_m/2, panel_height_m/2]`` in the panel frame; pushing
-    the +X face toward -X produces positive hinge torque (opens the door).
-    """
+    """Door-frame geometry in meters/radians and per-phase tick budgets."""
 
     panel_width_m: float = 0.83
     panel_height_m: float = 2.0
     panel_thickness_m: float = 0.036
 
     push_radius_frac: float = 0.8
-    """Push point distance from the hinge, as a fraction of the panel width."""
     push_height_m: float = -0.30
-    """Push point height in the door frame (0 = hinge-origin height, i.e. panel
-    mid-height). Kept below -0.15 so the tool point stays on the flat panel
-    face and clears the handle, which protrudes around door-frame y in
-    [0.63, 0.80], z in [0.0, 0.09]."""
+    """Below -0.15 m clears the handle band."""
 
     approach_standoff_m: float = 0.35
     align_standoff_m: float = 0.12
     pre_contact_clearance_m: float = 0.010
     contact_clearance_m: float = -0.005
-    """Commanded surface clearance while pushing (slightly inside the face)."""
     release_standoff_m: float = 0.30
 
     approach_tol_m: float = 0.020
     align_tol_m: float = 0.010
     pre_contact_tol_m: float = 0.005
     contact_eps_m: float = 0.002
-    """Inferred contact: tool point within this distance of the panel face."""
 
     target_open_angle_rad: float = math.radians(50.0)
     hold_ticks: int = 30
     max_step_m: float = 0.015
     contact_approach_max_step_m: float | None = None
-    """Optional tighter translation limit for PRE_CONTACT and CONTACT.
-
-    ``None`` preserves the general controller's historical ``max_step_m``.
-    Collision-heavy robot presets can slow only the final normal approach
-    without lengthening free-space motion or the tangential push.
-    """
+    """Optional PRE_CONTACT/CONTACT translation limit."""
 
     approach_max_ticks: int = 300
     align_max_ticks: int = 150
@@ -126,7 +97,6 @@ class DoorPushObservation:
 
     door_frame: ObjectFrame
     hinge_angle_rad: float
-    hinge_velocity_rad_s: float
     ee_pos_w: np.ndarray  # (3,)
     contact_sensed: bool
 
@@ -140,7 +110,6 @@ class DoorPushCommand:
     done: bool
     timed_out: bool
     contact_inferred: bool
-    target_door_frame: np.ndarray  # (3,) — waypoint the delta tracks, door frame
 
 
 @dataclass(frozen=True)
@@ -166,11 +135,7 @@ class DoorPushVariation:
 
 @dataclass(frozen=True)
 class VariationBounds:
-    """Sampling ranges for :func:`sample_variation`.
-
-    Defaults preserve the frozen task ranges and RNG draw order; calibrated
-    robot-specific presets may narrow them.
-    """
+    """Seeded variation bounds."""
 
     start_offset_low: tuple[float, float, float] = (-0.05, -0.15, -0.10)
     start_offset_high: tuple[float, float, float] = (0.15, 0.15, 0.10)
@@ -181,11 +146,7 @@ class VariationBounds:
 def sample_variation(
     rng: np.random.Generator, bounds: VariationBounds | None = None
 ) -> DoorPushVariation:
-    """Draw one bounded variation; deterministic given the generator state.
-
-    Default bounds keep push heights below the handle band (see
-    ``DoorPushControllerCfg``); pass ``bounds`` for robot-specific ranges.
-    """
+    """Draw one bounded variation from the supplied generator."""
     bounds = bounds or VariationBounds()
     offset = rng.uniform(low=bounds.start_offset_low, high=bounds.start_offset_high)
     return DoorPushVariation(
@@ -232,14 +193,14 @@ class DoorPushController:
         contact = obs.contact_sensed
 
         if state.phase is DoorPushPhase.DONE or state.timed_out:
-            return self._command(np.zeros(3), ee_door, contact_geometric)
+            return self._command(np.zeros(3), contact_geometric)
 
         target_door = self._phase_target_door(state.phase, obs.hinge_angle_rad)
         transition = self._phase_complete(state.phase, ee_door, target_door, obs, contact)
         if transition:
             self._advance_phase(obs)
             if self._state.phase is DoorPushPhase.DONE:
-                return self._command(np.zeros(3), ee_door, contact_geometric)
+                return self._command(np.zeros(3), contact_geometric)
             target_door = self._phase_target_door(self._state.phase, obs.hinge_angle_rad)
 
         state = self._state
@@ -248,7 +209,7 @@ class DoorPushController:
         if state.ticks_in_phase > cfg.phase_budget(state.phase):
             state.timed_out = True
             self._close_open_chunk()
-            return self._command(np.zeros(3), ee_door, contact_geometric)
+            return self._command(np.zeros(3), contact_geometric)
 
         if state.phase is DoorPushPhase.HOLD:
             step = np.zeros(3)
@@ -265,14 +226,12 @@ class DoorPushController:
                 step = error * (max_step_m / distance)
             else:
                 step = error
-        return self._command(step, target_door, contact_geometric)
+        return self._command(step, contact_geometric)
 
     def finalize(self) -> list[ObjectCentricChunk]:
         """Close and return the episode's A4 chunks."""
         self._close_open_chunk()
         return self._chunks
-
-    # -- FSM internals ---------------------------------------------------------
 
     def _phase_target_door(self, phase: DoorPushPhase, hinge_angle_rad: float) -> np.ndarray:
         cfg = self.cfg
@@ -364,9 +323,7 @@ class DoorPushController:
         )
         self._open_chunk_start_tick = self._total_ticks
 
-    def _command(
-        self, step_door: np.ndarray, target_door: np.ndarray, contact: bool
-    ) -> DoorPushCommand:
+    def _command(self, step_door: np.ndarray, contact: bool) -> DoorPushCommand:
         delta = np.zeros(EE_DELTA_DIM)
         delta[:3] = step_door
         state = self._state
@@ -376,18 +333,4 @@ class DoorPushController:
             done=state.phase is DoorPushPhase.DONE,
             timed_out=state.timed_out,
             contact_inferred=contact,
-            target_door_frame=np.asarray(target_door, dtype=np.float64).reshape(3),
         )
-
-
-__all__ = [
-    "PHASE_ORDER",
-    "DoorPushCommand",
-    "DoorPushController",
-    "DoorPushControllerCfg",
-    "DoorPushObservation",
-    "DoorPushPhase",
-    "DoorPushVariation",
-    "VariationBounds",
-    "sample_variation",
-]

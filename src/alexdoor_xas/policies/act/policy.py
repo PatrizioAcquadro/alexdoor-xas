@@ -13,8 +13,12 @@ from alexdoor_xas.assets.alex_v2_contract import (
     assert_checkpoint_runtime_compatible,
 )
 from alexdoor_xas.dataset.normalize import DatasetNormStats
-from alexdoor_xas.policies.act.checkpoint import load_checkpoint
+from alexdoor_xas.policies.act.config import ActModelCfg
 from alexdoor_xas.policies.act.model import ACTModel
+from alexdoor_xas.policies.common.checkpoint import (
+    ACT_CHECKPOINT_FORMAT,
+    load_checkpoint_payload,
+)
 from alexdoor_xas.policies.common.obs import (
     OBS_CLIP,
     build_rollout_obs,
@@ -43,10 +47,6 @@ class ActPolicy:
         self.stats = stats
         self.device = torch.device(device)
         self.obs_clip = obs_clip
-        self.checkpoint_config: dict | None = None
-        self.checkpoint_meta: dict | None = None
-        self.checkpoint_format: str | None = None
-        self.robot_asset: RobotAssetRef | None = None
         self.robot_compatibility_label: str | None = None
         self.model.to(self.device)
         self.model.eval()
@@ -59,12 +59,14 @@ class ActPolicy:
         *,
         runtime_asset: RobotAssetRef,
     ) -> ActPolicy:
-        loaded = load_checkpoint(path, map_location=device)
-        policy = cls(loaded.model, loaded.stats, device=device)
-        policy.checkpoint_config = loaded.config
-        policy.checkpoint_meta = loaded.meta
-        policy.checkpoint_format = loaded.checkpoint_format
-        policy.robot_asset = loaded.robot_asset
+        loaded = load_checkpoint_payload(path, ACT_CHECKPOINT_FORMAT, "ACT", device)
+        try:
+            model_cfg = ActModelCfg(**loaded.model_cfg)
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"invalid ACT checkpoint {path}: {error}") from error
+        model = ACTModel(loaded.obs_dim, loaded.action_dim, model_cfg)
+        model.load_state_dict(loaded.state_dict)
+        policy = cls(model, loaded.stats, device=device)
         policy.robot_compatibility_label = assert_checkpoint_runtime_compatible(
             loaded.robot_asset,
             runtime_asset,
@@ -133,10 +135,3 @@ def act_chunk_source(
         return action.reshape(1, -1)
 
     return ensemble_source
-
-
-__all__ = [
-    "OBS_CLIP",
-    "ActPolicy",
-    "act_chunk_source",
-]
