@@ -1,13 +1,4 @@
-"""Start-pose settle postcondition (pure numpy; shared by envs and tests).
-
-``set_ee_pose_w`` on an articulated executor can only *drive* the EE toward a
-requested start pose through its kinematics — the request is not guaranteed to
-be realized. This helper is the fail-closed postcondition: it measures the
-realized-vs-requested residual against an explicit tolerance and produces the
-provenance record (requested pose, realized pose, residual, settle ticks,
-result) that episodes and eval rows carry, so pose-stratified claims always
-refer to realized start states.
-"""
+"""Fail-closed validation for realized start poses."""
 
 from __future__ import annotations
 
@@ -15,12 +6,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-
-DEFAULT_START_POSE_TOLERANCE_M = 0.01
-"""Fail-closed position residual bound (meters). The settle loop itself
-targets < 0.005 m before breaking early; twice that target (and half the
-0.02 m per-tick command clamp) separates routine settle noise from a start
-pose that was genuinely not reached."""
 
 
 class StartPoseError(RuntimeError):
@@ -33,7 +18,7 @@ class StartPoseError(RuntimeError):
 
 @dataclass(frozen=True)
 class SettleReport:
-    """Realized-state evidence for one ``set_ee_pose_w`` request."""
+    """Evidence for one realized start-pose request."""
 
     requested_pos_m: tuple[float, float, float]
     realized_pos_m: tuple[float, float, float]
@@ -43,8 +28,6 @@ class SettleReport:
     max_settle_ticks: int
     passed: bool
     orientation_checked: bool = False
-    """False: orientation is not part of the request (position-mode IK
-    ignores it), so no orientation residual is defined."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -59,21 +42,15 @@ class SettleReport:
         }
 
 
-def check_settle_postcondition(
+def validate_start_pose_settle(
     requested_pos_m,
     realized_pos_m,
     *,
     settle_ticks_used: int,
     max_settle_ticks: int,
-    tolerance_m: float = DEFAULT_START_POSE_TOLERANCE_M,
-    strict: bool = True,
+    tolerance_m: float,
 ) -> SettleReport:
-    """Measure the settle residual; fail closed when it exceeds tolerance.
-
-    Raises :class:`StartPoseError` (``strict=True``, the default) instead of
-    letting an unrealized start pose silently contaminate an episode or an
-    evaluation rollout.
-    """
+    """Return settle evidence or raise when the realized position is invalid."""
     if not np.isfinite(tolerance_m) or tolerance_m <= 0.0:
         raise ValueError("tolerance_m must be finite and positive")
     requested = np.asarray(requested_pos_m, dtype=np.float64).reshape(3)
@@ -90,7 +67,7 @@ def check_settle_postcondition(
         max_settle_ticks=int(max_settle_ticks),
         passed=passed,
     )
-    if strict and not passed:
+    if not passed:
         raise StartPoseError(
             f"start pose not realized: residual {residual:.4f} m exceeds the "
             f"{tolerance_m:.4f} m tolerance after {settle_ticks_used}/"
@@ -99,11 +76,3 @@ def check_settle_postcondition(
             report,
         )
     return report
-
-
-__all__ = [
-    "DEFAULT_START_POSE_TOLERANCE_M",
-    "SettleReport",
-    "StartPoseError",
-    "check_settle_postcondition",
-]

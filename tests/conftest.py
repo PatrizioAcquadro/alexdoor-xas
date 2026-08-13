@@ -18,7 +18,7 @@ from alexdoor_xas.action.frames import ObjectFrame, rot_z  # noqa: E402
 from alexdoor_xas.adapters.limits import RobotLimitsCfg  # noqa: E402
 from alexdoor_xas.assets.alex_v2_contract import build_alex_v2_runtime_manifest  # noqa: E402
 from alexdoor_xas.data_engine import DataEngineCfg  # noqa: E402
-from alexdoor_xas.kinematics import check_settle_postcondition  # noqa: E402
+from alexdoor_xas.kinematics.settle import validate_start_pose_settle  # noqa: E402
 from alexdoor_xas.policies.scripted import DoorPushControllerCfg  # noqa: E402
 
 TEST_ROBOT_LIMITS = RobotLimitsCfg()
@@ -82,6 +82,7 @@ class FakeDoorPushEnv:
         decimation = 2
         max_pos_delta_m = 0.02
         max_rot_delta_rad = 0.05
+        start_pose_tolerance_m = 0.01
 
     cfg = _Cfg()
 
@@ -151,11 +152,12 @@ class FakeDoorPushEnv:
         assert self.world is not None
         requested = pos_w.detach().cpu().numpy().reshape(3).astype(np.float64)
         self.world.ee_pos_w = requested.copy()
-        self._last_settle_report = check_settle_postcondition(
+        self._last_settle_report = validate_start_pose_settle(
             requested,
             self.world.ee_pos_w,
             settle_ticks_used=0,
             max_settle_ticks=90,
+            tolerance_m=self.cfg.start_pose_tolerance_m,
         ).to_dict()
 
     def start_pose_settle_report(self):

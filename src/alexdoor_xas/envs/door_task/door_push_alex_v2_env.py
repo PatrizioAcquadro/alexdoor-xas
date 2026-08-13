@@ -13,6 +13,7 @@ from isaaclab.assets import Articulation
 from isaaclab.controllers import DifferentialIKController, DifferentialIKControllerCfg
 from isaaclab.envs import DirectRLEnv
 from isaaclab.sensors import ContactSensor
+from isaaclab.utils.math import combine_frame_transforms
 
 from alexdoor_xas.assets.alex_v2 import build_alex_v2_door_asset, load_alex_v2_articulation_cfg
 from alexdoor_xas.assets.alex_v2_tool_frame import derive_right_gripper_tool_frame
@@ -21,8 +22,8 @@ from alexdoor_xas.calibration.alex_v2_door import (
     AlexV2DoorCalibration,
     load_alex_v2_door_calibration,
 )
-from alexdoor_xas.kinematics import StartPoseError, check_settle_postcondition
-from alexdoor_xas.kinematics.offset_point import compose_offset_pose_xyzw, link_jacobian_to_point
+from alexdoor_xas.kinematics.point_jacobian import link_jacobian_to_point
+from alexdoor_xas.kinematics.settle import StartPoseError, validate_start_pose_settle
 
 from .contact_force import sum_actor_contact_force
 from .door_push_alex_v2_env_cfg import (
@@ -104,11 +105,18 @@ class DoorPushAlexV2Env(DirectRLEnv):
         self._calibration = calibration
         self._robot_asset = runtime_asset
         self._runtime_manifest = deepcopy(asset.manifest)
-        self._tool_translation_link = tuple(calibration.tool_frame["translation_m"])
-        self._tool_orientation_link_xyzw = tuple(calibration.tool_frame["orientation_xyzw"])
         self._door_contact_actor_id: int | None = None
 
         super().__init__(cfg, render_mode, **kwargs)
+
+        self._tool_translation_link = torch.tensor(
+            [calibration.tool_frame["translation_m"]], dtype=torch.float32, device=self.device
+        )
+        self._tool_orientation_link_xyzw = torch.tensor(
+            [calibration.tool_frame["orientation_xyzw"]],
+            dtype=torch.float32,
+            device=self.device,
+        )
 
         hinge_matches = [
             index
@@ -309,7 +317,7 @@ class DoorPushAlexV2Env(DirectRLEnv):
 
         realized, _ = self._ee_pose_w()
         try:
-            report = check_settle_postcondition(
+            report = validate_start_pose_settle(
                 goal[0].detach().cpu().numpy(),
                 realized[0].detach().cpu().numpy(),
                 settle_ticks_used=ticks_used,
@@ -452,15 +460,17 @@ class DoorPushAlexV2Env(DirectRLEnv):
     def _ee_pose_w(self) -> tuple[torch.Tensor, torch.Tensor]:
         link_pos = _as_torch(self._robot.data.body_pos_w)[:, self._ee_body_idx]
         link_quat = _as_torch(self._robot.data.body_quat_w)[:, self._ee_body_idx]
-        translation = link_pos.new_tensor(self._tool_translation_link)
-        orientation = link_quat.new_tensor(self._tool_orientation_link_xyzw)
-        tool_pos, tool_quat = compose_offset_pose_xyzw(
+        tool_pos, tool_quat = combine_frame_transforms(
             link_pos,
             link_quat,
-            translation,
-            orientation,
+            self._tool_translation_link,
+            self._tool_orientation_link_xyzw,
         )
-        return tool_pos.clone(), tool_quat.clone()
+        if tool_pos.shape != (1, 3) or tool_quat.shape != (1, 4):
+            raise RuntimeError("Alex V2 tool pose must have shapes (1, 3) and (1, 4)")
+        if not bool(torch.isfinite(tool_pos).all() & torch.isfinite(tool_quat).all()):
+            raise RuntimeError("Alex V2 tool pose must be finite")
+        return tool_pos, tool_quat
 
     def _point_jacobian_w(self) -> torch.Tensor:
         link_quat = _as_torch(self._robot.data.body_quat_w)[:, self._ee_body_idx]
@@ -470,9 +480,9 @@ class DoorPushAlexV2Env(DirectRLEnv):
         point_jacobian = link_jacobian_to_point(
             link_jacobian,
             link_quat,
-            link_quat.new_tensor(self._tool_translation_link),
+            self._tool_translation_link,
         )
         expected = (1, 6, len(self._arm_joint_ids))
         if point_jacobian.shape != expected or not bool(torch.isfinite(point_jacobian).all()):
             raise RuntimeError(f"Alex V2 point Jacobian must be finite with shape {expected}")
-        return point_jacobian.clone()
+        return point_jacobian
