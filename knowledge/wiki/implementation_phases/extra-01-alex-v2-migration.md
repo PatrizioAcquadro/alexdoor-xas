@@ -1,36 +1,35 @@
 # Extra 01 — Alex V2 Migration
 
+> Historical phase record. The current benchmark is documented in [[topics/alex-v2-benchmark|Alex V2 Benchmark]].
+
 ## Objective
 
-Replace provisional robot assumptions with the fixed-base IHMC Alex V2 door
-benchmark.
+Replace provisional robot assumptions with the fixed-base IHMC Alex V2 door benchmark.
 
-## Focus
-
-### Subphase E1.1 — Asset, calibration, and execution
+## Subphase E1.1 — Asset, Calibration, and Execution
 
 #### Implementation
 
-Validated the Alex V2 asset and joint order, derived the gripper collision tool
-point, implemented offset-point Jacobians, six-joint position-only IK, and
-door-panel force sensing. The active calibration is now
-`configs/alex_v2_door.json`.
+This work validated the Alex V2 asset and joint order, derived the collision tool point, introduced offset-point Jacobian control, and added door-panel force sensing.
 
-#### Key Decisions and Problems
+Generic Alex construction later moved to the external `ihmc_alex_isaaclab` extension. The current repository retains only door-specific calibration, position-only IK, scene, contact, and task behavior.
+
+#### Key Decisions
 
 - Requested rotation remains represented but is not actuated.
-- Calibration changes are made directly in the active config and require the
-  maintained runtime gates; gate history is not stored in the config.
-- Simulation results are not physical-robot safety evidence.
+- `configs/alex_v2_door.json` is the only active task calibration.
 
-#### Tests
+#### Problems / Limitations
 
-Asset, tool-frame, calibration, runtime injection, executor, and live scripted
-smoke checks cover the maintained path.
+- Calibration and force evidence are simulation-specific.
+- The completed calibration-authoring and generic executor layers were removed.
 
-## Version Notes
+## Artifacts
 
-- 2026-08-12 — Removed the completed calibration-authoring workflow; the active
-  config and maintained runtime gates now form the complete calibration path.
-- 2026-08-11 — Replaced candidate/validated calibration contracts with one
-  minimal operational calibration.
+The current calibration JSON and canonical D0-D4 layers are operational inputs, not historical phase packages.
+
+## Files
+
+- `configs/alex_v2_door.json`
+- `src/alexdoor_xas/assets/alex_v2.py`
+- `src/alexdoor_xas/envs/door_task/`

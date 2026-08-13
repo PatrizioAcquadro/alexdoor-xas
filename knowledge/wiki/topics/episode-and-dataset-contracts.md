@@ -1,36 +1,38 @@
 # Episode and Dataset Contracts
 
-The data system separates factual physical execution records from the action representations consumed by models.
+The maintained data path records one physical Alex V2 door episode and exports matched A1-A4 representations under the `door_push_alex_v2/v2_pose` identity.
 
-## Episode schema
+## Recording Schema
 
-New episodes use `phase2.v2`. `EpisodeOutcome` stores `success`, `final_door_angle`, `n_steps`, `termination_reason`, `environment_terminated`, `environment_truncated`, and notes. Stop reasons are factual: `controller_done`, `controller_timeout`, `tick_budget`, `environment_terminated`, `environment_truncated`, or `step_error`. The schema does not generate, validate, aggregate, or expose interpreted failure labels.
+New A1-A3 HDF5 episodes use `phase2.v2`. Each step contains the non-duplicated pre-action state, requested and applied action, adapter decision, controller phase, and contact information. The terminal response is stored separately so the final action is not left without an outcome.
 
-Readers continue to accept the active `phase2.v1` datasets and legacy A4 JSON Lines records. They discard the obsolete `failure_label`, expose `termination_reason: not_recorded`, and use unknown environment flags. Existing datasets are not rewritten.
+`EpisodeOutcome` records success, final door angle, step count, notes, factual termination reason, environment termination/truncation flags, and controller completion/timeout state. The writer does not invent failure labels from those facts.
 
-`src/alexdoor_xas/recording/episode.py` records state before each action, the applied command, controller phase, and terminal response. A1/A2/A3 use one HDF5 file per episode; A4 uses JSON Lines. Duplicate observation references, clamp flags, and per-episode JSON sidecars are not generated.
+`phase2.v1` HDF5 files remain readable and are upgraded in memory where necessary. The repository never rewrites them in place and no longer emits v1.
 
-## Matched exports
+## Matched Exports
 
-`src/alexdoor_xas/data_engine/export.py` derives matched products from one physical episode. A2 keeps world-frame end-effector deltas, A3 expresses the equivalent command in the static door frame, A4 stores object-centric guarded chunks, and Alex episodes derive A1 joint deltas from recorded targets. New A1 exports require the final applied target; `phase2.v1` support remains read-only. The active operational version is `v2_pose` under `door_push_alex_v2`.
+One recorded physical episode can produce:
 
-`scripts/verify_dataset_interface.py` requires all A1-A4 products, validates the existing split and normalization artifacts without writing, and checks the paired A2/A3 conversion. `--write-artifacts` is the explicit regeneration mode.
+- A1, A2, and A3 as one HDF5 file per episode;
+- A4 as structured chunks in `episodes.jsonl`.
 
-## Model-facing access
+All representations share the physical episode ID and outcome. Representation-specific actions and metadata remain separate. `scripts/verify_dataset_interface.py` checks the four exports and the numerical distinction between A2 and A3.
 
-`EpisodeDataset` and `A4ChunkDataset` are the supported readers. A4 remains structured and has no unused numeric feature encoding. `ChunkSampler` pairs observation at time t with the following action horizon; batches contain only `obs`, `actions`, and `is_pad`. Supported observations are `core`, `core_contact`, and `core_door_pose`.
+## Dataset Layout
 
-## Splits, views, and normalization
+The active path is `datasets/<task>/<action_space>/<version>/`. For this benchmark, task is `door_push_alex_v2` and version is `v2_pose`.
 
-`dataset/splits.py` hashes trajectory content only to keep equivalent episodes inside one split and prevent exact-content leakage. A retained view is resolved from `datasets/<task>/splits/<view_id>.json`; its normalization comes from the selected action-space version's `views/<view_id>/norm_stats.json`. Loaders verify schema, action space, dimensions, finite values, membership, and direct recomputation over declared train IDs.
+`datasets/door_push_alex_v2/splits/v2_pose.json` assigns shared episode IDs to disjoint train, validation, and test sets. Retained view files select nested training subsets without changing validation or test membership. Normalization is computed from the selected training IDs and validated by direct recomputation.
 
-The retained `v3_scale_master` contains 550 episodes across D0-D4. Its N50, N100, N250, and N500 split files remain usable with fixed validation and test memberships; the generation workflow is historical.
+The repository loads existing splits, views, and normalization. Completed scale-dataset construction, pose-plan, merge, ledger, and publication workflows are not maintained.
+
+## Model-Facing Data
+
+`EpisodeDataset`, `A4ChunkDataset`, and `ChunkSampler` expose validated records. Learned policies support `core`, `core_contact`, and `core_door_pose` observation presets. Training batches contain only `obs`, `actions`, and `is_pad`.
+
+ACT and Diffusion train on A2 or A3. A1 remains export-only and A4 remains non-learned.
 
 ## Version Notes
 
-- 2026-08-12 — Removed duplicate observation references, unused clamp fields, per-episode sidecars, and unused v0 compatibility while retaining active v1 reads.
-- 2026-08-12 — Removed unused dataset APIs and A4 numeric encoding, narrowed batch and observation contracts, and made the verifier read committed artifacts by default.
-- 2026-08-12 — Removed retired candidate-generation and paired-publication hooks; current A1 writes require the recorded final target.
-- 2026-08-12 — Introduced `phase2.v2` factual outcomes and legacy v0/v1 reads without failure labels; existing datasets remain unchanged.
-- 2026-08-12 — Made `door_push_alex_v2/v2_pose` the verifier default and folded the A2/A3 posed-door distinction check into the dataset interface gate.
-- 2026-08-11 — Dataset loading moved from publication/fingerprint orchestration to direct split membership and numerical validation.
+- 2026-08-13 — Documented `phase2.v2`, read-only v1 compatibility, matched `v2_pose` exports, and the minimal model-facing dataset path.

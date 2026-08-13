@@ -303,3 +303,15 @@ prim contract while preserving `door_push_alex_v2` as the task identity.
 Verified wiki links and source references, D0-D4 scene validation, the complete
 deterministic suite, and both maintained Isaac gates on `cuda:0`; protected raw
 and dataset boundaries remained unchanged.
+
+## 2026-08-13 — update : Current repository synchronization
+
+Reconciled current status, topics, and decisions with the simplified Alex V2,
+data, policy, checkpoint, evaluation, and storage paths. Reduced phase and
+experiment pages to explicit historical records without ingesting raw material.
+
+## 2026-08-13 — lint : Current repository synchronization
+
+Verified all wiki links, index coverage, phase-page structure, live repository
+references, removed-surface absence, Markdown whitespace, Ruff, and the complete
+336-test deterministic suite. The user-owned raw-note change remained unstaged.

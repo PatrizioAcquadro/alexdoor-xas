@@ -2,32 +2,25 @@
 
 ## Context
 
-The physical contact point is offset from the gripper-link origin, while full
-pose control would add uncalibrated orientation behavior.
+The Alex V2 benchmark needs a reproducible controller at the physical gripper contact point while preserving the A2/A3 representation contract.
 
 ## Decision
 
-Use the fixed-base Alex V2 runtime, one minimal door calibration, and
-position-only differential IK over six right-arm joints at the
-collision-derived tool point. Keep the six-dimensional A2/A3 interface but do
-not actuate requested rotation. Filter task force to the door panel.
+Use the fixed-base Alex V2 torso, the six calibrated right-arm joints, and position-only differential IK at the collision-derived tool point. Keep rotational A2/A3 components in data and adapter decisions, but do not command them to the robot.
 
-`configs/alex_v2_door.json` is the single calibration source. Changes are made
-directly and accepted only after the benchmark-scene, scripted-baseline, and
-adapter gates pass.
+Use `configs/alex_v2_door.json` as the only task calibration. Generic Alex construction remains in the external `ihmc_alex_isaaclab` extension; door calibration, IK, contact selection, and safety semantics remain local.
+
+Accept task force only from exact-door raw PhysX contact selection. Geometric contact may be recorded for diagnosis but cannot replace sensed force.
 
 ## Consequences
 
-- The controller stays small and directly testable.
-- Learned rotation values do not influence current motion.
-- Asset and robot compatibility remain explicit where they affect execution.
-- Simulator evidence does not authorize physical Alex operation.
+- The current action execution is intentionally translation-only.
+- Calibration changes require the benchmark, scripted-baseline, and adapter gates.
+- The controller is specialized to the single-environment simulated Alex V2 benchmark.
+- Simulator force thresholds and success do not establish physical-robot safety.
 
-See [[topics/alex-v2-benchmark|Alex V2 Benchmark]].
+The retired calibration-authoring, generic executor, sensorless, and surrogate-robot paths are not part of this decision.
 
 ## Version Notes
 
-- 2026-08-12 — Removed the duplicate authoring pipeline and retained direct
-  config validation through the maintained runtime gates.
-- 2026-08-11 — Calibration state was reduced to operational parameters; live
-  verification remains required for changes.
+- 2026-08-13 — Restated the active decision around one calibration, position-only tool-point IK, and exact-door contact sensing.

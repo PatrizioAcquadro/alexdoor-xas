@@ -1,48 +1,45 @@
 # Alex V2 Benchmark
 
-The current benchmark is a fixed-base IHMC Alex V2 torso pushing one simulated hinged door through a six-joint right-arm controller.
+The maintained benchmark is simulated door pushing with the fixed-base IHMC Alex V2 torso and a six-joint right-arm controller.
 
-## Asset and calibration
+## Asset and Calibration
 
-The autonomous `~/Desktop/Alex` repository owns the external URDF and the
-generic `ihmc_alex_isaaclab` extension. DoorManipulation imports
-`make_alex_v2_cfg` from `ihmc_alex_isaaclab.robots.alex_v2`, then applies its
-fixed-base runtime identity, right-arm PD gains, non-right-arm damping, and
-task calibration locally. `assets/alex_v2_contract.py` validates the robot
-asset and runtime identity. `configs/alex_v2_door.json` remains the single
-active task calibration and contains the task name, base pose, six initial
-joints, operational tool frame, reach shell, controller parameters, and
-randomization limits.
+The external `~/Desktop/Alex` repository owns the Alex V2 URDF and the generic `ihmc_alex_isaaclab` extension. DoorManipulation imports `make_alex_v2_cfg` and applies the door-task calibration locally.
 
-`scripts/verify_benchmark_scene.py` is the non-mutating scene gate. It validates the Alex asset and runtime manifest, canonical door USD dependencies, hinge, mass and inertia, exact 29-joint runtime order, reset state, and zero-action frame/door stability on the requested device. The optional combined hallway path remains registered for manual composition, but it is neither benchmark physics nor a `check_env.py` requirement.
+`configs/alex_v2_door.json` is the only active calibration. It defines the task and robot identities, base pose, six initial right-arm joints, operational tool frame, reach shell, control parameters, and randomization bounds. There is no separate calibration-authoring workflow.
 
-`configs/alex_v2_door.json` is edited directly when the operational calibration changes. Before committing it, run `verify_benchmark_scene.py`, `verify_scripted_baseline.py`, and `verify_adapters.py`; construction also rejects a malformed config or a tool frame that no longer matches the collision geometry.
+`src/alexdoor_xas/assets/alex_v2_contract.py` and the benchmark gate validate the external asset, fixed-base identity, joint order, tool frame, and runtime manifest.
 
-## Canonical scenes
+## Canonical Door Scenes
 
-`src/alexdoor_xas/assets/door_scene.py` owns one immutable pose registry and `outputs/door_scene/` contains exactly its five generated layers: D0 yaw `0.00`, XY `(0.00, 0.00)`; D1 yaw `+0.05`, XY `(+0.02, 0.00)`; D2 yaw `-0.05`, XY `(0.00, -0.02)`; D3 yaw `+0.10`, XY `(+0.02, +0.02)`; D4 yaw `-0.10`, XY `(+0.02, -0.02)`. D0 is the default. Each source layer uses `/World/Door`; the runtime instance uses `/World/envs/env_0/DoorScene/Door`. Runtime and data APIs accept only these pose IDs.
+`src/alexdoor_xas/assets/door_scene.py` defines the only accepted pose registry:
 
-## Control and sensing
+| Pose | Yaw | XY offset |
+|---|---:|---:|
+| D0 | 0.00 | (0.00, 0.00) |
+| D1 | +0.05 | (+0.02, 0.00) |
+| D2 | -0.05 | (0.00, -0.02) |
+| D3 | +0.10 | (+0.02, +0.02) |
+| D4 | -0.10 | (+0.02, -0.02) |
 
-`DoorPushAlexV2Env` is an explicitly single-environment `DirectRLEnv`; construction rejects `scene.num_envs != 1`. It resolves one hinge, one gripper link, one shoulder link, and the ordered six-joint right arm, then checks the fixed base, finite point Jacobian, calibrated tool frame, finite actions and observations, start-pose settle result, and joint-limit clamps.
+`outputs/door_scene/` contains exactly one USD layer per pose. D0 is the default. Noncanonical scenes must use an explicit path under the runtime cache and are not benchmark poses.
 
-The environment uses position-only differential IK over the six right-arm joints. The Jacobian is shifted from the gripper-link origin to the calibrated collision tool point. Simulation runs at 120 Hz with decimation 2; A2 translation is limited to 0.02 m per control tick. Rotation remains represented but is not actuated.
+## Control and Sensing
 
-Success is the first hinge crossing at 45 degrees. `contact_state()` reads the PhysX raw GPU buffer once per snapshot, selects only the exact door actor ID, and returns world-frame force plus the calibrated threshold result. It never falls back to unfiltered net force or geometric contact. The geometric estimate is retained only as recorded diagnostic information.
+`DoorPushAlexV2Env` is a single-environment Isaac Lab `DirectRLEnv`; construction rejects any other environment count. It resolves the calibrated six-joint right arm, gripper link, shoulder link, hinge, and exact door actor.
+
+Control runs at 120 Hz with decimation 2. Position-only differential IK commands the collision-derived tool point. Translation is limited to 0.02 m per control tick. Rotational components remain represented in A2/A3 data and adapter decisions but are not actuated.
+
+Success is the first 45-degree hinge crossing. Each runtime snapshot reads the raw GPU contact buffer once and retains only contacts whose opposite actor is the exact door panel. Unfiltered net force and geometric contact are not accepted as task-force substitutes; geometry remains diagnostic only.
+
+## Verification
+
+`scripts/verify_benchmark_scene.py` checks the external robot, canonical door dependencies and dynamics, runtime joint order, reset state, and zero-action stability. Calibration changes also require the maintained scripted-baseline and adapter gates.
 
 ## Limits
 
-The benchmark is simulation-only. It has no physical robot command path, hardware calibration workflow, or hardware safety layer.
+The benchmark is simulation-only, fixed-base, single-environment, and limited to one door family. It has no physical-robot command, hardware-calibration, or hardware-safety layer.
 
 ## Version Notes
 
-- 2026-08-13 — Unified the scene module, API, configuration field, and USD prim names under `door_scene`; retained `door_push_alex_v2` exclusively as the task, dataset, and learned-run identity.
-- 2026-08-12 — Unified config, scene construction, calibration, IK, reset, sensing, and telemetry in the concrete single-environment Alex V2 runtime and replaced the two contact accessors with one atomic snapshot.
-- 2026-08-12 — Removed duplicate calibration authoring; the active JSON is the single source and changes require the maintained runtime gates.
-- 2026-08-12 — Removed unused asset evidence fields and noncanonical scene-generation APIs while preserving runtime identity, D0-D4 validation, and physical scene checks.
-- 2026-08-12 — Limited environment readiness to benchmark-required assets while retaining the optional combined hallway path for manual composition.
-- 2026-08-12 — Moved generic Alex V2 configuration to the autonomous external extension while retaining every Door-specific runtime contract in this consumer.
-- 2026-08-12 — Replaced transform-derived scene names with the exact D0-D4 registry and moved noncanonical generation to the runtime cache.
-- 2026-08-12 — Consolidated asset and isolated-door checks into the production Alex V2 benchmark scene gate and separated calibration authoring by name.
-- 2026-08-11 — Replaced the unsupported GPU shape-level contact filter with exact door-actor selection over raw GPU contact buffers.
-- 2026-08-11 — Replaced the self-fingerprinted candidate/validated calibration pair with one minimal active calibration plus the existing live verifier.
+- 2026-08-13 — Documented only the external Alex asset, one active calibration, D0-D4 scenes, and the concrete single-environment runtime.

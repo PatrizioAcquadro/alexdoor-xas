@@ -2,30 +2,23 @@
 
 ## Context
 
-Independent N50, N100, N250, and N500 datasets would change episode
-composition and holdouts alongside training size.
+Independent N50, N100, N250, and N500 datasets would change episode composition and holdouts together with training size.
 
 ## Decision
 
-Use one 550-episode physical master with matched A2/A3 exports. Retain nested
-N50, N100, N250, and N500 train memberships with fixed 25-episode validation
-and test sets. Keep separate train-only normalization for every action-space
-and view pair.
+For the completed scale study, use one 550-episode matched A2/A3 master with nested N50, N100, N250, and N500 training memberships and fixed 25-episode validation and test sets. Maintain train-only normalization for each action-space/view pair.
 
-Current code loads these retained split files directly. It does not maintain a
-view-generation or sweep-publication workflow.
+Current loaders continue to consume and directly validate those retained split and normalization artifacts. They do not create the master, views, or publication package.
 
 ## Consequences
 
-- Larger views contain all training episodes from smaller views.
-- Validation and test membership stay fixed across sizes and representations.
-- Results remain limited to one simulated door family and five poses.
-- Split membership and recomputed normalization, rather than administrative
-  fingerprints, define current validity.
+- Every larger training view contains the smaller view.
+- Validation and test membership remain fixed across size and representation.
+- Direct split membership and normalization recomputation define current validity.
+- The result remains limited to one simulated door family and one completed seed-0 study.
 
-See [[topics/episode-and-dataset-contracts|Episode and Dataset Contracts]].
+The scale-generation, merge, ledger, cluster-sweep, and publication workflows are historical and no longer executable repository features.
 
 ## Version Notes
 
-- 2026-08-11 — Retained the scientific view contract while retiring its
-  generation and publication infrastructure.
+- 2026-08-13 — Clarified that the retained view contract is active for existing data while its construction and orchestration are retired.

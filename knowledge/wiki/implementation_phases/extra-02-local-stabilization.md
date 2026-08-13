@@ -1,32 +1,35 @@
 # Extra 02 — Local Stabilization
 
+> Historical phase record. Current safety and execution semantics are documented in [[topics/action-representations-and-adapters|Action Representations and Adapters]].
+
 ## Objective
 
-Stabilize learned-policy rollout semantics and force/safety reporting on the
-five-pose Alex V2 benchmark.
+Stabilize learned-policy rollout, contact entry, force reporting, and terminal-state handling on the five-pose Alex V2 benchmark.
 
-## Focus
-
-### Subphase E2.1 — Closed-loop safety semantics
+## Subphase E2.1 — Closed-Loop Safety Semantics
 
 #### Implementation
 
-Hardened first-crossing success, settle behavior, contact-entry correction,
-terminal force admission, structured adapter warnings, and deterministic
-same-seed replay. The local four-cell N50 matrix completed 144 successful
-rollouts with zero adapter rejections.
+This work hardened first-crossing success, settle behavior, adapter correction/rejection, terminal-state preservation, and force admission. A local four-cell N50 smoke matrix completed 144 successful rollouts with no adapter rejection.
 
-#### Key Decisions and Problems
+The smoke-matrix runner was removed after its behavior-level contracts moved into the maintained adapter, rollout, evaluation, and test paths.
 
-- Reset-transient warnings remain explicit evidence.
-- Force thresholds are simulator admission/watch signals, not hardware limits.
-- The former smoke-matrix plan and summarizer are retired.
+#### Key Decisions
 
-#### Tests
+- Adapter corrections and warnings remain explicit.
+- Simulator force limits are evaluation signals, not hardware limits.
 
-Current rollout, adapter, force, and evaluation tests preserve the stabilized
-semantics without the historical matrix orchestration.
+#### Problems / Limitations
 
-## Version Notes
+- The local matrix was a stabilization check, not a comparative scientific result.
+- Its run-specific plan and summarizer are no longer maintained.
 
-- 2026-08-11 — Reduced the completed phase to its retained behavior and result.
+## Artifacts
+
+No local smoke-matrix artifact is part of the active output contract. Git retains the historical implementation.
+
+## Files
+
+- `src/alexdoor_xas/adapters/rollout.py`
+- `src/alexdoor_xas/policies/common/closed_loop.py`
+- `tests/test_rollout_semantics.py`

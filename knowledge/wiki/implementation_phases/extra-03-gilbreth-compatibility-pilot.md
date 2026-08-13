@@ -1,30 +1,31 @@
 # Extra 03 — Gilbreth Compatibility Pilot
 
+> Historical phase record. Gilbreth orchestration is not a maintained repository capability.
+
 ## Objective
 
-Confirm that non-Isaac ACT and Diffusion training could run on Gilbreth A100
-GPUs and return loadable checkpoints.
+Confirm that Isaac-free ACT and Diffusion training could run on Gilbreth A100 GPUs and return loadable checkpoints.
 
-## Focus
-
-### Subphase E3.1 — Two-cell compatibility result
+## Subphase E3.1 — Two-Cell Compatibility Result
 
 #### Implementation
 
-One ACT-A2 and one Diffusion-A3 N50 cell completed and their checkpoints loaded
-on the workstation. This qualified the environment for the later scale sweep.
+One ACT-A2 and one Diffusion-A3 N50 cell completed on Gilbreth, and their checkpoints loaded on the workstation. This qualified the training environment for the later scale sweep.
 
-#### Key Decisions and Problems
+#### Key Decisions
 
 - Isaac simulation remained workstation-only.
-- The pilot environment, transfer, Slurm, return, and preflight workflows were
-  run-specific and are no longer part of the repository product.
+- Cluster training consumed the same model-facing dataset contract as local training.
 
-#### Tests
+#### Problems / Limitations
 
-Historical pilot verification is retained in Git history; current checkpoint
-load tests cover the durable interoperability requirement.
+- Two cells established compatibility, not policy quality or scale behavior.
+- Environment, transfer, Slurm, return, and preflight tooling were run-specific and were removed.
 
-## Version Notes
+## Artifacts
 
-- 2026-08-11 — Retired the completed pilot implementation and retained its result.
+Pilot packages are historical and are not present in the active repository. Git retains their implementation history.
+
+## Files
+
+No pilot-specific source or configuration file remains active.

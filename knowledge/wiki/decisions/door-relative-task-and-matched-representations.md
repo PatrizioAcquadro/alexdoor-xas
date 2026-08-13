@@ -2,55 +2,32 @@
 
 ## Context
 
-The project aims to compare action representation rather than compare different
-tasks or independently sampled trajectory distributions. World-frame and
-object-relative actions can appear different simply because generation,
-initial pose, or outcome differs.
+Comparing action representations is meaningful only when task geometry, physical experience, data membership, and evaluation conditions remain aligned.
 
 ## Decision
 
-Use one isolated hinge-anchored door task and derive A1–A4 products from the
-same physical episode identity. A2 is world-frame end-effector delta; A3 is the
-equivalent delta in a static hinge-anchored door frame; A4 contact targets are
-in the moving panel frame. Matched A2/A3 products share physical outcome,
-episode identity, pose allocation, split, and evaluation seeds while retaining
-distinct action arrays.
+Represent the door task around an explicit hinge frame and derive matched A1-A4 products from the same physical episode. A2 uses world-frame end-effector deltas; A3 uses a static hinge-anchored frame; A4 uses contact targets in the moving panel frame.
 
-The door-frame origin and +Z hinge axis are explicit. Door pose variants pivot
-around the hinge instead of redefining the task geometry independently.
+Use only the D0-D4 registry. Door variants rotate and translate the same task around the hinge rather than introducing independent scene definitions. Runtime APIs reject other pose IDs.
 
-The executable registry is limited to D0 `(0.00, 0.00, 0.00)`, D1 `(+0.05, +0.02, 0.00)`, D2 `(-0.05, 0.00, -0.02)`, D3 `(+0.10, +0.02, +0.02)`, and D4 `(-0.10, +0.02, -0.02)`, expressed as yaw and XY offset. Runtime APIs accept only these IDs.
+Matched A2/A3 products share physical outcome, episode identity, split, pose distribution, and evaluation seeds. Their action arrays and train-only normalization remain representation-specific.
 
 ## Consequences
 
-- Representation comparisons have less task-distribution confounding.
-- A3 must be transformed and validated before A2 execution; frame identity is
-  part of the data and adapter contract.
-- A4 needs guarded staged execution rather than direct simulator application.
-- Changed physical generation requires a new dataset version and regenerated
-  matched products.
-- The design does not prove causal isolation of representation from every
-  learning interaction; it provides a controlled benchmark contract.
+- A3 must be validated and transformed before A2 execution.
+- A4 requires guarded staged execution rather than direct application.
+- A changed physical generation pass requires a new dataset version, shared split, and regenerated normalization.
+- The design reduces major task-distribution confounds but does not prove perfect causal isolation of representation.
+
+Completed pose-plan, dataset-publication, and unified-matrix orchestration are historical workflows and are not required by this active decision.
 
 ## Evidence
 
-- `src/alexdoor_xas/action/spaces.py`
 - `src/alexdoor_xas/action/frames.py`
-- `src/alexdoor_xas/data_engine/export.py`
 - `src/alexdoor_xas/assets/door_scene.py`
-- `tests/test_action_spaces.py`
+- `src/alexdoor_xas/data_engine/export.py`
 - `scripts/verify_dataset_interface.py`
-
-See [[topics/action-representations-and-adapters|Action Representations and Adapters]]
-and [[topics/episode-and-dataset-contracts|Episode and Dataset Contracts]].
 
 ## Version Notes
 
-- 2026-08-12 — Made D0-D4 the sole supported pose registry.
-- 2026-08-12 — The A2/A3 distinguishability evidence moved into the canonical
-  dataset interface gate.
-
-- 2026-07-03 — Matched representation export and hinge-relative frame semantics
-  were established.
-- 2026-07-15 — The paired scale master and nested views applied the decision to
-  the full data-scale study.
+- 2026-08-13 — Limited the active decision to hinge-relative geometry, D0-D4, and matched physical identity across representations.

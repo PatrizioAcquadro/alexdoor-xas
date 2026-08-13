@@ -1,28 +1,32 @@
 # Extra 06 — Phase 3 Unified Evaluation
 
+> Historical phase record. The scientific result is summarized in [[experiments/phase-3-unified-evaluation|Phase 3 Unified Evaluation]].
+
 ## Objective
 
 Evaluate all sixteen Phase 3 checkpoints under one matched Alex V2 protocol.
 
-## Focus
-
-### Subphase E6.1 — Matched closed-loop matrix
+## Subphase E6.1 — Matched Closed-Loop Matrix
 
 #### Implementation
 
-Ran 36 D0-D4 rollouts per cell, 576 total. Every rollout succeeded and none was adapter-rejected. Success was saturated, secondary metrics were heterogeneous, and one ACT-A3-N50 seed-112 force event remained `REVIEW_REQUIRED`.
+Each ACT/Diffusion x A2/A3 x N50/N100/N250/N500 cell ran 36 D0-D4 rollouts, for 576 total. Every rollout succeeded and none was adapter-rejected.
 
-#### Key Decisions and Problems
+#### Key Decisions
 
-- The result does not select a policy, representation, or dataset size.
-- Simulator force evidence is not hardware safety evidence.
-- The executable matrix runner and intermediate artifacts are retired; canonical experiment pages preserve the conclusions and Git preserves the removed compact artifacts.
+- Saturated success cannot select a policy, representation, or data size.
+- Simulator force evidence cannot be interpreted as hardware-safety evidence.
 
-#### Tests
+#### Problems / Limitations
 
-Current factual aggregation, frozen-protocol, and evaluation-routing primitives remain covered. The former compact evidence package is recoverable from Git history through commit `7f1fc8c` and is no longer part of the active output structure.
+- Secondary metrics were heterogeneous.
+- One ACT-A3-N50 seed-112 force event remains `REVIEW_REQUIRED`.
+- The matrix runner and intermediate packages were removed after closeout.
 
-## Version Notes
+## Artifacts
 
-- 2026-08-12 — Removed the curated-output package after retaining its conclusions in the canonical wiki and its files in Git history.
-- 2026-08-11 — Reduced the phase to scientific findings and retained evidence.
+Canonical experiment pages retain the conclusions. Detailed removed files remain recoverable from Git history through commit `7f1fc8c`.
+
+## Files
+
+No unified-matrix runner or result package remains in the active tree.
