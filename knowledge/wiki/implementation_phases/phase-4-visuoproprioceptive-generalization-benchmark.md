@@ -1,13 +1,11 @@
 # Phase 4 — Visuoproprioceptive Generalization Benchmark
 
 > Planned phase. None of the implementation or result claims below are complete.
-> The scientific contract is defined in
-> [[decisions/visuoproprioceptive-generalization-benchmark|Visuoproprioceptive Generalization Benchmark]].
+> The scientific contract is defined in [[decisions/visuoproprioceptive-generalization-benchmark|Visuoproprioceptive Generalization Benchmark]].
 
 ## Objective
 
-Build and execute B1: a reproducible visuoproprioceptive benchmark that compares
-A1-A4 x ACT/Diffusion on geometrically unseen push doors without retraining.
+Build and execute B1: a reproducible visuoproprioceptive benchmark that compares A1-A4 x ACT/Diffusion on geometrically unseen push doors without retraining.
 
 ## Subphase 4.1 — Asset Collection and Qualification
 
@@ -23,7 +21,7 @@ Execute the following bounded acquisition and qualification loop:
 5. Run static and physics tests, replacing failures by repeating Steps 2-4 until 24 pass.
 6. Run one nominal expert rollout per door to verify that it opens.
 7. Reset and repeat the identical rollout. Compare outcome, angle curve, maximum sustained angle, and errors. If the pair is outside tolerance, run three additional identical rollouts and diagnose the source of variation.
-8. Produce the candidate manifest and qualification report, recommend the common Subphase 4.2 rollout count from the observed repeatability, and update the canonical documentation.
+8. Produce the candidate manifest, recommend the common Subphase 4.2 rollout count from the observed repeatability, and update the canonical documentation.
 
 The online gate checks the per-asset license, source, available format, archive size, reported triangle count, visible frame/panel separability, dimensions when stated, and duplicates before download. Values unavailable or unreliable online are checked locally. Search and replacement continue only until 24 assets pass; no unused reserve set is collected.
 

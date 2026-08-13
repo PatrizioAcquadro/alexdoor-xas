@@ -1223,6 +1223,25 @@ The manual indicates provisions for:
 - a RealSense D457 or ZED X Mini in the torso.
 However, these cameras and their mounting hardware were not included in the delivery described by the manual.
 
+##### Alex Proprioceptive Signals
+**Proprioception** is the robot’s internal sensing of its own configuration, motion, and applied effort.
+
+| Sensor/source        | Signals                                  | What they mean                                        | Typical use                                                |
+| -------------------- | ---------------------------------------- | ----------------------------------------------------- | ---------------------------------------------------------- |
+| Joint actuators      | Position, velocity, torque               | Joint angle, motion speed, and applied effort         | Robot configuration, motion control, and contact detection |
+| Joint diagnostics    | Temperature and operational state        | Actuator health and availability                      | Safety monitoring, not normally policy input               |
+| IMUs                 | Angular velocity and linear acceleration | Rotation rate and body acceleration                   | Estimating body motion and stability                       |
+| Force/torque sensors | Three-axis force and torque              | External loads at an instrumented body location       | Contact detection and force-controlled manipulation        |
+| Sake EZGripper       | Opening position and applied effort      | How open the gripper is and how strongly it is acting | Grasping handles and detecting object contact              |
+| Gripper diagnostics  | Temperature and operational state        | Gripper health and current mode                       | Safety monitoring, not normally policy input               |
+Force/torque data are available only where the corresponding sensor is installed and exposed by the robot interface. 
+Desired joint or gripper targets are commands, not proprioceptive measurements.
+
+For **manipulation**, the main signals are usually joint position and velocity, gripper state, and—when needed—joint torque or force/torque sensing. 
+For **locomotion**, joint position and velocity, IMU measurements, joint torque, and foot-contact or force sensing are typically most important.
+
+Source: [Alex003 Usage Guide](https://docs.google.com/document/d/17QtexPK_RqmfRammA7CsvEUuhFZFkicrJfONCdlWkEg/edit)
+
 ##### Physical-Robot Software
 The real robot has two control levels:
 1. **Low-level controller:** runs on the NUC and manages EtherCAT, actuators, faults, power-up, and power-down.
