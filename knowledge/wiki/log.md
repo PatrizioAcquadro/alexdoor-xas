@@ -315,3 +315,13 @@ experiment pages to explicit historical records without ingesting raw material.
 Verified all wiki links, index coverage, phase-page structure, live repository
 references, removed-surface absence, Markdown whitespace, Ruff, and the complete
 336-test deterministic suite. The user-owned raw-note change remained unstaged.
+
+## 2026-08-13 — update : Generalization benchmark scope
+
+Recorded the approved visuoproprioceptive held-out push-door question, matched
+A1-A4 data strategy, hybrid simulation pipeline, and articulated-object progression.
+
+## 2026-08-13 — lint : Generalization benchmark scope
+
+Verified wiki links, complete index coverage, current-versus-planned wording,
+Markdown whitespace, and unchanged user-owned raw and historical pages.

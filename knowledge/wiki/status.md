@@ -16,6 +16,22 @@ AlexDoor-XAS maintains one simulation workflow:
 
 See [[topics/system-architecture|System Architecture]] for the current data flow and [[topics/alex-v2-benchmark|Alex V2 Benchmark]] for the simulator contract.
 
+## Approved Next Study
+
+The next study asks how A1-A4 and ACT/Diffusion affect zero-shot success on
+geometrically unseen push-door USD assets when Alex V2, vision and proprioception,
+matched demonstrations, dataset size, training budget, and evaluation protocol
+are held fixed.
+
+It will use disjoint door-identity splits, one dataset size, multiple training
+seeds, matched A1-A4 exports, and a simulation-first hybrid data strategy. The
+primary results are success on seen and held-out doors, their generalization gap,
+and performance per door instance. Handles and other articulated objects are
+later benchmark stages.
+
+This scope is approved but not implemented. See
+[[decisions/visuoproprioceptive-generalization-benchmark|Visuoproprioceptive Generalization Benchmark]].
+
 ## Maintained Entry Points
 
 `scripts/check_env.py` checks the supported workstation, Isaac, and external Alex dependencies. The maintained behavior gates are:
@@ -62,8 +78,10 @@ One deterministic fake environment remains for software tests. It mirrors the pr
 - Simulator success and force measurements do not establish hardware safety, sim-to-real readiness, or broader generalization.
 - No repository command controls a physical Alex robot.
 
-Any new dataset, benchmark, seed study, learned A4/VLA path, physical-robot work, or sim-to-real work requires a separately authorized scope.
+Implementation of the approved next study has not started. Physical-robot,
+sim-to-real, VLA, and later articulated-object work remain separately scoped.
 
 ## Version Notes
 
 - 2026-08-13 — Reconciled the wiki with the simplified current repository and separated maintained behavior from concise historical evidence.
+- 2026-08-13 — Recorded the approved visuoproprioceptive held-out-door generalization study without changing current implementation claims.

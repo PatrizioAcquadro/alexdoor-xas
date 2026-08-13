@@ -35,6 +35,7 @@ Current technical behavior:
 Current architectural and scientific contracts:
 
 - [[decisions/door-relative-task-and-matched-representations|Door-Relative Task and Matched Representations]] — Hold physical experience and task geometry aligned across A1-A4.
+- [[decisions/visuoproprioceptive-generalization-benchmark|Visuoproprioceptive Generalization Benchmark]] — Approved question, held-out door benchmark, matched data strategy, and articulated-object progression.
 - [[decisions/calibrated-position-only-alex-v2-execution|Calibrated Position-Only Alex V2 Execution]] — Use one calibration, tool-point IK, and exact-door contact sensing.
 - [[decisions/one-scale-master-with-nested-views|One Scale Master with Nested Views]] — Reuse fixed holdouts and nested training memberships for the completed scale data.
 
