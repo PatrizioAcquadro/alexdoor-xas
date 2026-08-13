@@ -1,9 +1,7 @@
-"""Factual closed-loop rows, aggregation, plotting, selective traces, and routing."""
+"""Closed-loop metrics, traces, and immutable evaluation runs."""
 
 from __future__ import annotations
 
-import json
-import os
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,7 +11,7 @@ import numpy as np
 
 from alexdoor_xas.assets.door_task import CANONICAL_DOOR_POSES
 from alexdoor_xas.policies.common.runs import (
-    allocate_run_directory,
+    RUN_FORMAT,
     load_resolved_config,
     write_json_atomic,
     write_run_report,
@@ -408,37 +406,48 @@ def evaluation_preflight(
     source_checkpoint: str | Path,
     requested_protocol: dict[str, Any],
     policy: str,
-) -> tuple[Path, dict[str, Any], bool]:
-    """Validate the source and report whether the requested protocol matches."""
+) -> tuple[Path, dict[str, Any]]:
+    """Validate the checkpoint, training config, and requested protocol."""
     checkpoint = Path(source_checkpoint).expanduser().resolve()
     source_run = checkpoint.parent.parent
     if checkpoint.name != "best.pt" or checkpoint.parent.name != "checkpoints":
         raise ValueError("source checkpoint must be <training-run>/checkpoints/best.pt")
+    if not checkpoint.is_file():
+        raise ValueError(f"source checkpoint does not exist: {checkpoint}")
     source_resolved = load_resolved_config(source_run)
     if source_resolved.get("run_type") != "training" or source_resolved.get("policy") != policy:
         raise ValueError("source checkpoint does not belong to the expected training run")
-    required_training_artifacts = (
-        checkpoint,
-        source_run / "training" / "history.json",
-        source_run / "training" / "summary.png",
-        source_run / "open_loop" / "metrics.json",
-        source_run / "open_loop" / "summary.png",
-        source_run / "report.md",
-    )
-    missing = [str(path) for path in required_training_artifacts if not path.is_file()]
-    if missing or (source_run / "checkpoints" / "last.pt").exists():
-        raise ValueError(
-            "closed-loop evaluation requires a successfully completed training run; "
-            f"missing={missing}, last_checkpoint_present="
-            f"{(source_run / 'checkpoints' / 'last.pt').exists()}"
-        )
+    try:
+        if policy == "act":
+            from alexdoor_xas.policies.act.config import act_config_from_dict
+
+            act_config_from_dict(source_resolved.get("config"))
+        elif policy == "diffusion":
+            from alexdoor_xas.policies.diffusion.config import diffusion_config_from_dict
+
+            diffusion_config_from_dict(source_resolved.get("config"))
+        else:
+            raise ValueError(f"unknown policy {policy!r}")
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"invalid training config: {error}") from error
     validate_evaluation_protocol(requested_protocol, policy)
-    protocol_matches = requested_protocol == source_resolved["evaluation_protocol"]
-    if protocol_matches and (source_run / "closed_loop").exists():
-        raise FileExistsError(
-            f"refusing to overwrite completed closed-loop result: {source_run / 'closed_loop'}"
-        )
-    return source_run, source_resolved, protocol_matches
+    return source_run, source_resolved
+
+
+def _allocate_evaluation_directory(source_run: Path) -> tuple[str, Path]:
+    parent = source_run / "closed_loop"
+    parent.mkdir(exist_ok=True)
+    base = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    revision = 1
+    while True:
+        run_id = base if revision == 1 else f"{base}_r{revision}"
+        run_dir = parent / run_id
+        try:
+            run_dir.mkdir()
+        except FileExistsError:
+            revision += 1
+            continue
+        return run_id, run_dir
 
 
 def prepare_evaluation_run(
@@ -446,42 +455,28 @@ def prepare_evaluation_run(
     source_checkpoint: str | Path,
     requested_protocol: dict[str, Any],
     policy: str,
-    output_root: str | Path | None,
-) -> tuple[Path, dict[str, Any], bool]:
-    """Route exact protocol matches to source runs and changes to evaluation siblings."""
-    source_run, source_resolved, protocol_matches = evaluation_preflight(
+) -> tuple[Path, dict[str, Any]]:
+    """Allocate one immutable evaluation below its training run."""
+    source_run, source_resolved = evaluation_preflight(
         source_checkpoint=source_checkpoint,
         requested_protocol=requested_protocol,
         policy=policy,
     )
     checkpoint = Path(source_checkpoint).expanduser().resolve()
-    if protocol_matches:
-        return source_run, source_resolved, True
-
-    dataset = source_resolved["config"]["dataset"]
-    train = source_resolved["config"]["train"]
-    sibling_root = Path(output_root) if output_root is not None else source_run.parents[2]
-    run_id, run_dir = allocate_run_directory(
-        output_root=sibling_root,
-        policy=policy,
-        action_space=dataset["space"],
-        dataset_version=dataset["version"],
-        dataset_view_id=dataset.get("view_id"),
-        seed=int(train["seed"]),
-    )
+    run_id, run_dir = _allocate_evaluation_directory(source_run)
     resolved = {
-        "format": source_resolved["format"],
+        "format": RUN_FORMAT,
         "run_type": "evaluation",
         "run_id": run_id,
         "policy": policy,
         "created_utc": datetime.now(UTC).isoformat(),
         "source_run_id": source_resolved["run_id"],
-        "source_checkpoint": str(checkpoint),
+        "checkpoint": str(checkpoint),
         "config": source_resolved["config"],
         "evaluation_protocol": requested_protocol,
     }
     write_json_atomic(run_dir / "resolved_config.json", resolved, exclusive=True)
-    return run_dir, resolved, False
+    return run_dir, resolved
 
 
 def publish_closed_loop(
@@ -490,11 +485,10 @@ def publish_closed_loop(
     resolved: dict[str, Any],
     rows: list[dict[str, Any]],
     force_samples: dict[str, list[float]],
-    source_run_publish: bool,
     trace_payloads: dict[str, dict[str, Any]] | None = None,
     selected_trace_keys: set[str] | None = None,
 ) -> dict[str, Any]:
-    """Atomically publish canonical metrics/plot, selective traces, and refresh report."""
+    """Publish one immutable evaluation result."""
     run_dir = Path(run_dir)
     selected_trace_keys = selected_trace_keys or set()
     row_keys = {row["rollout_key"] for row in rows}
@@ -508,27 +502,18 @@ def publish_closed_loop(
     ]
     if missing_traces:
         raise ValueError(f"selected rollouts have no trace payload: {missing_traces}")
-    if selected_rows and (run_dir / "traces").exists():
-        raise FileExistsError("refusing to overwrite retained rollout traces")
+    outputs = [run_dir / name for name in ("metrics.json", "summary.png", "report.md", "traces")]
+    existing = [str(path) for path in outputs if path.exists()]
+    if existing:
+        raise FileExistsError(f"refusing to overwrite evaluation artifacts: {existing}")
     aggregate = aggregate_closed_loop(rows, force_samples)
     metrics = {
         "protocol": resolved["evaluation_protocol"],
         "rollouts": rows,
         "aggregate": aggregate,
     }
-    temporary = run_dir / f".closed_loop.{os.getpid()}.tmp"
-    if temporary.exists() or (run_dir / "closed_loop").exists():
-        raise FileExistsError("refusing to overwrite a closed-loop result")
-    temporary.mkdir(parents=True)
-    try:
-        write_json_atomic(temporary / "metrics.json", metrics)
-        write_closed_loop_summary(rows, temporary / "summary.png")
-        os.replace(temporary, run_dir / "closed_loop")
-    finally:
-        if temporary.exists():
-            for child in temporary.iterdir():
-                child.unlink()
-            temporary.rmdir()
+    write_json_atomic(run_dir / "metrics.json", metrics, exclusive=True)
+    write_closed_loop_summary(rows, run_dir / "summary.png")
 
     retained = write_selected_traces(
         run_dir,
@@ -536,24 +521,12 @@ def publish_closed_loop(
         trace_payloads,
         selected_trace_keys,
     )
-    training = None
-    open_loop = None
-    if source_run_publish:
-        history = json.loads((run_dir / "training" / "history.json").read_text())
-        training = {
-            "best_epoch": history["best_epoch"],
-            "best_value": history["best_value"],
-            "duration_s": history["duration_s"],
-        }
-        open_loop = json.loads((run_dir / "open_loop" / "metrics.json").read_text())
     write_run_report(
         run_dir,
         resolved,
         status="completed",
-        training=training,
-        open_loop=open_loop,
         closed_loop=metrics,
-        source_checkpoint=resolved.get("source_checkpoint"),
+        source_checkpoint=resolved["checkpoint"],
         retained_optional_artifacts=retained,
     )
     return metrics

@@ -280,3 +280,15 @@ Documented single-file HDF5 episodes, non-duplicated step state, controller-phas
 ## 2026-08-12 — lint : Minimal recording contract
 
 Verified all 23 wiki pages, 31 internal links, source references, Markdown whitespace, deterministic tests, the active v1 dataset gate, unchanged protected raw boundaries, and the scripted-baseline gate on `cuda:0`.
+
+## 2026-08-12 — update : Policy runtime simplification
+
+Documented shared OmegaConf configuration, consolidated checkpoint/model
+primitives, reduced contract tests, and immutable evaluation children with
+minimal preflight and selective traces.
+
+## 2026-08-12 — lint : Policy runtime simplification
+
+Verified all 23 wiki pages, 31 internal links, complete index coverage, current
+source references, Markdown whitespace, and unchanged raw, dataset, output,
+and historical evidence boundaries.

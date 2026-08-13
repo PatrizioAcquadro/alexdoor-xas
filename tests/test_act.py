@@ -218,7 +218,6 @@ def test_checkpoint_rejects_unknown_format(tmp_path) -> None:
         ActPolicy.from_checkpoint(path, runtime_asset=TEST_ROBOT_ASSET)
 
 
-# --- training loop -----------------------------------------------------------
 
 
 def _constant_mapping_batch(batch: int = 8) -> dict[str, np.ndarray]:
@@ -313,7 +312,6 @@ def test_train_act_resume_matches_uninterrupted_state() -> None:
     )
 
 
-# --- policy wrapper ----------------------------------------------------------
 
 
 class _StubModel(torch.nn.Module):
@@ -394,7 +392,6 @@ def test_act_policy_rejects_mismatched_stats() -> None:
         ActPolicy(model, stats)
 
 
-# --- rollout observation builder ---------------------------------------------
 
 
 def _step_context(env):
@@ -486,7 +483,6 @@ def test_build_rollout_obs_core_door_pose_matches_dataset_ordering() -> None:
     np.testing.assert_allclose(obs_matrix(record, "core_door_pose")[0], live, atol=1e-9)
 
 
-# --- chunk source + adapter rollout (closed-loop smoke, no Isaac) -------------
 
 
 def _rollout_policy() -> ActPolicy:
@@ -560,7 +556,6 @@ def test_temporal_ensemble_weights_match_the_paper_scheme() -> None:
     np.testing.assert_allclose(second[0], expected)
 
 
-# --- open-loop inspection ------------------------------------------------------
 
 
 def _stub_record(n_steps: int = 12, episode_id: str = "ep-stub-0001") -> EpisodeRecord:

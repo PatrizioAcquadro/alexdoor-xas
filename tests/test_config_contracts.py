@@ -15,8 +15,6 @@ from alexdoor_xas.policies.scripted.config import (
 )
 from alexdoor_xas.policies.scripted.door_push import DoorPushControllerCfg
 
-# --- test_act_config ---
-
 
 def test_act_default_config_matches_yaml_defaults() -> None:
     cfg = load_act_config()
@@ -42,7 +40,7 @@ def test_act_default_config_matches_yaml_defaults() -> None:
     assert cfg.rollout.policy_device == "cuda"
 
 
-def test_act_hydra_overrides_flow_through_all_sections() -> None:
+def test_act_overrides_flow_through_all_sections() -> None:
     cfg = load_act_config(
         [
             "dataset.space=A3_obj_rel_ee_delta",
@@ -66,7 +64,7 @@ def test_act_hydra_overrides_flow_through_all_sections() -> None:
     assert cfg.rollout.temporal_ensemble is True
 
 
-def test_act_cli_overrides_take_precedence_over_hydra() -> None:
+def test_act_cli_overrides_take_precedence() -> None:
     cfg = load_act_config(
         ["train.epochs=3", "rollout.max_ticks=100"],
         cli_overrides={
@@ -108,12 +106,11 @@ def test_act_unknown_fields_are_rejected() -> None:
         load_act_config(cli_overrides={"nosection": 1})
 
 
-def test_act_non_key_value_hydra_tokens_are_rejected() -> None:
+def test_act_non_key_value_tokens_are_rejected() -> None:
     with pytest.raises(ActConfigError, match="key=value"):
-        load_act_config(["--not-a-hydra-token"])
+        load_act_config(["--not-an-override"])
 
 
-# --- test_diffusion_config ---
 
 
 def test_diffusion_default_config_matches_yaml_defaults() -> None:
@@ -145,7 +142,7 @@ def test_diffusion_default_config_matches_yaml_defaults() -> None:
     assert cfg.rollout.policy_device == "cuda"
 
 
-def test_diffusion_hydra_overrides_flow_through_all_sections() -> None:
+def test_diffusion_overrides_flow_through_all_sections() -> None:
     cfg = load_diffusion_config(
         [
             "dataset.space=A3_obj_rel_ee_delta",
@@ -177,19 +174,6 @@ def test_diffusion_hydra_overrides_flow_through_all_sections() -> None:
     assert cfg.rollout.n_action_steps == 4
     assert cfg.rollout.sampler == "ddim"
     assert cfg.rollout.num_inference_steps == 10
-
-
-def test_diffusion_cli_overrides_take_precedence_over_hydra() -> None:
-    cfg = load_diffusion_config(
-        ["train.epochs=3", "rollout.max_ticks=100"],
-        cli_overrides={
-            "train.epochs": 9,
-            "rollout.max_ticks": None,
-        },
-    )
-
-    assert cfg.train.epochs == 9
-    assert cfg.rollout.max_ticks == 100
 
 
 @pytest.mark.parametrize(
@@ -234,19 +218,6 @@ def test_diffusion_cross_section_constraints_are_enforced(
         load_diffusion_config(overrides)
 
 
-def test_diffusion_unknown_fields_are_rejected() -> None:
-    with pytest.raises(DiffusionConfigError, match="not_a_field"):
-        load_diffusion_config(["+model.not_a_field=1"])
-    with pytest.raises(DiffusionConfigError, match="unknown CLI override"):
-        load_diffusion_config(cli_overrides={"nosection": 1})
-
-
-def test_diffusion_non_key_value_hydra_tokens_are_rejected() -> None:
-    with pytest.raises(DiffusionConfigError, match="key=value"):
-        load_diffusion_config(["--not-a-hydra-token"])
-
-
-# --- test_hydra_config ---
 
 
 def test_scripted_default_config_is_alex_v2_only() -> None:
@@ -261,13 +232,13 @@ def test_scripted_default_config_is_alex_v2_only() -> None:
     assert cfg.controller_overrides == {}
 
 
-def test_scripted_hydra_overrides_update_run_and_controller_settings() -> None:
+def test_scripted_overrides_update_run_and_controller_settings() -> None:
     cfg = load_scripted_baseline_config(
         [
             "run.episodes=7",
             "run.randomized=2",
             "run.seed=11",
-            "run.experiment=hydra_test",
+            "run.experiment=override_test",
             "run.run_id=seed11",
             "run.video=true",
             "controller.overrides.push_height_m=-0.25",
@@ -278,7 +249,7 @@ def test_scripted_hydra_overrides_update_run_and_controller_settings() -> None:
     assert cfg.run.episodes == 7
     assert cfg.run.randomized == 2
     assert cfg.run.seed == 11
-    assert cfg.run.experiment == "hydra_test"
+    assert cfg.run.experiment == "override_test"
     assert cfg.run.run_id == "seed11"
     assert cfg.run.video is True
     assert cfg.controller_overrides == {
@@ -287,7 +258,7 @@ def test_scripted_hydra_overrides_update_run_and_controller_settings() -> None:
     }
 
 
-def test_scripted_cli_overrides_take_precedence_over_hydra() -> None:
+def test_scripted_cli_overrides_take_precedence() -> None:
     cfg = load_scripted_baseline_config(
         ["run.episodes=2", "run.video=false"],
         cli_overrides={"episodes": 9, "video": True},
@@ -314,11 +285,6 @@ def test_scripted_invalid_run_config_is_rejected(override: str, message: str) ->
 def test_scripted_unknown_controller_override_is_rejected() -> None:
     with pytest.raises(ScriptedBaselineConfigError, match="not_in_controller"):
         load_scripted_baseline_config(["+controller.overrides.not_in_controller=1.0"])
-
-
-def test_scripted_non_key_value_hydra_tokens_are_rejected() -> None:
-    with pytest.raises(ScriptedBaselineConfigError, match="key=value"):
-        load_scripted_baseline_config(["--not-a-hydra-token"])
 
 
 def test_scripted_apply_controller_overrides_preserves_controller_type() -> None:

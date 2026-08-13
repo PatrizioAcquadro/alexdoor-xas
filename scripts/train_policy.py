@@ -69,7 +69,7 @@ def parse_config() -> tuple[str, PolicyConfig, Path | None, dict | None]:
         default=None,
         help="Incomplete run directory containing checkpoints/last.pt.",
     )
-    args, hydra_overrides = parser.parse_known_args()
+    args, overrides = parser.parse_known_args()
     explicit_overrides = {
         "dataset.space": args.space,
         "train.epochs": args.epochs,
@@ -81,7 +81,7 @@ def parse_config() -> tuple[str, PolicyConfig, Path | None, dict | None]:
     load_config = load_act_config if args.policy == "act" else load_diffusion_config
 
     if args.resume is not None:
-        if hydra_overrides or any(value is not None for value in explicit_overrides.values()):
+        if overrides or any(value is not None for value in explicit_overrides.values()):
             parser.error("--resume loads the frozen config and cannot be combined with overrides")
         try:
             run_dir = resolve_resume_directory(args.resume, args.policy)
@@ -93,7 +93,7 @@ def parse_config() -> tuple[str, PolicyConfig, Path | None, dict | None]:
             parser.error(str(error))
 
     try:
-        cfg = load_config(hydra_overrides, cli_overrides=explicit_overrides)
+        cfg = load_config(overrides, cli_overrides=explicit_overrides)
     except (ActConfigError, DiffusionConfigError) as error:
         parser.error(str(error))
     return args.policy, cfg, None, None

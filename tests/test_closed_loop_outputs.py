@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,9 +20,9 @@ from alexdoor_xas.policies.common.closed_loop import (
     publish_closed_loop,
     rollout_key,
     validate_evaluation_protocol,
-    write_selected_traces,
 )
 from alexdoor_xas.policies.common.runs import (
+    RUN_FORMAT,
     frozen_evaluation_protocol,
     resolved_training_config,
     write_json_atomic,
@@ -80,23 +81,7 @@ def _source_run(tmp_path: Path):
     run_dir = tmp_path / "door_push_alex_v2" / "act" / "source-run"
     (run_dir / "checkpoints").mkdir(parents=True)
     (run_dir / "checkpoints" / "best.pt").write_bytes(b"self-contained")
-    (run_dir / "training").mkdir()
-    write_json_atomic(
-        run_dir / "training" / "history.json",
-        {"best_epoch": 0, "best_value": 0.1, "duration_s": 1.0},
-    )
-    (run_dir / "training" / "summary.png").write_bytes(b"plot")
-    (run_dir / "open_loop").mkdir()
-    write_json_atomic(
-        run_dir / "open_loop" / "metrics.json",
-        {
-            "aggregate_l1_mean": 0.1,
-            "evaluated_steps": 2,
-            "representative_episode_id": "episode-0",
-        },
-    )
-    (run_dir / "open_loop" / "summary.png").write_bytes(b"plot")
-    (run_dir / "report.md").write_text("# Run report\n")
+    (run_dir / "checkpoints" / "last.pt").write_bytes(b"allowed")
     resolved = resolved_training_config(run_id="source-run", policy="act", config=cfg)
     write_json_atomic(run_dir / "resolved_config.json", resolved)
     return run_dir, resolved
@@ -152,44 +137,51 @@ def test_closed_loop_rows_and_aggregates_are_factual_and_compact() -> None:
     assert rows[1]["termination_reason"] == "controller_done"
 
 
-def test_protocol_match_publishes_source_once_and_changes_create_sibling(tmp_path) -> None:
+def test_evaluations_are_exclusive_children_with_minimal_preflight(tmp_path) -> None:
     source_run, resolved = _source_run(tmp_path)
     best = source_run / "checkpoints" / "best.pt"
-    target, exact, source_publish = prepare_evaluation_run(
+    training_report = source_run / "report.md"
+    training_report.write_text("training report\n")
+    legacy = source_run / "closed_loop"
+    legacy.mkdir()
+    (legacy / "metrics.json").write_text("legacy\n")
+
+    first, first_resolved = prepare_evaluation_run(
         source_checkpoint=best,
         requested_protocol=resolved["evaluation_protocol"],
         policy="act",
-        output_root=None,
     )
-    assert target == source_run.resolve()
-    assert exact == resolved
-    assert source_publish is True
-
-    (source_run / "closed_loop").mkdir()
-    with pytest.raises(FileExistsError, match="overwrite"):
-        prepare_evaluation_run(
-            source_checkpoint=best,
-            requested_protocol=resolved["evaluation_protocol"],
-            policy="act",
-            output_root=None,
-        )
-    (source_run / "closed_loop").rmdir()
-
     changed = deepcopy(resolved["evaluation_protocol"])
     changed["force_limit_n"] = 150.0
-    sibling, evaluation, source_publish = prepare_evaluation_run(
+    second, second_resolved = prepare_evaluation_run(
         source_checkpoint=best,
         requested_protocol=changed,
         policy="act",
-        output_root=None,
     )
-    assert sibling.parent == source_run.parent
-    assert source_publish is False
-    assert evaluation["run_type"] == "evaluation"
-    assert evaluation["source_run_id"] == "source-run"
-    assert evaluation["source_checkpoint"] == str(best.resolve())
-    assert not (sibling / "checkpoints").exists()
-    assert set(path.name for path in sibling.iterdir()) == {"resolved_config.json"}
+    assert first.parent == second.parent == legacy
+    assert first != second
+    assert re.fullmatch(r"\d{8}T\d{6}Z(?:_r\d+)?", first.name)
+    assert re.fullmatch(r"\d{8}T\d{6}Z(?:_r\d+)?", second.name)
+    assert (legacy / "metrics.json").read_text() == "legacy\n"
+    assert training_report.read_text() == "training report\n"
+    assert set(path.name for path in source_run.parent.iterdir()) == {"source-run"}
+    assert set(path.name for path in first.iterdir()) == {"resolved_config.json"}
+    assert set(first_resolved) == {
+        "format",
+        "run_type",
+        "run_id",
+        "policy",
+        "created_utc",
+        "source_run_id",
+        "checkpoint",
+        "config",
+        "evaluation_protocol",
+    }
+    assert first_resolved["format"] == RUN_FORMAT
+    assert first_resolved["run_type"] == "evaluation"
+    assert first_resolved["source_run_id"] == "source-run"
+    assert first_resolved["checkpoint"] == str(best.resolve())
+    assert second_resolved["evaluation_protocol"] == changed
 
 
 def test_publish_writes_one_summary_and_only_required_traces(tmp_path) -> None:
@@ -199,11 +191,12 @@ def test_publish_writes_one_summary_and_only_required_traces(tmp_path) -> None:
     changed["poses"][0]["fixed_seeds"] = [100, 101, 102]
     changed["poses"][0]["randomized_seeds"] = []
     changed["rollout_count"] = 3
-    run_dir, resolved, source_publish = prepare_evaluation_run(
+    training_report = source_run / "report.md"
+    training_report.write_text("training report\n")
+    run_dir, resolved = prepare_evaluation_run(
         source_checkpoint=source_run / "checkpoints" / "best.pt",
         requested_protocol=changed,
         policy="act",
-        output_root=None,
     )
     results = [
         _result(success=True, forces=[10.0, 20.0]),
@@ -223,15 +216,10 @@ def test_publish_writes_one_summary_and_only_required_traces(tmp_path) -> None:
         resolved=resolved,
         rows=rows,
         force_samples=samples,
-        source_run_publish=source_publish,
         trace_payloads=traces,
         selected_trace_keys={rollout_key("D0", 100, "fixed")},
     )
     assert metrics["aggregate"]["overall"]["success_count"] == 2
-    assert set(path.name for path in (run_dir / "closed_loop").iterdir()) == {
-        "metrics.json",
-        "summary.png",
-    }
     assert set(path.name for path in (run_dir / "traces").iterdir()) == {
         "D0_seed100_fixed.json",
         "D0_seed101_fixed.json",
@@ -239,15 +227,41 @@ def test_publish_writes_one_summary_and_only_required_traces(tmp_path) -> None:
     }
     assert set(path.name for path in run_dir.iterdir()) == {
         "resolved_config.json",
+        "metrics.json",
+        "summary.png",
         "report.md",
-        "closed_loop",
         "traces",
     }
-    assert not (run_dir / "media").exists()
+    assert training_report.read_text() == "training report\n"
+    with pytest.raises(FileExistsError, match="overwrite"):
+        publish_closed_loop(
+            run_dir=run_dir,
+            resolved=resolved,
+            rows=rows,
+            force_samples=samples,
+            trace_payloads=traces,
+            selected_trace_keys={rollout_key("D0", 100, "fixed")},
+        )
 
 
-def test_optional_directories_are_not_created_empty(tmp_path) -> None:
+def test_successful_evaluation_omits_traces(tmp_path) -> None:
+    source_run, source_resolved = _source_run(tmp_path)
+    run_dir, resolved = prepare_evaluation_run(
+        source_checkpoint=source_run / "checkpoints" / "best.pt",
+        requested_protocol=source_resolved["evaluation_protocol"],
+        policy="act",
+    )
     result = _result(success=True, forces=[10.0])
-    row, _ = _row("D0", 100, "fixed", result)
-    assert write_selected_traces(tmp_path, [row], {row["rollout_key"]: {}}) == []
-    assert not (tmp_path / "traces").exists()
+    row, samples = _row("D0", 100, "fixed", result)
+    publish_closed_loop(
+        run_dir=run_dir,
+        resolved=resolved,
+        rows=[row],
+        force_samples={row["rollout_key"]: samples},
+    )
+    assert set(path.name for path in run_dir.iterdir()) == {
+        "resolved_config.json",
+        "metrics.json",
+        "summary.png",
+        "report.md",
+    }

@@ -71,14 +71,14 @@ class DiffusionConfig:
 
 
 def load_diffusion_config(
-    hydra_overrides: list[str] | tuple[str, ...] | None = None,
+    overrides: list[str] | tuple[str, ...] | None = None,
     cli_overrides: dict[str, Any] | None = None,
 ) -> DiffusionConfig:
     config = load_config(
         paths.REPO_ROOT / "configs" / "diffusion.yaml",
         DiffusionConfig,
         DiffusionConfigError,
-        hydra_overrides,
+        overrides,
         cli_overrides,
     )
     return _validate(config)

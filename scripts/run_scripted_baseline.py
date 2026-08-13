@@ -70,11 +70,11 @@ parser.add_argument(
     help="Call SimulationApp.close() before exiting; useful for debugging Kit shutdown hangs.",
 )
 AppLauncher.add_app_launcher_args(parser)
-args, hydra_overrides = parser.parse_known_args()
+args, overrides = parser.parse_known_args()
 
 try:
     run_config = load_scripted_baseline_config(
-        hydra_overrides,
+        overrides,
         cli_overrides={
             "episodes": args.episodes,
             "randomized": args.randomized,

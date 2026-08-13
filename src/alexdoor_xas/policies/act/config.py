@@ -65,14 +65,14 @@ class ActConfig:
 
 
 def load_act_config(
-    hydra_overrides: list[str] | tuple[str, ...] | None = None,
+    overrides: list[str] | tuple[str, ...] | None = None,
     cli_overrides: dict[str, Any] | None = None,
 ) -> ActConfig:
     config = load_config(
         paths.REPO_ROOT / "configs" / "act.yaml",
         ActConfig,
         ActConfigError,
-        hydra_overrides,
+        overrides,
         cli_overrides,
     )
     return _validate(config)

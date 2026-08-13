@@ -122,7 +122,6 @@ def _save_checkpoint(path, model, stats):
     )
 
 
-# --- min-max normalization -------------------------------------------------------
 
 
 def test_minmax_round_trip_and_extrema() -> None:
@@ -208,7 +207,6 @@ def test_sample_actions_is_deterministic_with_seeded_generator() -> None:
     assert not torch.allclose(first, third)
 
 
-# --- model + loss ----------------------------------------------------------------
 
 
 def test_model_forward_shapes_and_finiteness() -> None:
@@ -295,7 +293,6 @@ def test_diffusion_loss_masks_padded_steps() -> None:
         )
 
 
-# --- training --------------------------------------------------------------------
 
 TINY_TRAIN_CFG = DiffusionTrainCfg(
     epochs=150,

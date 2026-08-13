@@ -49,7 +49,7 @@ class ScriptedBaselineCfg:
 
 
 def load_scripted_baseline_config(
-    hydra_overrides: list[str] | tuple[str, ...] | None = None,
+    overrides: list[str] | tuple[str, ...] | None = None,
     cli_overrides: dict[str, Any] | None = None,
 ) -> ScriptedBaselineCfg:
     dotted_cli = {f"run.{key}": value for key, value in (cli_overrides or {}).items()}
@@ -57,7 +57,7 @@ def load_scripted_baseline_config(
         paths.REPO_ROOT / "configs" / "scripted_baseline.yaml",
         _ConfigFile,
         ScriptedBaselineConfigError,
-        hydra_overrides,
+        overrides,
         dotted_cli,
     )
     _validate_run(config.run)

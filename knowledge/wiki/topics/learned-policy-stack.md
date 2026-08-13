@@ -10,6 +10,8 @@ AlexDoor-XAS maintains state-only ACT and Diffusion policies for A2 and A3. Both
 
 `ACTModel` is a conditional variational transformer over action chunks. It optimizes masked L1 reconstruction plus KL regularization and uses a zero latent for deterministic inference. `DiffusionTransformer` predicts epsilon over an action horizon with a causal transformer, DDPM training noise, optional EMA, and DDPM/DDIM inference. Active defaults are in `configs/act.yaml` and `configs/diffusion.yaml`.
 
+Both policy configs use one OmegaConf loader. YAML values are overridden first by CLI `key=value` tokens and then by explicit argparse options; no global Hydra state is used.
+
 ## Training-run contract
 
 New runs are exclusively allocated under `outputs/door_push_alex_v2/{act,diffusion}/<run_id>/` with full UTC IDs such as `20260812T153045Z_a3_v3n500_seed0`; same-second collisions append `_r2`, `_r3`, and so on. `resolved_config.json` is immutable and freezes the policy configuration plus the complete evaluation protocol. Reuse requires explicit `--resume <run-directory>` and a resumable `last.pt`; completed runs are never overwritten.
@@ -24,16 +26,18 @@ W&B is an optional vanilla SDK integration installed through `.[tracking]`. The 
 
 ## Closed-loop evaluation
 
-Each training run freezes the canonical 36-rollout D0-D4 protocol, thresholds, 200 N force limit, horizon, control settings, and policy execution settings. The evaluator creates a fresh environment per pose and publishes one `closed_loop/metrics.json` with factual rollout rows plus overall, pose, fixed/randomized, and pose-plus-subset aggregates. The single summary plot shows time to success, peak force with its limit, and adapter correction/rejection rates.
+Each training run freezes the canonical 36-rollout D0-D4 protocol, thresholds, 200 N force limit, horizon, control settings, and policy execution settings. The evaluator creates a fresh environment per pose and allocates every result under `<training-run>/closed_loop/<UTC-id>[_rN]/`; legacy files already under `closed_loop/` are left untouched.
 
-An exact protocol match may publish the first closed-loop result into the source training run. Any change to poses, seeds, randomization, thresholds, force limits, horizon, control settings, or policy execution creates a timestamped sibling evaluation run with `run_type: evaluation`, `source_run_id`, and `source_checkpoint`; the checkpoint is not copied and the source run is not modified. `traces/` is retained only for unsuccessful rollouts, force-limit exceedances, or explicitly selected keys, and `media/` only when explicitly requested.
+Each evaluation directory contains immutable `resolved_config.json`, `metrics.json`, `summary.png`, and `report.md`. The resolved config records `run_type: evaluation`, `source_run_id`, checkpoint path, frozen training config, and the requested protocol. Metrics contain factual rollout rows plus overall, pose, fixed/randomized, and pose-plus-subset aggregates; the summary shows time to success, peak force with its limit, and adapter correction/rejection rates. `traces/` exists only for unsuccessful rollouts, force-limit exceedances, or explicit `--trace-rollout` keys. Evaluation never changes the training report and never creates top-level sibling runs.
+
+Preflight requires only a valid `checkpoints/best.pt` location, training `resolved_config.json`, and evaluation protocol. Training plots, reports, open-loop output, and the absence of `last.pt` are not evaluation prerequisites.
 
 ACT and Diffusion accept only self-contained checkpoint v2 files whose robot-asset identity exactly matches the active Alex V2 runtime. Older or unfingerprinted checkpoint formats and cross-model transfer evaluation are unsupported. `scripts/verify_policy_rollout.py` remains the compact A2/A3 runtime gate and writes temporary evidence under `~/.cache/alexdoor-xas/verification/`.
 
-Both policy families use `policies/common/checkpoint.py` for the shared payload,
-normalization, robot-identity, and atomic I/O contract. Their policy-specific
-modules retain the public loaders and construct the corresponding model config
-and model without changing either checkpoint format.
+Both policy families use `policies/common/checkpoint.py` for payload serialization,
+normalization, robot identity, and atomic I/O. Each policy loader reconstructs
+its own model directly without policy-specific checkpoint modules. The
+`alexdoor_xas.{act,diffusion}.v2` formats remain unchanged.
 
 ## Limits
 
@@ -44,6 +48,8 @@ and model without changing either checkpoint format.
 
 ## Version Notes
 
+- 2026-08-12 — Replaced protocol-match routing with exclusive immutable evaluation children under each training run and reduced preflight to its operational inputs.
+- 2026-08-12 — Unified OmegaConf loading, shared model/checkpoint primitives, and policy-owned model reconstruction while reducing internal APIs and tests.
 - 2026-08-12 — Consolidated model-neutral checkpoint v2 serialization and
   validation while preserving the ACT and Diffusion public loaders and formats.
 - 2026-08-12 — Consolidated policy execution into `train_policy.py` and `eval_policy.py`; evaluation now detects the policy family from the frozen source run.

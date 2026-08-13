@@ -15,10 +15,7 @@ from isaaclab.app import AppLauncher
 
 from alexdoor_xas import paths
 from alexdoor_xas.policies.act.config import act_config_from_dict
-from alexdoor_xas.policies.common.closed_loop import (
-    evaluation_preflight,
-    validate_evaluation_protocol,
-)
+from alexdoor_xas.policies.common.closed_loop import prepare_evaluation_run
 from alexdoor_xas.policies.common.runs import load_resolved_config
 from alexdoor_xas.policies.diffusion.config import diffusion_config_from_dict
 
@@ -50,6 +47,7 @@ if unknown:
     )
 if args.checkpoint is None:
     parser.error("the following argument is required: --checkpoint")
+selected_trace_keys = set(args.trace_rollout)
 
 checkpoint_path = Path(args.checkpoint).expanduser().resolve()
 if not checkpoint_path.is_file():
@@ -73,8 +71,7 @@ protocol = (
     else source_resolved["evaluation_protocol"]
 )
 try:
-    validate_evaluation_protocol(protocol, policy_name)
-    evaluation_preflight(
+    evaluation_dir, evaluation_resolved = prepare_evaluation_run(
         source_checkpoint=checkpoint_path,
         requested_protocol=protocol,
         policy=policy_name,
@@ -103,10 +100,10 @@ from alexdoor_xas.policies.act.policy import ActPolicy, act_chunk_source  # noqa
 from alexdoor_xas.policies.common.closed_loop import (  # noqa: E402
     closed_loop_trace_payload,
     factual_rollout_row,
-    prepare_evaluation_run,
     protocol_rollouts,
     publish_closed_loop,
     rollout_key,
+    trace_required,
 )
 from alexdoor_xas.policies.diffusion.policy import (  # noqa: E402
     DiffusionPolicy,
@@ -266,7 +263,8 @@ def _evaluate(run=None) -> int:
                 key = rollout_key(pose_id, seed, item["status"])
                 rows.append(row)
                 force_samples[key] = forces
-                trace_payloads[key] = closed_loop_trace_payload(result)
+                if trace_required(row, selected_trace_keys):
+                    trace_payloads[key] = closed_loop_trace_payload(result)
                 print(
                     f"[eval_policy:{policy_name}] {key}: success={row['success']} "
                     f"reason={row['termination_reason']} steps={row['evaluated_steps']}",
@@ -275,20 +273,13 @@ def _evaluate(run=None) -> int:
         finally:
             env.close()
 
-    run_dir, resolved, source_publish = prepare_evaluation_run(
-        source_checkpoint=checkpoint_path,
-        requested_protocol=protocol,
-        policy=policy_name,
-        output_root=None,
-    )
     metrics = publish_closed_loop(
-        run_dir=run_dir,
-        resolved=resolved,
+        run_dir=evaluation_dir,
+        resolved=evaluation_resolved,
         rows=rows,
         force_samples=force_samples,
-        source_run_publish=source_publish,
         trace_payloads=trace_payloads,
-        selected_trace_keys=set(args.trace_rollout),
+        selected_trace_keys=selected_trace_keys,
     )
     overall = metrics["aggregate"]["overall"]
     if run is not None:
@@ -312,7 +303,7 @@ def _evaluate(run=None) -> int:
     print(
         f"[eval_policy:{policy_name}] "
         f"{overall['success_count']}/{overall['rollout_count']} successful; "
-        f"published {run_dir / 'closed_loop'}",
+        f"published {evaluation_dir}",
         flush=True,
     )
     return 0

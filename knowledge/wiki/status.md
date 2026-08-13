@@ -9,7 +9,7 @@ Current as of 2026-08-12. Code and deterministic tests are the source of truth f
 - A2/A3 model datasets, content-grouped splits, retained views, and directly recomputed train-only normalization.
 - A2/A3/A4 adapters and simulator safety controls.
 - State-only ACT and Diffusion training with collision-safe UTC run IDs, immutable resolved configuration, atomic full-state resume checkpoints, compact histories, open-loop summaries, and self-contained best checkpoints.
-- Frozen 36-rollout D0-D4 evaluation with factual force/adapter/termination metrics, protocol-match routing, checkpoint-free sibling evaluation runs, and selective traces/media.
+- Frozen 36-rollout D0-D4 evaluation with factual force/adapter/termination metrics, immutable per-training-run evaluation children, and selective traces.
 - Optional vanilla W&B metric tracking, disabled by default and stored under `outputs/wandb/` only when enabled.
 
 The only maintained execution path is Door + Alex V2 to `v2_pose` A1-A4, training, adapter-v1, and evaluation. The five verification gates are `verify_benchmark_scene.py`, `verify_scripted_baseline.py`, `verify_dataset_interface.py`, `verify_adapters.py`, and `verify_policy_rollout.py`.
