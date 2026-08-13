@@ -22,13 +22,7 @@ A2/A3 datasets -> ACT or Diffusion -> adapter-v1 -> closed-loop evaluation
 The completed evaluation was success-saturated and did not identify a winning policy, representation, or dataset size. 
 See [Project Status](knowledge/wiki/status.md) for maintained capabilities, results, and current boundaries.
 
-The approved next study moves to vision-and-proprioception policies and compares
-the complete A1-A4 x ACT/Diffusion matrix on geometrically unseen push-door USD
-assets, without retraining on those held-out doors. It will use matched A1-A4
-exports, one dataset size, multiple training seeds, and a simulation-first hybrid
-data pipeline. Handles and other articulated objects are later benchmark stages.
-This direction is approved but not yet implemented; see the
-[generalization benchmark scope](knowledge/wiki/decisions/visuoproprioceptive-generalization-benchmark.md).
+The next study moves to vision-and-proprioception policies and compares the complete A1-A4 x ACT/Diffusion matrix on geometrically unseen push-door USD assets, without retraining on those held-out doors. It will use matched A1-A4 exports, one dataset size, multiple training seeds, and a simulation-first hybrid data pipeline. Handles and other articulated objects are later benchmark stages.
 
 ## Requirements
 
