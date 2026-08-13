@@ -1,11 +1,5 @@
 #!/usr/bin/env python
-"""Scripted door-push data engine CLI for the calibrated Alex V2 benchmark.
-
-Rolls out the deterministic scripted controller in the door-push env, records
-episodes to the schema, exports A1/A2/A3/A4 datasets under ``datasets/``, and
-writes temporary run artifacts under ``~/.cache/alexdoor-xas/scripted_runs/<experiment>/<run_id>/``.
-Every run uses the calibrated fixed-base Alex V2 humanoid and the frozen
-``door_push_alex_v2`` task identity.
+"""Generate calibrated Alex V2 episodes and matched A1-A4 datasets.
 
 Run through the official Isaac Lab launcher::
 
@@ -13,9 +7,7 @@ Run through the official Isaac Lab launcher::
         scripts/run_scripted_baseline.py --viz none --device cuda:0 \
         --episodes 5 --randomized 3
 
-Add ``--video --enable_cameras`` to also record per-episode rollout videos.
-Run settings can also be supplied as Hydra-style overrides, for example
-``run.episodes=5 run.randomized=3``.
+Use ``--video --enable_cameras`` to record rollout videos.
 """
 
 from __future__ import annotations
@@ -26,7 +18,6 @@ import os
 import sys
 import traceback
 from datetime import UTC, datetime
-from pathlib import Path
 
 # -- AppLauncher must be configured before any other Isaac import.
 from isaaclab.app import AppLauncher
@@ -38,19 +29,6 @@ from alexdoor_xas.scripted_baseline_config import (
 )
 
 parser = argparse.ArgumentParser(description="AlexDoor-XAS Alex V2 scripted data engine")
-parser.add_argument(
-    "--randomized-seed-plan",
-    type=Path,
-    default=None,
-    help="JSON list of explicit randomized seeds (scale candidate generation only).",
-)
-parser.add_argument(
-    "--candidate-pool",
-    action="store_true",
-    help=(
-        "Preserve failed candidate evidence for later fail-closed selection; requires --no-export."
-    ),
-)
 parser.add_argument("--episodes", type=int, default=None, help="Fixed-start episodes.")
 parser.add_argument("--randomized", type=int, default=None, help="Seeded randomized episodes.")
 parser.add_argument("--seed", type=int, default=None, help="Base seed for the episode plan.")
@@ -77,7 +55,7 @@ parser.add_argument(
     "--no-export",
     action="store_true",
     default=None,
-    help="Record the run in the runtime cache only; never write datasets/ (multi-pose passes).",
+    help="Record the run in the runtime cache without writing datasets/.",
 )
 parser.add_argument(
     "--door-pose-id",
@@ -127,7 +105,6 @@ import alexdoor_xas.envs.door_task as door_task  # noqa: E402
 from alexdoor_xas import paths  # noqa: E402
 from alexdoor_xas.data_engine import (  # noqa: E402
     DataEngineCfg,
-    plan_randomized_seeds,
     run_baseline,
 )
 from alexdoor_xas.envs.door_task.alex_v2_runtime import ALEX_V2_LIMITATIONS  # noqa: E402
@@ -173,14 +150,6 @@ def main() -> int:
             alex_v2_push_cfg(calibration), run_config.controller_overrides
         )
         variation_bounds = alex_v2_variation_bounds(calibration)
-        explicit_plan = None
-        if args.randomized_seed_plan is not None:
-            import json
-
-            seed_payload = json.loads(args.randomized_seed_plan.read_text())
-            if not isinstance(seed_payload, list):
-                raise ValueError("--randomized-seed-plan must contain a JSON list")
-            explicit_plan = plan_randomized_seeds(seed_payload, variation_bounds)
         artifacts = run_baseline(
             env,
             outputs_root=paths.SCRIPTED_RUNS_CACHE_DIR,
@@ -196,8 +165,6 @@ def main() -> int:
             video=run_config.run.video,
             export=run_config.run.export,
             dataset_version=paths.ALEX_V2_DATASET_VERSION,
-            episode_plan=explicit_plan,
-            preserve_candidate_failures=args.candidate_pool,
         )
 
         print(f"[run] dir={artifacts.run_dir}", flush=True)

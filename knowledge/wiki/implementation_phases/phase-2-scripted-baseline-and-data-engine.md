@@ -16,6 +16,8 @@ New writes use `phase2.v2`: outcomes retain success, final door angle, step coun
 
 Scripted-run staging moved from `outputs/` to `~/.cache/alexdoor-xas/scripted_runs/`; reusable exports remain under `datasets/`.
 
+The maintained runner uses count-and-seed planning only. Retired scale-candidate and paired-master publication paths are not part of the current engine.
+
 #### Key Decisions and Problems
 
 - Door-relative frames are explicit and hinge anchored.
@@ -29,5 +31,6 @@ Pure tests cover controller transitions, `phase2.v2` recording, legacy v0/v1 rea
 
 ## Version Notes
 
+- 2026-08-12 — Reduced the engine to maintained count-and-seed generation and current A1-A4 export contracts.
 - 2026-08-12 — Introduced factual `phase2.v2`, retained legacy read compatibility, and moved scripted staging to the runtime cache.
 - 2026-08-11 — The scripted baseline and data engine remain active.

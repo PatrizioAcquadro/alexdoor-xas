@@ -1,21 +1,8 @@
-"""Deterministic scripted-episode generation for the Alex V2 benchmark.
-
-The engine drives a door-push environment with the scripted
-controller and records every control tick to the episode schema. The env is
-duck-typed through its benchmark state accessors (``door_frame_pose_w``,
-``hinge_state``, ``ee_pose_w``, ``set_ee_pose_w``, ``step``, ``reset``), so
-the loop itself has no Isaac imports and is testable against a synthetic env.
-
-Recorded actions are the executed world-frame EE deltas (A2). The controller's
-native door-frame deltas (A3) are stored per step in ``extras`` so the A3
-export is a relabeling, not a recomputation.
-"""
+"""Deterministic scripted episode generation for the Alex V2 benchmark."""
 
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
-from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -24,11 +11,6 @@ import torch
 
 from alexdoor_xas.action.frames import ObjectFrame, door_frame_from_body_pose, frame_delta_to_world
 from alexdoor_xas.action.spaces import A2_EE_DELTA
-from alexdoor_xas.assets.alex_v2_contract import (
-    AlexV2ContractError,
-    RobotAssetRef,
-    validate_alex_v2_manifest,
-)
 from alexdoor_xas.assets.door_task import DEFAULT_DOOR_POSE_ID, canonical_door_pose
 from alexdoor_xas.envs.door_task.contact_force import decode_contact_flag
 from alexdoor_xas.policies.scripted import (
@@ -46,8 +28,6 @@ CONTACT_SOURCE_FORCE = "force_sensor+geometric"
 DEFAULT_SUCCESS_ANGLE_RAD = math.pi / 4.0
 DEFAULT_MAX_TICKS = 600
 
-_MISSING = object()
-
 
 @dataclass(frozen=True)
 class DataEngineCfg:
@@ -56,23 +36,16 @@ class DataEngineCfg:
     task: str
     robot: str
     limitations: tuple[str, ...]
-    """Known limitations of the run setup, surfaced in the run report."""
-    scene: str = ""
-    policy: str = "scripted"
     success_angle_rad: float = DEFAULT_SUCCESS_ANGLE_RAD
     max_ticks: int = DEFAULT_MAX_TICKS
     door_pose_id: str = DEFAULT_DOOR_POSE_ID
-    """Canonical door pose selected by ID; routine generation never accepts raw transforms."""
 
     def __post_init__(self) -> None:
         canonical_door_pose(self.door_pose_id)
-        expected_scene = f"outputs/door_scene/{self.door_pose_id}.usda"
-        if self.scene and self.scene != expected_scene:
-            raise ValueError(
-                f"scene {self.scene!r} conflicts with canonical pose {self.door_pose_id!r}; "
-                f"expected {expected_scene!r}"
-            )
-        object.__setattr__(self, "scene", expected_scene)
+
+    @property
+    def scene(self) -> str:
+        return f"outputs/door_scene/{self.door_pose_id}.usda"
 
     def to_dict(self) -> dict[str, object]:
         values = asdict(self)
@@ -125,41 +98,6 @@ def plan_randomized_seeds(
         )
         for seed in normalized
     ]
-
-
-def _validated_robot_asset_provenance(
-    env: Any,
-) -> tuple[RobotAssetRef | None, dict[str, Any] | None]:
-    """Validate an optional env-provided robot asset before executing it."""
-    accessor = getattr(env, "robot_asset_provenance", _MISSING)
-    if accessor is _MISSING:
-        return None, None
-    if not callable(accessor):
-        raise AlexV2ContractError("env robot_asset_provenance must be callable")
-
-    payload = accessor()
-    if not isinstance(payload, Mapping):
-        raise AlexV2ContractError("env robot_asset_provenance must return an object")
-    required = {"id", "sha256", "manifest_fingerprint", "manifest"}
-    missing = required.difference(payload)
-    if missing:
-        raise AlexV2ContractError(
-            "env robot_asset_provenance is missing required keys: " + ", ".join(sorted(missing))
-        )
-
-    manifest_value = payload["manifest"]
-    if not isinstance(manifest_value, Mapping):
-        raise AlexV2ContractError("env robot_asset_provenance manifest must be an object")
-    manifest = deepcopy(dict(manifest_value))
-    validated = validate_alex_v2_manifest(manifest)
-    provided = RobotAssetRef(
-        asset_id=str(payload["id"]),
-        sha256=str(payload["sha256"]),
-        manifest_fingerprint=str(payload["manifest_fingerprint"]),
-    )
-    if provided != validated:
-        raise AlexV2ContractError("env robot asset reference does not match its canonical manifest")
-    return validated, manifest
 
 
 @dataclass(frozen=True)
@@ -232,7 +170,7 @@ def _prepare_episode(
     controller_cfg: DoorPushControllerCfg | None,
 ) -> _EpisodeSetup:
     base_controller_cfg = controller_cfg or DoorPushControllerCfg()
-    robot_asset_ref, robot_asset_manifest = _validated_robot_asset_provenance(env)
+    robot_asset = env.robot_asset_provenance() if hasattr(env, "robot_asset_provenance") else None
     env.reset(seed=item.seed)
     door_frame = _read_door_frame(env)
 
@@ -249,16 +187,16 @@ def _prepare_episode(
         action_space=A2_EE_DELTA,
         robot=engine_cfg.robot,
         scene=engine_cfg.scene,
-        policy=engine_cfg.policy,
+        policy="scripted",
         seed=item.seed,
         sim_dt=sim_dt,
         control_dt=control_dt,
-        robot_asset_id=robot_asset_ref.asset_id if robot_asset_ref is not None else "",
-        robot_asset_sha256=robot_asset_ref.sha256 if robot_asset_ref is not None else "",
+        robot_asset_id=str(robot_asset["id"]) if robot_asset is not None else "",
+        robot_asset_sha256=str(robot_asset["sha256"]) if robot_asset is not None else "",
     )
     buffer = EpisodeBuffer(meta=meta)
-    if robot_asset_manifest is not None:
-        buffer.extras["robot_asset_manifest"] = robot_asset_manifest
+    if robot_asset is not None:
+        buffer.extras["robot_asset_manifest"] = robot_asset["manifest"]
     return _EpisodeSetup(
         buffer=buffer,
         controller=DoorPushController(active_cfg),
@@ -550,14 +488,7 @@ def _step_termination_flags(step_result: Any) -> tuple[bool, bool]:
 def traces_equal(
     first: EpisodeBuffer, second: EpisodeBuffer, tol: float = 1e-6, force_tol: float | None = None
 ) -> float:
-    """Max abs difference between two episodes' action/state traces (determinism check).
-
-    Always compares the action, EE position, and door angle. When both episodes
-    recorded them, also compares joint positions/velocities/targets (at ``tol``),
-    the sensed contact force (at ``force_tol``, default ``tol`` — headless physics
-    is deterministic in this build, so the contact force is too), and the exact
-    per-tick sensed-contact flags and controller phases.
-    """
+    """Compare deterministic action, state, contact, and phase traces."""
     if first.n_steps != second.n_steps:
         raise AssertionError(f"step-count mismatch: {first.n_steps} != {second.n_steps}")
     force_tol = tol if force_tol is None else force_tol
@@ -617,14 +548,7 @@ def _door_frame_quat(env) -> np.ndarray:
 
 
 def apply_start_offset(env, door_frame: ObjectFrame, variation: DoorPushVariation) -> dict | None:
-    """Shift the EE start pose by the variation's door-frame offset (shared with eval).
-
-    Returns the env's realized-state settle report when it exposes one
-    (``start_pose_settle_report``): requested/realized position, residual,
-    settle ticks, and pass/fail — the fail-closed postcondition itself lives
-    in the env's ``set_ee_pose_w``. Teleporting test fakes realize the request
-    exactly and return ``None``.
-    """
+    """Apply a door-frame start offset and return optional settle evidence."""
     pos, quat = env.ee_pose_w()
     offset_w = door_frame.vector_to_world(np.asarray(variation.start_offset_door_frame))
     new_pos = _numpy(pos)[0] + offset_w
@@ -650,17 +574,3 @@ def _numpy(value) -> np.ndarray:
     if isinstance(value, torch.Tensor):
         return value.detach().cpu().numpy()
     return np.asarray(value)
-
-
-__all__ = [
-    "CONTACT_SOURCE",
-    "CONTACT_SOURCE_FORCE",
-    "DEFAULT_MAX_TICKS",
-    "DEFAULT_SUCCESS_ANGLE_RAD",
-    "DataEngineCfg",
-    "EpisodePlanItem",
-    "plan_episodes",
-    "plan_randomized_seeds",
-    "run_episode",
-    "traces_equal",
-]

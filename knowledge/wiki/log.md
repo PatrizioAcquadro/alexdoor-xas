@@ -228,3 +228,13 @@ authoring workflow, and the maintained runtime gates required for changes.
 
 Verified wiki structure and links, source references, Markdown whitespace,
 protected raw boundaries, and removal of active calibration-authoring references.
+
+## 2026-08-12 — update : Maintained data engine
+
+Documented removal of retired candidate-generation and paired-publication hooks,
+plus the current-only A1 export requirement for the recorded final target.
+
+## 2026-08-12 — lint : Maintained data engine
+
+Verified wiki structure and links, source references, Markdown whitespace,
+protected raw boundaries, and removal of retired data-engine interfaces.

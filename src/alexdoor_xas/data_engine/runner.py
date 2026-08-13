@@ -1,15 +1,10 @@
-"""One-run orchestration: episodes -> a caller-selected run cache + datasets.
-
-Used by both ``scripts/run_scripted_baseline.py`` (the engine CLI) and
-``scripts/verify_scripted_baseline.py`` (the Phase 2 gate), so the gate
-exercises exactly the code path that produces real datasets. No Isaac imports:
-the env comes in already constructed.
-"""
+"""Scripted run orchestration from episodes to reports and datasets."""
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+import shutil
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +26,7 @@ from alexdoor_xas.eval.sanity import (
 from alexdoor_xas.policies.scripted import DoorPushControllerCfg, VariationBounds
 from alexdoor_xas.recording import EpisodeBuffer, write_episode
 
-VIDEO_FPS = 60  # one rendered frame per control tick at control_dt = 1/60 s
+VIDEO_FPS = 60
 
 
 @dataclass
@@ -66,30 +61,9 @@ def run_baseline(
     video: bool = False,
     export: bool = True,
     dataset_version: str = "v0",
-    episode_plan: list[EpisodePlanItem] | None = None,
-    preserve_candidate_failures: bool = False,
 ) -> RunArtifacts:
-    """Generate, record, export, evaluate, and report one baseline run.
-
-    Rerunning the same ``run_id`` replaces its artifacts: the run-owned
-    subdirectories (episodes/videos/metrics/plots/logs) and report.md are
-    removed up front so a rerun can never leave stale episode files behind.
-
-    Force-sensing (Alex) episodes are sanity-checked (``eval/sanity.py``)
-    before any dataset export: the per-episode summary is always written to
-    ``metrics/sanity.json``, warnings are reported verbatim, and any sanity
-    *error* aborts the run loudly — bad data can no longer reach ``datasets/``
-    silently and fail only at the Phase 3.0 gate.
-
-    ``export=False`` records the run under the caller's cache only and never
-    writes ``datasets/`` — the mode multi-pose generation uses so partial per-pose
-    passes cannot masquerade as an official dataset version.
-    """
-    # Posed runs never export directly: a re-export replaces the version dir,
-    # so one posed run with export=True would silently overwrite the official
-    # default-pose dataset (and its splits/norm stats) the trained checkpoints
-    # depend on. Posed runs remain output-only unless a future dataset workflow
-    # explicitly defines how multiple poses are selected and published.
+    """Generate, validate, export, evaluate, and report one baseline run."""
+    # A posed run must not replace the maintained D0 dataset version.
     non_default_pose = engine_cfg.door_pose_id != "D0"
     if export and non_default_pose:
         raise RuntimeError(
@@ -100,11 +74,7 @@ def run_baseline(
 
     run_dir = Path(outputs_root) / experiment / run_id
     _fresh_run_dir(run_dir)
-    # Config provenance is written up front so an aborted run (sanity error)
-    # still records what produced it.
-    active_plan = episode_plan or plan_episodes(
-        n_fixed, n_randomized, base_seed, bounds=variation_bounds
-    )
+    active_plan = plan_episodes(n_fixed, n_randomized, base_seed, bounds=variation_bounds)
     _write_run_config(
         run_dir,
         engine_cfg,
@@ -112,16 +82,10 @@ def run_baseline(
         n_fixed,
         n_randomized,
         base_seed,
-        active_plan,
-        preserve_candidate_failures,
         dataset_version,
     )
     env_tick_limit = getattr(env, "max_episode_length", None)
     if env_tick_limit is not None and engine_cfg.max_ticks > int(env_tick_limit):
-        # max_ticks == env budget is the frozen contract (both 600); running
-        # *past* it can only record post-auto-reset garbage. Episodes that
-        # actually reach the env's truncation are caught per-episode by the
-        # auto-reset detector in run_episode.
         raise RuntimeError(
             f"engine max_ticks ({engine_cfg.max_ticks}) exceeds the env's episode "
             f"length ({int(env_tick_limit)} control ticks): steps past the env "
@@ -160,16 +124,13 @@ def run_baseline(
             f"Sanity warnings on {sanity['n_episodes_with_warnings']} episode(s) "
             f"(see metrics/sanity.json)"
         )
-    if sanity is not None and sanity["n_episodes_with_errors"] and not preserve_candidate_failures:
+    if sanity is not None and sanity["n_episodes_with_errors"]:
         failing = [entry["seed"] for entry in sanity["episodes"] if entry["errors"]]
         raise RuntimeError(
             f"sanity checks failed on {sanity['n_episodes_with_errors']} episode(s) "
             f"(seeds {failing}); run aborted before export — see "
             f"{metrics_dir / 'sanity.json'}"
         )
-    if preserve_candidate_failures and export:
-        raise RuntimeError("candidate-pool failure preservation requires export=false")
-
     exports = export_datasets(episodes, datasets_root, version=dataset_version) if export else {}
     plots = {
         "door_angle_vs_time": door_angle_plot(episodes, run_dir / "plots" / "door_angle.png"),
@@ -205,19 +166,9 @@ def run_baseline(
 
 
 def _run_sanity_checks(episodes: list[EpisodeBuffer], metrics_dir: Path) -> dict[str, Any] | None:
-    """Sanity-check force-sensing (Alex) episodes; write metrics/sanity.json.
-
-    Same episode condition the Phase 3.0 dataset gate uses (joint proprio
-    present). Returns ``None`` for synthetic runs without joint state. The
-    summary carries every warning/error message verbatim plus the anti-windup
-    IK clamp telemetry per episode — warnings are reported, never suppressed.
-    """
+    """Validate Alex episodes and write their sanity evidence."""
     entries: list[dict[str, Any]] = []
     for episode in episodes:
-        # An Alex episode is identified by joint proprio OR the joint-limit
-        # extras: a degenerate zero-step Alex episode has no steps but must
-        # still reach the checker (which hard-errors on empty episodes)
-        # instead of silently skipping the gate.
         is_alex = "joint_pos_limits" in episode.extras or (
             bool(episode.steps) and "joint_pos" in episode.steps[0].proprio
         )
@@ -249,13 +200,7 @@ def _run_sanity_checks(episodes: list[EpisodeBuffer], metrics_dir: Path) -> dict
 
 
 def _fresh_run_dir(run_dir: Path) -> None:
-    """Remove the artifacts a previous run with the same run_id produced.
-
-    Targeted (not ``rmtree(run_dir)``): sibling content such as a gate's
-    ``*_datasets`` directory or user notes dropped next to the artifacts
-    must survive a rerun.
-    """
-    import shutil
+    """Remove only run-owned artifacts from an earlier run with the same ID."""
 
     for subdir in ("episodes", "videos", "metrics", "plots", "logs"):
         path = run_dir / subdir
@@ -267,7 +212,7 @@ def _fresh_run_dir(run_dir: Path) -> None:
 
 
 def _make_render_hook(env, frames: list[Any], videos_state: dict[str, Any]):
-    def hook(tick: int) -> None:
+    def hook(_tick: int) -> None:
         if videos_state["status"] != "enabled":
             return
         try:
@@ -308,36 +253,21 @@ def _write_run_config(
     n_fixed: int,
     n_randomized: int,
     base_seed: int,
-    episode_plan: list[EpisodePlanItem],
-    preserve_candidate_failures: bool,
     dataset_version: str,
 ) -> None:
-    import dataclasses
-
     logs_dir = run_dir / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
     (logs_dir / "run_config.json").write_text(
         json.dumps(
             {
                 "engine_cfg": engine_cfg.to_dict(),
-                "controller_cfg": dataclasses.asdict(controller_cfg or DoorPushControllerCfg()),
+                "controller_cfg": asdict(controller_cfg or DoorPushControllerCfg()),
                 "n_fixed": n_fixed,
                 "n_randomized": n_randomized,
                 "base_seed": base_seed,
-                "explicit_episode_plan": [
-                    {
-                        "seed": item.seed,
-                        "randomized": item.variation is not None,
-                    }
-                    for item in episode_plan
-                ],
-                "preserve_candidate_failures": preserve_candidate_failures,
                 "dataset_version": dataset_version,
             },
             indent=2,
         )
         + "\n"
     )
-
-
-__all__ = ["VIDEO_FPS", "RunArtifacts", "run_baseline"]

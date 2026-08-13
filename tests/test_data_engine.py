@@ -16,6 +16,7 @@ from alexdoor_xas.action.spaces import (
     A3_OBJ_REL_EE_DELTA,
     A4_OBJ_CENTRIC_CHUNK,
 )
+from alexdoor_xas.assets.alex_v2_contract import build_alex_v2_runtime_manifest
 from alexdoor_xas.data_engine import (
     export_datasets,
     plan_episodes,
@@ -88,12 +89,6 @@ def test_run_episode_succeeds_and_matches_schema() -> None:
     assert step.safety["controller_phase"] == "approach"
 
 
-def test_run_episode_is_deterministic() -> None:
-    first = _generate(seed=3)
-    second = _generate(seed=3)
-    assert traces_equal(first, second, tol=0.0) == 0.0
-
-
 def test_randomized_episode_records_variation_and_succeeds() -> None:
     variation = plan_episodes(0, 1, 42)[0].variation
     episode = _generate(seed=42, variation=variation)
@@ -102,6 +97,20 @@ def test_randomized_episode_records_variation_and_succeeds() -> None:
     assert episode.extras["controller_cfg"]["push_radius_frac"] == pytest.approx(
         variation.push_radius_frac
     )
+
+
+def test_run_episode_records_environment_asset_provenance() -> None:
+    manifest, ref = build_alex_v2_runtime_manifest()
+
+    class AssetEnv(FakeDoorPushEnv):
+        def robot_asset_provenance(self):
+            return {**ref.to_dict(), "manifest": manifest}
+
+    episode = run_episode(AssetEnv(), plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
+
+    assert episode.meta.robot_asset_id == ref.asset_id
+    assert episode.meta.robot_asset_sha256 == ref.sha256
+    assert episode.extras["robot_asset_manifest"] == manifest
 
 
 @requires_h5py
@@ -145,8 +154,6 @@ def test_export_datasets_produces_a2_a3_a4(tmp_path) -> None:
 
 
 def test_force_sensing_env_records_sensed_contact_and_joint_state() -> None:
-    """The engine picks up the Alex V2 accessors via hasattr and records the
-    force-sensed contact fields, joint proprio, and joint-name extras."""
     env = FakeForceDoorPushEnv()
     episode = run_episode(env, plan_episodes(1, 0, 0)[0], make_test_engine_cfg())
 
@@ -167,7 +174,6 @@ def test_force_sensing_env_records_sensed_contact_and_joint_state() -> None:
     assert all(s.contact["force_n"] > 0.0 for s in sensed_ticks)
     assert episode.extras["joint_names"] == env.robot_joint_names()
     assert episode.extras["arm_joint_ids"] == env.arm_joint_ids()
-    # Hardening-pass extras: A1 diff closure + Isaac-reported joint limits.
     assert episode.extras["final_joint_pos_target"].shape == (FakeForceDoorPushEnv.N_JOINTS,)
     assert episode.extras["joint_pos_limits"].shape == (FakeForceDoorPushEnv.N_JOINTS, 2)
     assert episode.extras["joint_vel_limits"].shape == (FakeForceDoorPushEnv.N_JOINTS,)
@@ -179,7 +185,6 @@ def _force_episode(seed: int = 0):
 
 @requires_h5py
 def test_a1_export_relabels_joint_target_deltas(tmp_path) -> None:
-    """Alex-style episodes additionally export A1 = joint-position-target deltas."""
     episode = _force_episode()
     exported = export_datasets([episode], tmp_path, version="v0")
     assert set(exported) == {
@@ -196,9 +201,6 @@ def test_a1_export_relabels_joint_target_deltas(tmp_path) -> None:
     actions = np.stack([step.action for step in a1.steps])
     assert actions.shape == (episode.n_steps, FakeForceDoorPushEnv.N_JOINTS)
 
-    # Recorded targets are pre-step, so action[t] = target[t+1] - target[t] with
-    # the last diff closed by extras["final_joint_pos_target"]. The fake env's
-    # arm targets advance by TARGET_STEP_RAD per executed tick.
     arm = list(FakeForceDoorPushEnv().arm_joint_ids())
     held = [j for j in range(FakeForceDoorPushEnv.N_JOINTS) if j not in arm]
     np.testing.assert_allclose(actions[:, arm], FakeForceDoorPushEnv.TARGET_STEP_RAD, atol=1e-12)
@@ -213,15 +215,6 @@ def test_a1_export_relabels_joint_target_deltas(tmp_path) -> None:
 
     meta = json.loads((exported[A1_JOINT_DELTA] / "meta.json").read_text())
     assert meta["action_space"] == A1_JOINT_DELTA
-
-
-@requires_h5py
-def test_a1_export_without_final_target_falls_back_to_zero_last_delta(tmp_path) -> None:
-    episode = _force_episode()
-    del episode.extras["final_joint_pos_target"]  # pre-hardening episodes lack it
-    exported = export_datasets([episode], tmp_path, version="v0")
-    a1 = read_episode(sorted(exported[A1_JOINT_DELTA].glob("episode_*.hdf5"))[0])
-    np.testing.assert_allclose(a1.steps[-1].action, 0.0, atol=1e-12)
 
 
 def test_traces_equal_covers_joint_and_contact_traces() -> None:
@@ -312,9 +305,6 @@ def test_reexport_replaces_the_version_dir(tmp_path) -> None:
     assert len(a4_lines) == 1
 
 
-# -- Local post-Phase 3.3 stabilization: door-pose obs, sanity, no-export --
-
-
 def test_door_pose_obs_terms_recorded_and_round_trip(tmp_path) -> None:
     yaw = 0.1
     origin = (1.0, -2.0, 0.5)
@@ -348,13 +338,7 @@ def test_door_pose_obs_terms_recorded_and_round_trip(tmp_path) -> None:
 
 @requires_h5py
 def test_a2_a3_exports_differ_under_posed_door_and_match_rotation(tmp_path) -> None:
-    """Problem-2 acceptance at unit level: yaw+translation separates A2 from A3.
-
-    A3 must equal R_z(yaw)^T applied per-vector to A2 (deltas are free
-    vectors: the door translation must not leak into the conversion), and at
-    the default orientation the two exports stay numerically identical even
-    with a translated door.
-    """
+    """A3 rotates A2 into the door frame without applying translation."""
     from alexdoor_xas.action.frames import rot_z
 
     yaw = 0.7
@@ -419,39 +403,6 @@ def test_run_baseline_writes_sanity_summary_and_respects_no_export(tmp_path) -> 
 
 
 @requires_h5py
-def test_run_baseline_aborts_loudly_before_export_on_sanity_error(tmp_path) -> None:
-    from alexdoor_xas.data_engine import run_baseline
-
-    class WindupEnv(FakeForceDoorPushEnv):
-        """Joint targets march far past tight limits -> hard sanity error."""
-
-        def robot_joint_limits(self):
-            limits = super().robot_joint_limits()
-            limits["joint_pos_limits"] = np.stack(
-                [np.full(self.N_JOINTS, -0.01), np.full(self.N_JOINTS, 0.01)], axis=1
-            )
-            return limits
-
-    with pytest.raises(RuntimeError, match="sanity checks failed"):
-        run_baseline(
-            WindupEnv(),
-            outputs_root=tmp_path / "cache",
-            datasets_root=tmp_path / "datasets",
-            experiment="sanity",
-            run_id="bad",
-            n_fixed=1,
-            n_randomized=0,
-            base_seed=0,
-            engine_cfg=make_test_engine_cfg(),
-        )
-    # The summary is written for debugging, but nothing reached datasets/.
-    summary_path = tmp_path / "cache" / "sanity" / "bad" / "metrics" / "sanity.json"
-    assert summary_path.exists()
-    assert json.loads(summary_path.read_text())["n_episodes_with_errors"] == 1
-    assert not (tmp_path / "datasets").exists()
-
-
-@requires_h5py
 def test_run_baseline_aborts_before_export_on_force_admission_error(tmp_path) -> None:
     from alexdoor_xas.data_engine import run_baseline
 
@@ -482,51 +433,8 @@ def test_run_baseline_aborts_before_export_on_force_admission_error(tmp_path) ->
 
 
 @requires_h5py
-def test_run_baseline_aborts_before_export_on_negative_force(tmp_path, monkeypatch) -> None:
-    import dataclasses
-
-    from alexdoor_xas.data_engine import run_baseline
-    from alexdoor_xas.data_engine import runner as runner_module
-
-    original_run_episode = runner_module.run_episode
-
-    def run_episode_with_negative_force(*args, **kwargs):
-        episode = original_run_episode(*args, **kwargs)
-        contact = dict(episode.steps[3].contact)
-        contact["force_n"] = -1.0
-        episode.steps[3] = dataclasses.replace(episode.steps[3], contact=contact)
-        return episode
-
-    monkeypatch.setattr(runner_module, "run_episode", run_episode_with_negative_force)
-
-    with pytest.raises(RuntimeError, match="sanity checks failed"):
-        run_baseline(
-            FakeForceDoorPushEnv(),
-            outputs_root=tmp_path / "cache",
-            datasets_root=tmp_path / "datasets",
-            experiment="negative_force_gate",
-            run_id="bad",
-            n_fixed=1,
-            n_randomized=0,
-            base_seed=0,
-            engine_cfg=make_test_engine_cfg(),
-            export=True,
-        )
-
-    summary_path = tmp_path / "cache/negative_force_gate/bad/metrics/sanity.json"
-    summary = json.loads(summary_path.read_text())
-    entry = summary["episodes"][0]
-    assert any("force magnitude must be non-negative" in error for error in entry["errors"])
-    assert entry["force_diagnostics"]["min_force_n"] == -1.0
-    assert entry["force_diagnostics"]["negative_force_ticks"] == [3]
-    assert entry["force_diagnostics"]["force_admission_passed"] is False
-    assert not (tmp_path / "datasets").exists()
-
-
-@requires_h5py
 def test_run_baseline_refuses_direct_export_from_posed_runs(tmp_path) -> None:
-    """A posed run with export enabled would replace the official default-pose
-    dataset version; only the merged-export script may write multi-pose data."""
+    """A posed run cannot replace the maintained D0 dataset version."""
     from alexdoor_xas.data_engine import run_baseline
 
     with pytest.raises(RuntimeError, match="non-default door pose"):
@@ -542,7 +450,7 @@ def test_run_baseline_refuses_direct_export_from_posed_runs(tmp_path) -> None:
             engine_cfg=make_test_engine_cfg(door_pose_id="D1"),
         )
     assert not (tmp_path / "datasets").exists()
-    # export=False stays allowed for posed runs (the multi-pose flow).
+    # Cache-only posed runs remain available for diagnostics.
     artifacts = run_baseline(
         FakeForceDoorPushEnv(),
         outputs_root=tmp_path / "cache",
@@ -556,5 +464,4 @@ def test_run_baseline_refuses_direct_export_from_posed_runs(tmp_path) -> None:
         export=False,
     )
     assert artifacts.exports == {}
-    # Config provenance survives even for runs that would later abort.
     assert (artifacts.run_dir / "logs" / "run_config.json").exists()

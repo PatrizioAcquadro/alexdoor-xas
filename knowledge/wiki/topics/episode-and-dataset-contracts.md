@@ -12,7 +12,7 @@ Readers continue to accept `phase2.v0` and `phase2.v1`, including A4 JSON Lines 
 
 ## Matched exports
 
-`src/alexdoor_xas/data_engine/export.py` derives matched products from one physical episode. A2 keeps world-frame end-effector deltas, A3 expresses the equivalent command in the static door frame, A4 stores object-centric guarded chunks, and Alex episodes can derive A1 joint deltas. The active operational version is `v2_pose` under `door_push_alex_v2`.
+`src/alexdoor_xas/data_engine/export.py` derives matched products from one physical episode. A2 keeps world-frame end-effector deltas, A3 expresses the equivalent command in the static door frame, A4 stores object-centric guarded chunks, and Alex episodes derive A1 joint deltas from recorded targets. New A1 exports require the final applied target; legacy v0/v1 support remains read-only. The active operational version is `v2_pose` under `door_push_alex_v2`.
 
 `scripts/verify_dataset_interface.py` requires all A1-A4 products and includes the paired A2/A3 gate: D0 commands are identical, yawed canonical poses are numerically distinct, and every pair satisfies the exact door-frame rotation within tolerance.
 
@@ -28,6 +28,7 @@ The retained `v3_scale_master` contains 550 episodes across D0-D4. Its N50, N100
 
 ## Version Notes
 
+- 2026-08-12 — Removed retired candidate-generation and paired-publication hooks; current A1 writes require the recorded final target.
 - 2026-08-12 — Introduced `phase2.v2` factual outcomes and legacy v0/v1 reads without failure labels; existing datasets remain unchanged.
 - 2026-08-12 — Made `door_push_alex_v2/v2_pose` the verifier default and folded the A2/A3 posed-door distinction check into the dataset interface gate.
 - 2026-08-11 — Dataset loading moved from publication/fingerprint orchestration to direct split membership and numerical validation.
