@@ -262,3 +262,13 @@ fallback was used.
 Verified wiki structure, links, source references, Markdown whitespace,
 protected raw and historical-phase boundaries, and removal of current wiki
 references to the retired environment layers.
+
+## 2026-08-12 — update : Compact evaluation runtime
+
+Documented compact scripted metrics and force evidence, the fixed 200 N
+admission gate, retained report and plots, and legacy terminal-sample handling.
+
+## 2026-08-12 — lint : Compact evaluation runtime
+
+Verified all 23 wiki pages, 31 internal links, complete index coverage, source
+references, Markdown whitespace, and unchanged protected raw boundaries.

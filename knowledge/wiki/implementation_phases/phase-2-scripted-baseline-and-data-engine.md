@@ -18,6 +18,8 @@ Scripted-run staging moved from `outputs/` to `~/.cache/alexdoor-xas/scripted_ru
 
 The maintained runner uses count-and-seed planning only. Retired scale-candidate and paired-master publication paths are not part of the current engine.
 
+Each run writes compact factual episode and aggregate metrics, a compact joint/contact sanity summary, two door-angle plots, and one Markdown report. The sanity gate always rejects non-finite or negative force and force above 200 N, including the terminal response to the final action. Legacy episodes without that terminal sample remain readable.
+
 #### Key Decisions and Problems
 
 - Door-relative frames are explicit and hinge anchored.
@@ -27,10 +29,11 @@ The maintained runner uses count-and-seed planning only. Retired scale-candidate
 
 #### Tests
 
-Pure tests cover controller transitions, `phase2.v2` recording, legacy v0/v1 reads, matched export, metrics, and factual termination semantics; Isaac smoke checks cover live execution.
+Pure tests cover controller transitions, `phase2.v2` recording, legacy v0/v1 reads, matched export, compact metrics and reports, factual termination semantics, and the fixed force gate. The Isaac scripted-baseline gate verifies the same artifacts and A1-A4 export on `cuda:0`.
 
 ## Version Notes
 
+- 2026-08-12 — Reduced evaluation to direct module imports, compact metrics and force evidence, one fixed 200 N admission gate, essential tests, and unchanged report/plot outputs.
 - 2026-08-12 — Reduced the engine to maintained count-and-seed generation and current A1-A4 export contracts.
 - 2026-08-12 — Introduced factual `phase2.v2`, retained legacy read compatibility, and moved scripted staging to the runtime cache.
 - 2026-08-11 — The scripted baseline and data engine remain active.
