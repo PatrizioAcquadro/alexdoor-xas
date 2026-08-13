@@ -4,7 +4,7 @@ Current as of 2026-08-12. Code and deterministic tests are the source of truth f
 
 ## Maintained capabilities
 
-- Calibrated fixed-base Alex V2 benchmark with exact canonical D0-D4 scene layers.
+- Calibrated single-environment Alex V2 runtime with exact canonical D0-D4 scene layers, position-only right-arm IK, and exact-actor raw PhysX contact sensing.
 - Deterministic scripted baseline and matched `phase2.v2`/`v2_pose` A1-A4 episode export with factual termination fields and legacy v0/v1 reads.
 - A2/A3 model datasets, content-grouped splits, retained views, and directly recomputed train-only normalization.
 - A2/A3/A4 adapters and simulator safety controls.
@@ -34,7 +34,7 @@ The canonical experiment pages preserve these conclusions. The former compact ev
 
 Gilbreth pilot and sweep orchestration, cluster environments, Slurm, transfer and return packaging, scale-dataset construction, multi-pose merge, smoke matrix aggregation, unified-evaluation orchestration, and calibration authoring are no longer part of the executable repository. Existing local datasets and checkpoints remain usable and are not rewritten.
 
-The former generic door-task and surrogate-robot simulator runtimes are also retired. Test-only fake environments remain deterministic software doubles, not supported runtime paths.
+The former generic door-task, executor layering, compatibility shims, sensorless path, multi-environment generality, and surrogate-robot simulator runtimes are retired. One complete deterministic fake mirrors the production state contract for software tests; it is not a supported runtime path or simulator evidence.
 
 ## Boundaries
 
@@ -48,3 +48,7 @@ The former generic door-task and surrogate-robot simulator runtimes are also ret
 ## Next decision
 
 Any new dataset, harder benchmark, training-seed study, VLA/A4 learning, hardware, or sim-to-real phase requires a separately authorized scope. The current Phase 3 evidence is pipeline validation on a saturated benchmark, not winner selection.
+
+## Version Notes
+
+- 2026-08-12 — Reduced `src/alexdoor_xas/envs` from twelve Python files to five and made force, provenance, robot state, settle evidence, episode counting, and clamp telemetry mandatory in active generation and rollout paths.

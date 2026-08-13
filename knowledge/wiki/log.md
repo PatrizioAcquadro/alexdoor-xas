@@ -248,3 +248,17 @@ minimal batch contract, and read-only default dataset gate.
 
 Verified wiki structure and links, source references, Markdown whitespace,
 protected raw boundaries, and removal of retired dataset interfaces.
+
+## 2026-08-12 — update : Single Alex V2 environment runtime
+
+Documented the five-file environment surface, concrete single-environment
+runtime, atomic exact-actor contact snapshot, and strict generation/rollout
+state contract. Deterministic tests and the existing A1-A4 dataset gate passed.
+The scene, scripted-baseline, and adapter gates passed on `cuda:0`; no CPU
+fallback was used.
+
+## 2026-08-12 — lint : Single Alex V2 environment runtime
+
+Verified wiki structure, links, source references, Markdown whitespace,
+protected raw and historical-phase boundaries, and removal of current wiki
+references to the retired environment layers.

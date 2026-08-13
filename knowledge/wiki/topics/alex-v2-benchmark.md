@@ -24,9 +24,11 @@ randomization limits.
 
 ## Control and sensing
 
-The executor uses position-only differential IK over the six right-arm joints. The Jacobian is shifted from the gripper-link origin to the calibrated collision tool point. Simulation runs at 120 Hz with decimation 2; A2 translation is limited to 0.02 m per control tick. Rotation remains represented but is not actuated.
+`DoorPushAlexV2Env` is an explicitly single-environment `DirectRLEnv`; construction rejects `scene.num_envs != 1`. It resolves one hinge, one gripper link, one shoulder link, and the ordered six-joint right arm, then checks the fixed base, finite point Jacobian, calibrated tool frame, finite actions and observations, start-pose settle result, and joint-limit clamps.
 
-Success is the first hinge crossing at 45 degrees. Contact force comes from PhysX raw GPU contact buffers and is selected by the exact door actor ID; it does not represent arbitrary robot/environment contacts.
+The environment uses position-only differential IK over the six right-arm joints. The Jacobian is shifted from the gripper-link origin to the calibrated collision tool point. Simulation runs at 120 Hz with decimation 2; A2 translation is limited to 0.02 m per control tick. Rotation remains represented but is not actuated.
+
+Success is the first hinge crossing at 45 degrees. `contact_state()` reads the PhysX raw GPU buffer once per snapshot, selects only the exact door actor ID, and returns world-frame force plus the calibrated threshold result. It never falls back to unfiltered net force or geometric contact. The geometric estimate is retained only as recorded diagnostic information.
 
 ## Limits
 
@@ -34,6 +36,7 @@ The benchmark is simulation-only. It has no physical robot command path, hardwar
 
 ## Version Notes
 
+- 2026-08-12 — Unified config, scene construction, calibration, IK, reset, sensing, and telemetry in the concrete single-environment Alex V2 runtime and replaced the two contact accessors with one atomic snapshot.
 - 2026-08-12 — Removed duplicate calibration authoring; the active JSON is the single source and changes require the maintained runtime gates.
 - 2026-08-12 — Removed unused asset evidence fields and noncanonical scene-generation APIs while preserving runtime identity, D0-D4 validation, and physical scene checks.
 - 2026-08-12 — Limited environment readiness to benchmark-required assets while retaining the optional combined hallway path for manual composition.

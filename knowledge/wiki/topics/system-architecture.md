@@ -14,11 +14,13 @@ The end-to-end operational path is `Door + Alex V2 -> v2_pose A1-A4 -> training 
 - `action/` and `adapters/` validate, transform, correct, reject, and execute requested actions.
 - `policies/common/runs.py` and `policies/common/closed_loop.py` own learned-run allocation, resume state, artifact schemas, frozen evaluation protocols, aggregation, plotting, and protocol routing.
 
-There is one registered simulator environment, `AlexDoor-DoorPush-AlexV2-v0`. Neutral door contract/runtime helpers own the observation/action terms, hinge resolution, and door-frame stage reads used by the Alex executor; no alternate task or surrogate-robot runtime is maintained.
+There is one registered simulator environment, `AlexDoor-DoorPush-AlexV2-v0`. `DoorPushAlexV2EnvCfg` and `DoorPushAlexV2Env` own the complete single-environment runtime; the only separate environment helper aggregates raw PhysX contacts for one exact door actor. No generic robot layer, compatibility shim, sensorless runtime, multi-environment path, or alternate simulator task is maintained.
 
 ## Main flows
 
 Scripted generation records pre-action state and the matching requested/applied action, then exports representation-specific siblings from that same episode. Training selects a split or retained view, validates stored normalization, allocates an exclusive learned run, and maintains both a self-contained best inference checkpoint and a consolidated resumable state until successful completion. Optional W&B tracking calls the SDK directly from the training and evaluation scripts, remains disabled unless `WANDB_MODE` enables it, and records only compact configuration and aggregate scalar metrics.
+
+Generation and rollout consume one strict runtime snapshot contract: contact force and sensed state from one `contact_state()` read, robot provenance and base pose, full joint state/names/limits, episode counter, settle evidence, and IK-clamp telemetry. Geometric contact remains recorded for analysis but never replaces the PhysX sensor.
 
 Closed-loop evaluation loads the source run's frozen configuration and self-contained `best.pt`, creates a fresh environment for each canonical pose, executes every requested rollout through adapter-v1, and writes factual aggregate results. Exact protocol matches may complete the source training run; changed protocols create checkpoint-free sibling evaluation runs.
 
@@ -39,6 +41,7 @@ The workstation is authoritative for Isaac asset validation, calibration, datase
 
 ## Version Notes
 
+- 2026-08-12 — Collapsed the environment runtime to one Alex V2 config, one concrete environment, and one exact-actor contact helper; removed generic, legacy, sensorless, and multi-environment paths.
 - 2026-08-12 — Removed calibration authoring and retained one directly validated runtime config.
 - 2026-08-12 — Replaced the custom W&B wrapper and configuration with direct, environment-controlled SDK logging in the four learned-policy scripts.
 - 2026-08-12 — Added the canonical scene/output boundary, exclusive learned runs, resumable training state, and frozen-protocol evaluation routing.
